@@ -1,0 +1,19 @@
+{
+  "errors": [
+    {"code": 0, "name": "OK", "category": "common"},
+    {"code": 1001, "name": "AUTH_INVALID_TOKEN", "category": "auth"},
+    {"code": 1002, "name": "AUTH_FORBIDDEN_DEVICE", "category": "auth"},
+    {"code": 2001, "name": "DEVICE_NOT_FOUND", "category": "device"},
+    {"code": 2002, "name": "DEVICE_OFFLINE", "category": "device"},
+    {"code": 2003, "name": "DEVICE_BUSY", "category": "device"},
+    {"code": 3001, "name": "SESSION_REQUEST_TIMEOUT", "category": "session"},
+    {"code": 3002, "name": "SESSION_REJECTED", "category": "session"},
+    {"code": 3003, "name": "SESSION_NOT_FOUND", "category": "session"},
+    {"code": 3004, "name": "SESSION_STATE_INVALID", "category": "session"},
+    {"code": 4001, "name": "INPUT_INVALID_PAYLOAD", "category": "input"},
+    {"code": 4002, "name": "INPUT_NOT_ALLOWED", "category": "input"},
+    {"code": 5001, "name": "MEDIA_NEGOTIATION_FAILED", "category": "media"},
+    {"code": 5002, "name": "NETWORK_DISCONNECTED", "category": "network"},
+    {"code": 9001, "name": "INTERNAL_ERROR", "category": "internal"}
+  ]
+}

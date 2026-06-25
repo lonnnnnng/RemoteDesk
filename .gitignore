@@ -1,0 +1,51 @@
+# macOS
+.DS_Store
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+
+# Rust / Tauri
+target/
+**/target/
+src-tauri/target/
+apps/desktop/src-tauri/gen/schemas/
+
+# Go
+bin/
+.coverprofile
+
+# Android
+.gradle/
+.kotlin/
+local.properties
+**/build/
+*.iml
+
+# IDE
+.idea/
+.vscode/
+
+# Generated
+coverage/
+.tmp/
+.rd_runtime/
+
+# Release artifacts
+*.apk
+*.aab
+*.dmg
+*.msi
+*.exe
+*.app.tar.gz
+*.tar.gz

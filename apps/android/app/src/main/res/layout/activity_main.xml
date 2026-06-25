@@ -1,0 +1,826 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:app="http://schemas.android.com/apk/res-auto"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:background="#F2F4F7"
+  android:orientation="vertical">
+
+  <View
+    android:layout_width="match_parent"
+    android:layout_height="10dp" />
+
+  <TextView
+    android:id="@+id/topConnectionStatusText"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingStart="18dp"
+    android:paddingTop="8dp"
+    android:paddingEnd="18dp"
+    android:paddingBottom="8dp"
+    android:text="连接状态：未连接"
+    android:textColor="#374151"
+    android:textSize="18sp"
+    android:textStyle="bold" />
+
+  <View
+    android:layout_width="match_parent"
+    android:layout_height="1dp"
+    android:background="#E4E8EE" />
+
+  <FrameLayout
+    android:layout_width="match_parent"
+    android:layout_height="0dp"
+    android:layout_weight="1">
+
+    <ScrollView
+      android:layout_width="match_parent"
+      android:layout_height="match_parent"
+      android:clipToPadding="false"
+      android:fillViewport="true"
+      android:overScrollMode="never">
+
+      <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="18dp"
+        android:paddingTop="18dp"
+        android:paddingEnd="18dp"
+        android:paddingBottom="88dp">
+
+
+        <LinearLayout
+          android:id="@+id/myDevicesPage"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:layout_marginTop="4dp"
+          android:orientation="vertical"
+          android:visibility="gone">
+
+          <TextView
+            android:id="@+id/onlineDevicesTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="在线设备 0 ▾"
+            android:textColor="#111111"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+          <LinearLayout
+            android:id="@+id/onlineDevicesContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="vertical" />
+
+          <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone"
+            app:boxBackgroundMode="none"
+            app:hintEnabled="false">
+
+            <com.google.android.material.textfield.TextInputEditText
+              android:id="@+id/targetDeviceInput"
+              android:layout_width="0dp"
+              android:layout_height="0dp"
+              android:inputType="text" />
+          </com.google.android.material.textfield.TextInputLayout>
+
+          <com.google.android.material.card.MaterialCardView
+            android:id="@+id/devicesEmptyCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            app:cardBackgroundColor="#FFFFFF"
+            app:cardCornerRadius="14dp"
+            app:cardElevation="0dp"
+            app:strokeColor="#E6EAF0"
+            app:strokeWidth="1dp">
+
+            <TextView
+              android:id="@+id/devicesEmptyText"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:padding="12dp"
+              android:text="暂无设备。先完成连接和注册，或检查中继服务是否可访问。"
+              android:textColor="#68707F"
+              android:textSize="12sp" />
+          </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+
+        <LinearLayout
+          android:id="@+id/cloudPage"
+          android:layout_width="0dp"
+          android:layout_height="0dp"
+          android:visibility="gone" />
+
+        <LinearLayout
+          android:id="@+id/remoteAssistPage"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:layout_marginTop="14dp"
+          android:orientation="vertical"
+          android:visibility="gone">
+
+          <com.google.android.material.card.MaterialCardView
+            android:id="@+id/remoteFrameCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:visibility="gone"
+            app:cardBackgroundColor="#FFFFFF"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeColor="#D4E2F8"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:orientation="vertical"
+              android:padding="14dp">
+
+              <TextView
+                android:id="@+id/statusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:text="当前状态：准备连接"
+                android:textColor="#5E769B"
+                android:textSize="13sp" />
+
+              <TextView
+                android:id="@+id/sessionText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="当前会话：-"
+                android:textColor="#5E769B"
+                android:textSize="13sp" />
+
+              <TextView
+                android:id="@+id/sessionStartText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="会话开始：-"
+                android:textColor="#5E769B"
+                android:textSize="13sp" />
+
+              <TextView
+                android:id="@+id/sessionDurationText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="会话时长：-"
+                android:textColor="#5E769B"
+                android:textSize="13sp" />
+
+              <TextView
+                android:id="@+id/frameMetaText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="当前画面：-"
+                android:textColor="#5E769B"
+                android:textSize="12sp" />
+
+              <TextView
+                android:id="@+id/ackText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="输入回执：-"
+                android:textColor="#5E769B"
+                android:textSize="12sp" />
+
+              <FrameLayout
+                android:id="@+id/remoteViewportContainer"
+                android:layout_width="match_parent"
+                android:layout_height="262dp"
+                android:layout_marginTop="10dp"
+                android:background="#EAF2FF">
+
+                <org.webrtc.SurfaceViewRenderer
+                  android:id="@+id/remoteVideoView"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:keepScreenOn="true" />
+
+                <ImageView
+                  android:id="@+id/remoteFrameView"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:adjustViewBounds="true"
+                  android:contentDescription="远端画面预览"
+                  android:padding="8dp"
+                  android:scaleType="fitCenter"
+                  android:visibility="gone" />
+
+                <com.google.android.material.button.MaterialButton
+                  android:id="@+id/remoteZoomResetButton"
+                  android:layout_width="wrap_content"
+                  android:layout_height="32dp"
+                  android:layout_gravity="top|start"
+                  android:layout_marginStart="8dp"
+                  android:layout_marginTop="8dp"
+                  android:insetTop="0dp"
+                  android:insetBottom="0dp"
+                  android:minWidth="0dp"
+                  android:paddingStart="10dp"
+                  android:paddingEnd="10dp"
+                  android:text="1x"
+                  android:textAllCaps="false"
+                  android:textColor="#1E3A8A"
+                  android:textSize="11sp"
+                  app:backgroundTint="#DCE9FF"
+                  app:cornerRadius="10dp" />
+
+                <com.google.android.material.button.MaterialButton
+                  android:id="@+id/remoteFullscreenButton"
+                  android:layout_width="wrap_content"
+                  android:layout_height="32dp"
+                  android:layout_gravity="top|end"
+                  android:layout_marginTop="8dp"
+                  android:layout_marginEnd="8dp"
+                  android:insetTop="0dp"
+                  android:insetBottom="0dp"
+                  android:minWidth="0dp"
+                  android:paddingStart="10dp"
+                  android:paddingEnd="10dp"
+                  android:text="全屏"
+                  android:textAllCaps="false"
+                  android:textColor="#1E3A8A"
+                  android:textSize="11sp"
+                  app:backgroundTint="#DCE9FF"
+                  app:cornerRadius="10dp" />
+              </FrameLayout>
+
+              <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/remoteKeyboardInputLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                app:boxBackgroundColor="#F3F7FF"
+                app:boxBackgroundMode="filled"
+                app:boxCornerRadiusBottomEnd="12dp"
+                app:boxCornerRadiusBottomStart="12dp"
+                app:boxCornerRadiusTopEnd="12dp"
+                app:boxCornerRadiusTopStart="12dp"
+                app:boxStrokeColor="#D4E2F8"
+                app:boxStrokeWidth="1dp"
+                app:boxStrokeWidthFocused="1dp"
+                app:hintEnabled="false">
+
+                <com.google.android.material.textfield.TextInputEditText
+                  android:id="@+id/remoteKeyboardInput"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:hint="输入要发送到远端的文本"
+                  android:imeOptions="actionSend"
+                  android:inputType="textVisiblePassword|textNoSuggestions|textMultiLine"
+                  android:maxLines="2"
+                  android:paddingStart="14dp"
+                  android:paddingTop="12dp"
+                  android:paddingEnd="14dp"
+                  android:paddingBottom="12dp"
+                  android:textColor="#11325E"
+                  android:textColorHint="#6A86AD"
+                  android:textSize="14sp" />
+              </com.google.android.material.textfield.TextInputLayout>
+
+              <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                  android:id="@+id/remoteKeyboardSendButton"
+                  android:layout_width="0dp"
+                  android:layout_height="42dp"
+                  android:layout_weight="1"
+                  android:insetTop="0dp"
+                  android:insetBottom="0dp"
+                  android:text="发送文本"
+                  android:textAllCaps="false"
+                  android:textColor="#FFFFFF"
+                  android:textSize="13sp"
+                  app:backgroundTint="#2B6DFF"
+                  app:cornerRadius="12dp" />
+
+                <com.google.android.material.button.MaterialButton
+                  android:id="@+id/remoteKeyboardBackspaceButton"
+                  style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                  android:layout_width="0dp"
+                  android:layout_height="42dp"
+                  android:layout_marginStart="8dp"
+                  android:layout_weight="1"
+                  android:insetTop="0dp"
+                  android:insetBottom="0dp"
+                  android:text="退格"
+                  android:textAllCaps="false"
+                  android:textColor="#35598C"
+                  android:textSize="13sp"
+                  app:cornerRadius="12dp"
+                  app:strokeColor="#D4E2F8" />
+
+                <com.google.android.material.button.MaterialButton
+                  android:id="@+id/remoteKeyboardEnterButton"
+                  style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                  android:layout_width="0dp"
+                  android:layout_height="42dp"
+                  android:layout_marginStart="8dp"
+                  android:layout_weight="1"
+                  android:insetTop="0dp"
+                  android:insetBottom="0dp"
+                  android:text="回车"
+                  android:textAllCaps="false"
+                  android:textColor="#35598C"
+                  android:textSize="13sp"
+                  app:cornerRadius="12dp"
+                  app:strokeColor="#D4E2F8" />
+              </LinearLayout>
+
+              <TextView
+                android:id="@+id/transportText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="传输方式：-"
+                android:textColor="#5E769B"
+                android:textSize="13sp" />
+
+              <TextView
+                android:id="@+id/peerText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="会话链路：-"
+                android:textColor="#5E769B"
+                android:textSize="13sp" />
+
+              <TextView
+                android:id="@+id/liveMetricsText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="#F3F7FF"
+                android:padding="10dp"
+                android:text="实时指标：\n首帧：-\n渲染FPS：-\n接收码率：-\n发送FPS/码率：-\n候选路径/分级：-\n质量判定：-"
+                android:textColor="#4F6D97"
+                android:textSize="12sp" />
+            </LinearLayout>
+          </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+
+        <LinearLayout
+          android:id="@+id/profilePage"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:layout_marginTop="18dp"
+          android:orientation="vertical"
+          android:visibility="gone">
+
+          <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            app:cardBackgroundColor="#FFFFFF"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeColor="#D4E2F8"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:orientation="vertical"
+              android:padding="14dp">
+
+              <TextView
+                android:id="@+id/deviceIdText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="本机设备 ID：-"
+                android:textColor="#11325E"
+                android:textSize="14sp" />
+
+              <TextView
+                android:id="@+id/tokenText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="访问凭证：未注册"
+                android:textColor="#5E769B"
+                android:textSize="13sp" />
+            </LinearLayout>
+          </com.google.android.material.card.MaterialCardView>
+
+          <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            app:cardBackgroundColor="#FFFFFF"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeColor="#D4E2F8"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:orientation="vertical"
+              android:padding="14dp">
+
+              <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="中继信令设置"
+                android:textColor="#11325E"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+              <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                app:boxBackgroundColor="#F3F7FF"
+                app:boxBackgroundMode="filled"
+                app:boxCornerRadiusBottomEnd="12dp"
+                app:boxCornerRadiusBottomStart="12dp"
+                app:boxCornerRadiusTopEnd="12dp"
+                app:boxCornerRadiusTopStart="12dp"
+                app:boxStrokeColor="#D4E2F8"
+                app:boxStrokeWidth="1dp"
+                app:boxStrokeWidthFocused="1dp"
+                app:hintEnabled="false">
+
+                <com.google.android.material.textfield.TextInputEditText
+                  android:id="@+id/wsUrlInput"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:hint="信令地址：ws://局域网IP:18081/ws 或 wss://域名/ws"
+                  android:inputType="textUri"
+                  android:paddingStart="14dp"
+                  android:paddingTop="14dp"
+                  android:paddingEnd="14dp"
+                  android:paddingBottom="14dp"
+                  android:textColor="#11325E"
+                  android:textColorHint="#6A86AD"
+                  android:textSize="14sp" />
+              </com.google.android.material.textfield.TextInputLayout>
+
+              <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="说明：画面走 WebRTC；这里仅做设备发现与信令。"
+                android:textColor="#5E769B"
+                android:textSize="12sp" />
+
+              <com.google.android.material.button.MaterialButton
+                android:id="@+id/connectButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="10dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="连接服务端"
+                android:textAllCaps="false"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                app:backgroundTint="#2B6DFF"
+                app:cornerRadius="12dp" />
+
+              <com.google.android.material.button.MaterialButton
+                android:id="@+id/registerButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="8dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="注册设备"
+                android:textAllCaps="false"
+                android:textColor="#35598C"
+                app:cornerRadius="12dp"
+                app:strokeColor="#D4E2F8" />
+
+              <com.google.android.material.button.MaterialButton
+                android:id="@+id/heartbeatButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="8dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="发送心跳"
+                android:textAllCaps="false"
+                android:textColor="#35598C"
+                app:cornerRadius="12dp"
+                app:strokeColor="#D4E2F8" />
+
+              <com.google.android.material.button.MaterialButton
+                android:id="@+id/sessionButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="8dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="发起会话"
+                android:textAllCaps="false"
+                android:textColor="#35598C"
+                app:cornerRadius="12dp"
+                app:strokeColor="#D4E2F8" />
+            </LinearLayout>
+          </com.google.android.material.card.MaterialCardView>
+
+          <LinearLayout
+            android:id="@+id/debugPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <com.google.android.material.card.MaterialCardView
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              app:cardBackgroundColor="#FFFFFF"
+              app:cardCornerRadius="16dp"
+              app:cardElevation="0dp"
+              app:strokeColor="#D4E2F8"
+              app:strokeWidth="1dp">
+
+              <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="开发调试"
+                  android:textColor="#11325E"
+                  android:textSize="18sp"
+                  android:textStyle="bold" />
+
+                <com.google.android.material.button.MaterialButton
+                  android:id="@+id/debugTapButton"
+                  style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                  android:layout_width="match_parent"
+                  android:layout_height="44dp"
+                  android:layout_marginTop="10dp"
+                  android:insetTop="0dp"
+                  android:insetBottom="0dp"
+                  android:text="发送测试点击"
+                  android:textAllCaps="false"
+                  android:textColor="#35598C"
+                  app:cornerRadius="12dp"
+                  app:strokeColor="#D4E2F8" />
+
+                <com.google.android.material.button.MaterialButton
+                  android:id="@+id/debugKeyboardButton"
+                  style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                  android:layout_width="match_parent"
+                  android:layout_height="44dp"
+                  android:layout_marginTop="8dp"
+                  android:insetTop="0dp"
+                  android:insetBottom="0dp"
+                  android:text="发送按键A"
+                  android:textAllCaps="false"
+                  android:textColor="#35598C"
+                  app:cornerRadius="12dp"
+                  app:strokeColor="#D4E2F8" />
+
+                <com.google.android.material.button.MaterialButton
+                  android:id="@+id/debugScrollButton"
+                  style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                  android:layout_width="match_parent"
+                  android:layout_height="44dp"
+                  android:layout_marginTop="8dp"
+                  android:insetTop="0dp"
+                  android:insetBottom="0dp"
+                  android:text="发送滚轮"
+                  android:textAllCaps="false"
+                  android:textColor="#35598C"
+                  app:cornerRadius="12dp"
+                  app:strokeColor="#D4E2F8" />
+
+                <com.google.android.material.button.MaterialButton
+                  android:id="@+id/debugProofSequenceButton"
+                  style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                  android:layout_width="match_parent"
+                  android:layout_height="44dp"
+                  android:layout_marginTop="8dp"
+                  android:insetTop="0dp"
+                  android:insetBottom="0dp"
+                  android:text="E2E proof input"
+                  android:textAllCaps="false"
+                  android:textColor="#35598C"
+                  app:cornerRadius="12dp"
+                  app:strokeColor="#D4E2F8" />
+
+                <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="8dp"
+                  android:orientation="horizontal">
+
+                  <com.google.android.material.button.MaterialButton
+                    android:id="@+id/debugProofRefreshButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:text="Refresh proof"
+                    android:textAllCaps="false"
+                    android:textColor="#35598C"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="#D4E2F8" />
+
+                  <com.google.android.material.button.MaterialButton
+                    android:id="@+id/debugProofResetButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:text="Reset proof"
+                    android:textAllCaps="false"
+                    android:textColor="#35598C"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="#D4E2F8" />
+                </LinearLayout>
+
+                <TextView
+                  android:id="@+id/debugProofStatusText"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="8dp"
+                  android:background="#F3F7FF"
+                  android:padding="10dp"
+                  android:text="E2E proof: not checked"
+                  android:textColor="#5E769B"
+                  android:textSize="12sp" />
+              </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:layout_marginTop="10dp"
+              app:cardBackgroundColor="#FFFFFF"
+              app:cardCornerRadius="16dp"
+              app:cardElevation="0dp"
+              app:strokeColor="#D4E2F8"
+              app:strokeWidth="1dp">
+
+              <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="运行日志"
+                  android:textColor="#11325E"
+                  android:textSize="18sp"
+                  android:textStyle="bold" />
+
+                <TextView
+                  android:id="@+id/logText"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="10dp"
+                  android:background="#F3F7FF"
+                  android:padding="12dp"
+                  android:text="暂无日志"
+                  android:textColor="#5E769B"
+                  android:textSize="12sp" />
+              </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+          </LinearLayout>
+        </LinearLayout>
+      </LinearLayout>
+    </ScrollView>
+
+    <com.google.android.material.card.MaterialCardView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_gravity="bottom"
+      android:layout_marginStart="0dp"
+      android:layout_marginEnd="0dp"
+      android:layout_marginBottom="0dp"
+      app:cardBackgroundColor="#FFFFFF"
+      app:cardCornerRadius="0dp"
+      app:cardElevation="0dp"
+      app:strokeColor="#D4E2F8"
+      app:strokeWidth="1dp">
+
+      <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingTop="4dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="4dp">
+
+        <com.google.android.material.button.MaterialButton
+          android:id="@+id/navMyDevicesButton"
+          style="@style/Widget.MaterialComponents.Button.TextButton"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_weight="1"
+          android:insetTop="0dp"
+          android:insetBottom="0dp"
+          android:minHeight="42dp"
+          android:text="设备"
+          android:textAllCaps="false"
+          android:textColor="#6A86AD"
+          android:textSize="11sp"
+          app:cornerRadius="10dp"
+          app:icon="@android:drawable/ic_menu_slideshow"
+          app:iconGravity="top"
+          app:iconPadding="2dp"
+          app:iconSize="16dp"
+          app:iconTint="#6A86AD" />
+
+        <com.google.android.material.button.MaterialButton
+          android:id="@+id/navCloudButton"
+          style="@style/Widget.MaterialComponents.Button.TextButton"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_weight="1"
+          android:insetTop="0dp"
+          android:insetBottom="0dp"
+          android:minHeight="42dp"
+          android:text="云端"
+          android:textAllCaps="false"
+          android:textColor="#6A86AD"
+          android:textSize="11sp"
+          app:cornerRadius="10dp"
+          app:icon="@android:drawable/ic_menu_upload"
+          app:iconGravity="top"
+          app:iconPadding="2dp"
+          app:iconSize="16dp"
+          app:iconTint="#6A86AD" />
+
+        <com.google.android.material.button.MaterialButton
+          android:id="@+id/navAssistButton"
+          style="@style/Widget.MaterialComponents.Button.TextButton"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_weight="1"
+          android:insetTop="0dp"
+          android:insetBottom="0dp"
+          android:minHeight="42dp"
+          android:text="协助"
+          android:textAllCaps="false"
+          android:textColor="#6A86AD"
+          android:textSize="11sp"
+          app:cornerRadius="10dp"
+          app:icon="@android:drawable/ic_menu_share"
+          app:iconGravity="top"
+          app:iconPadding="2dp"
+          app:iconSize="16dp"
+          app:iconTint="#6A86AD" />
+
+        <com.google.android.material.button.MaterialButton
+          android:id="@+id/navProfileButton"
+          style="@style/Widget.MaterialComponents.Button.TextButton"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_weight="1"
+          android:insetTop="0dp"
+          android:insetBottom="0dp"
+          android:minHeight="42dp"
+          android:text="设置"
+          android:textAllCaps="false"
+          android:textColor="#6A86AD"
+          android:textSize="11sp"
+          app:cornerRadius="10dp"
+          app:icon="@android:drawable/ic_menu_myplaces"
+          app:iconGravity="top"
+          app:iconPadding="2dp"
+          app:iconSize="16dp"
+          app:iconTint="#6A86AD" />
+      </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+  </FrameLayout>
+</LinearLayout>

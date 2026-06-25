@@ -1,0 +1,22 @@
+{
+  "v": "1.0",
+  "msg_id": "fixture-register-1",
+  "type": "device.register.req",
+  "ts": 1776300000000,
+  "trace_id": "trace-fixture-1",
+  "from": {
+    "device_id": "desktop-dev-1",
+    "role": "controller"
+  },
+  "payload": {
+    "device_id": "desktop-dev-1",
+    "user_id": "user-001",
+    "platform": "macos",
+    "client_version": "0.1.0",
+    "device_name": "LONG-MBP",
+    "capabilities": {
+      "can_control": true,
+      "can_be_controlled": true
+    }
+  }
+}

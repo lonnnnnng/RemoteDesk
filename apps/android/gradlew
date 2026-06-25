@@ -1,0 +1,6 @@
+#!/bin/sh
+
+DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+GRADLE_BIN="${GRADLE_BIN:-gradle}"
+
+exec "$GRADLE_BIN" -p "$DIR" "$@"

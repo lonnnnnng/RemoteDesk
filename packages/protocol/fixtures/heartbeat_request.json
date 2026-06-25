@@ -1,0 +1,16 @@
+{
+  "v": "1.0",
+  "msg_id": "fixture-heartbeat-1",
+  "type": "presence.heartbeat.req",
+  "ts": 1776300010000,
+  "trace_id": "trace-heartbeat-1",
+  "from": {
+    "device_id": "android-dev-1",
+    "role": "controller"
+  },
+  "payload": {
+    "token": "stub-token",
+    "status": "online",
+    "active_session_id": null
+  }
+}

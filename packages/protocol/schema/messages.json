@@ -1,0 +1,219 @@
+{
+  "protocol_version": "1.0",
+  "messages": [
+    {
+      "type": "device.register.req",
+      "required": ["device_id", "user_id", "platform", "client_version", "capabilities"],
+      "constraints": [
+        "payload.device_id must equal envelope.from.device_id"
+      ],
+      "payload": {
+        "device_id": "string",
+        "user_id": "string",
+        "platform": "windows|macos|android",
+        "client_version": "string",
+        "device_name": "string",
+        "capabilities": {
+          "can_control": "boolean",
+          "can_be_controlled": "boolean"
+        }
+      }
+    },
+    {
+      "type": "device.register.rsp",
+      "payload": {
+        "result": "ok|error",
+        "token": "string",
+        "expires_in": "number",
+        "server_time": "number",
+        "device_name": "string",
+        "error": "object|null"
+      }
+    },
+    {
+      "type": "presence.heartbeat.req",
+      "required": ["token", "status"],
+      "constraints": [
+        "token must match the token issued during device.register.rsp"
+      ],
+      "payload": {
+        "token": "string",
+        "status": "online|busy",
+        "active_session_id": "string|null"
+      }
+    },
+    {
+      "type": "presence.heartbeat.rsp",
+      "payload": {
+        "result": "ok",
+        "next_interval_ms": "number",
+        "device_status": "online|busy"
+      }
+    },
+    {
+      "type": "session.request.req",
+      "required": ["target_device_id", "request_id", "auth_mode"],
+      "constraints": [
+        "caller must already be registered"
+      ],
+      "payload": {
+        "target_device_id": "string",
+        "request_id": "string",
+        "auth_mode": "consent_required"
+      }
+    },
+    {
+      "type": "session.request.result.push",
+      "payload": {
+        "request_id": "string",
+        "result": "approved|rejected|timeout",
+        "reason": "string|null",
+        "session_id": "string|null"
+      }
+    },
+    {
+      "type": "session.start.push",
+      "payload": {
+        "session_id": "string",
+        "controller_device_id": "string",
+        "agent_device_id": "string",
+        "transport": {
+          "mode": "webrtc",
+          "signal_url": "string"
+        },
+        "webrtc": {
+          "ice_servers": [
+            {
+              "urls": ["string"]
+            }
+          ]
+        },
+        "start_deadline_ms": "number"
+      }
+    },
+    {
+      "type": "session.end.req",
+      "required": ["session_id", "reason"],
+      "constraints": [
+        "payload.session_id must equal envelope.session_id"
+      ],
+      "payload": {
+        "session_id": "string",
+        "reason": "user_end|network_lost|error"
+      }
+    },
+    {
+      "type": "session.end.push",
+      "payload": {
+        "session_id": "string",
+        "reason": "user_end|peer_disconnected|timeout|server_terminate",
+        "ended_at": "number"
+      }
+    },
+    {
+      "type": "input.mouse.move",
+      "constraints": [
+        "envelope.session_id is required"
+      ],
+      "payload": {
+        "x": "number",
+        "y": "number"
+      }
+    },
+    {
+      "type": "input.mouse.button",
+      "constraints": [
+        "envelope.session_id is required"
+      ],
+      "payload": {
+        "button": "left|right|middle",
+        "action": "down|up",
+        "x": "number",
+        "y": "number"
+      }
+    },
+    {
+      "type": "input.keyboard.key",
+      "constraints": [
+        "envelope.session_id is required"
+      ],
+      "payload": {
+        "key_code": "string",
+        "action": "down|up",
+        "modifiers": ["string"]
+      }
+    },
+    {
+      "type": "input.wheel.scroll",
+      "constraints": [
+        "envelope.session_id is required"
+      ],
+      "payload": {
+        "delta_x": "number",
+        "delta_y": "number"
+      }
+    },
+    {
+      "type": "input.ack",
+      "payload": {
+        "accepted": "boolean",
+        "echo_type": "string"
+      }
+    },
+    {
+      "type": "webrtc.offer",
+      "constraints": [
+        "envelope.session_id is required",
+        "only session participants may exchange signaling"
+      ],
+      "payload": {
+        "sdp_type": "offer",
+        "sdp": "string"
+      }
+    },
+    {
+      "type": "webrtc.answer",
+      "constraints": [
+        "envelope.session_id is required",
+        "only session participants may exchange signaling"
+      ],
+      "payload": {
+        "sdp_type": "answer",
+        "sdp": "string"
+      }
+    },
+    {
+      "type": "webrtc.ice_candidate",
+      "constraints": [
+        "envelope.session_id is required",
+        "only session participants may exchange signaling"
+      ],
+      "payload": {
+        "candidate": "string",
+        "sdp_mid": "string",
+        "sdp_mline_index": "number"
+      }
+    },
+    {
+      "type": "webrtc.restart_ice",
+      "constraints": [
+        "envelope.session_id is required",
+        "only session participants may exchange signaling"
+      ],
+      "payload": {
+        "reason": "string"
+      }
+    },
+    {
+      "type": "error.rsp",
+      "payload": {
+        "code": "number",
+        "name": "string",
+        "message": "string",
+        "request_msg_id": "string",
+        "retryable": "boolean",
+        "device_id": "string"
+      }
+    }
+  ]
+}

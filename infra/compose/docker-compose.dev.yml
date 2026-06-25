@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: remote_desk-postgres
+    environment:
+      POSTGRES_DB: remote_desk
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../db/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ../db/postgres/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+
+volumes:
+  postgres_data:

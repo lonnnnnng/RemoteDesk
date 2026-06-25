@@ -1,0 +1,41 @@
+[package]
+name = "remote_desk_desktop"
+version = "0.1.0"
+description = "Remote Desk desktop bootstrap app"
+authors = ["Claude"]
+edition = "2021"
+default-run = "remote_desk_desktop"
+
+[lib]
+name = "remote_desk_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "windows-self-test"
+path = "src/windows_self_test_cli.rs"
+
+[[bin]]
+name = "desktop-self-test"
+path = "src/desktop_self_test_cli.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+base64 = "0.22"
+jpeg-encoder = "0.6"
+jpeg-decoder = "0.3"
+openh264 = { version = "0.9.3", features = ["source"] }
+png = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+webrtc = "0.8.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-foundation = "0.3.2"
+objc2-core-graphics = { version = "0.3.2", features = ["CGDataProvider", "CGDirectDisplay", "CGError", "CGEvent", "CGEventSource", "CGEventTypes", "CGGeometry", "CGImage", "CGRemoteOperation"] }
+screencapturekit = { version = "1.5.4", features = ["macos_14_4"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }

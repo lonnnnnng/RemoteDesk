@@ -1,0 +1,21 @@
+{
+  "v": "1.0",
+  "msg_id": "fixture-session-request-1",
+  "type": "session.request.req",
+  "ts": 1776300200000,
+  "trace_id": "trace-session-1",
+  "from": {
+    "device_id": "controller-001",
+    "role": "controller"
+  },
+  "payload": {
+    "target_device_id": "agent-001",
+    "request_id": "req-001",
+    "auth_mode": "consent_required",
+    "video_pref": {
+      "max_width": 1920,
+      "max_height": 1080,
+      "max_fps": 15
+    }
+  }
+}

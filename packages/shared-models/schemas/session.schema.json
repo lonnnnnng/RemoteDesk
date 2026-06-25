@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Session",
+  "type": "object",
+  "properties": {
+    "session_id": {"type": "string"},
+    "controller_device_id": {"type": "string"},
+    "agent_device_id": {"type": "string"},
+    "state": {"type": "string"}
+  },
+  "required": ["session_id", "controller_device_id", "agent_device_id", "state"]
+}

@@ -1,0 +1,18 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+  <style name="Theme.RemoteDesk" parent="Theme.MaterialComponents.NoActionBar">
+    <item name="colorPrimary">#4CD7F6</item>
+    <item name="colorPrimaryVariant">#03B5D3</item>
+    <item name="colorOnPrimary">#003640</item>
+    <item name="colorSecondary">#4CD7F6</item>
+    <item name="colorSecondaryVariant">#03B5D3</item>
+    <item name="colorOnSecondary">#003640</item>
+    <item name="colorSurface">#122131</item>
+    <item name="colorOnSurface">#D4E4FA</item>
+    <item name="android:colorBackground">#051424</item>
+    <item name="android:windowBackground">#051424</item>
+    <item name="android:statusBarColor">#0F172A</item>
+    <item name="android:navigationBarColor">#0F172A</item>
+    <item name="android:windowLightStatusBar">false</item>
+    <item name="android:windowLightNavigationBar">false</item>
+  </style>
+</resources>

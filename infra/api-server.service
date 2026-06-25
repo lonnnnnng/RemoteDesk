@@ -1,0 +1,22 @@
+[Unit]
+Description=remote_desk relay api-server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=remote_desk
+Group=remote_desk
+EnvironmentFile=-/etc/remote-desk/api-server.env
+ExecStart=/usr/local/bin/api-server
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/remote-desk
+WorkingDirectory=/var/lib/remote-desk
+
+[Install]
+WantedBy=multi-user.target
