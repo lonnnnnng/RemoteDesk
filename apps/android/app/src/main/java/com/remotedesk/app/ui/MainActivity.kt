@@ -100,6 +100,9 @@ class MainActivity : AppCompatActivity() {
     private const val RTC_QUALITY_STALL_FPS_THRESHOLD = 16.0
     private const val RTC_QUALITY_BITRATE_LOW_KBPS = 350.0
     private const val RTC_QUALITY_RTT_HIGH_MS = 220.0
+    private const val RTC_QUALITY_LOW_FPS_STREAK_THRESHOLD_MS = 6000L
+    private const val RTC_QUALITY_FRAME_GAP_SPIKE_MS = 1000L
+    private const val RTC_QUALITY_DROPPED_FRAME_SPIKE_THRESHOLD = 12L
     private const val LIVE_E2E_PROOF_REPORT_MIN_INTERVAL_MS = 1500L
     private const val LEGACY_FRAME_IGNORED_LOG_INTERVAL_MS = 3000L
     private const val LEGACY_DECODE_FAILURE_UI_INTERVAL_MS = 1200L
@@ -193,6 +196,11 @@ class MainActivity : AppCompatActivity() {
   private var rtcFirstFrameAtMs = 0L
   private var rtcRenderFpsSampleSum = 0.0
   private var rtcRenderFpsSampleCount = 0L
+  private var rtcCurrentLowFpsStreakMs = 0L
+  private var rtcLongestLowFpsStreakMs = 0L
+  private var rtcLowFpsSampleCount = 0L
+  private var rtcLongestFrameGapMs = 0L
+  private var rtcFrameGapSpikeCount = 0L
   private var rtcLastNetStatsSampleAtMs = 0L
   private var rtcNetStatsRequestInFlight = false
   private var rtcLastInboundBytesReceived = 0.0
@@ -207,6 +215,9 @@ class MainActivity : AppCompatActivity() {
   private var rtcLastDecodedFps: Double? = null
   private var rtcLastRecvKbps: Double? = null
   private var rtcLastRttMs: Double? = null
+  private var rtcLastFramesDroppedValue = -1L
+  private var rtcFramesDroppedLast = 0L
+  private var rtcFramesDroppedSpikeMax = 0L
   private var rtcIcePolicyDegradeStreak = 0
   private var rtcIcePolicyRecoveryAttempts = 0
   private var rtcIcePolicyLastActionAtMs = 0L
@@ -260,6 +271,20 @@ class MainActivity : AppCompatActivity() {
     renderedFrameWidth = frame.rotatedWidth
     renderedFrameHeight = frame.rotatedHeight
     val now = SystemClock.elapsedRealtime()
+    val previousFrameAtMs = rtcLastFrameRenderedAtMs
+    if (previousFrameAtMs > 0L) {
+      val frameGapMs = now - previousFrameAtMs
+      if (frameGapMs > rtcLongestFrameGapMs) {
+        rtcLongestFrameGapMs = frameGapMs
+      }
+      if (frameGapMs >= RTC_QUALITY_FRAME_GAP_SPIKE_MS) {
+        rtcFrameGapSpikeCount += 1
+        Log.w(
+          RTC_TAG,
+          "render_frame_gap_spike session=${rtcCurrentSessionId ?: sessionId ?: "-"} gap_ms=$frameGapMs longest_gap_ms=$rtcLongestFrameGapMs spikes=$rtcFrameGapSpikeCount",
+        )
+      }
+    }
     rtcLastFrameRenderedAtMs = now
     rtcRenderedFrameCount += 1
     val activeSessionId = rtcCurrentSessionId ?: sessionId ?: "-"
@@ -287,9 +312,24 @@ class MainActivity : AppCompatActivity() {
         val sampleFps = if (sampleElapsedMs > 0L) sampleFrames * 1000.0 / sampleElapsedMs.toDouble() else 0.0
         rtcRenderFpsSampleSum += sampleFps
         rtcRenderFpsSampleCount += 1
+        if (sampleFps < RTC_QUALITY_STALL_FPS_THRESHOLD) {
+          rtcLowFpsSampleCount += 1
+          rtcCurrentLowFpsStreakMs += sampleElapsedMs
+          if (rtcCurrentLowFpsStreakMs > rtcLongestLowFpsStreakMs) {
+            rtcLongestLowFpsStreakMs = rtcCurrentLowFpsStreakMs
+          }
+          if (rtcCurrentLowFpsStreakMs >= RTC_QUALITY_LOW_FPS_STREAK_THRESHOLD_MS) {
+            Log.w(
+              RTC_TAG,
+              "render_low_fps_streak session=$activeSessionId streak_ms=$rtcCurrentLowFpsStreakMs longest_ms=$rtcLongestLowFpsStreakMs fps=${"%.2f".format(Locale.US, sampleFps)}",
+            )
+          }
+        } else {
+          rtcCurrentLowFpsStreakMs = 0L
+        }
         Log.i(
           RTC_TAG,
-          "render_frame_sample session=$activeSessionId frames_total=$rtcRenderedFrameCount sample_frames=$sampleFrames sample_ms=$sampleElapsedMs fps=${"%.2f".format(Locale.US, sampleFps)} size=${frame.rotatedWidth}x${frame.rotatedHeight}",
+          "render_frame_sample session=$activeSessionId frames_total=$rtcRenderedFrameCount sample_frames=$sampleFrames sample_ms=$sampleElapsedMs fps=${"%.2f".format(Locale.US, sampleFps)} low_fps_streak_ms=$rtcCurrentLowFpsStreakMs longest_gap_ms=$rtcLongestFrameGapMs size=${frame.rotatedWidth}x${frame.rotatedHeight}",
         )
         rtcRenderLogSampleAtMs = now
         rtcRenderLogSampleFrameCount = rtcRenderedFrameCount
@@ -669,8 +709,14 @@ class MainActivity : AppCompatActivity() {
     rtcRenderLogSampleFrameCount = 0L
     rtcRenderLogSampleAtMs = 0L
     rtcFirstFrameAtMs = 0L
+    rtcLastFrameRenderedAtMs = 0L
     rtcRenderFpsSampleSum = 0.0
     rtcRenderFpsSampleCount = 0L
+    rtcCurrentLowFpsStreakMs = 0L
+    rtcLongestLowFpsStreakMs = 0L
+    rtcLowFpsSampleCount = 0L
+    rtcLongestFrameGapMs = 0L
+    rtcFrameGapSpikeCount = 0L
   }
 
   private fun resetRtcNetworkStats() {
@@ -688,6 +734,9 @@ class MainActivity : AppCompatActivity() {
     rtcLastDecodedFps = null
     rtcLastRecvKbps = null
     rtcLastRttMs = null
+    rtcLastFramesDroppedValue = -1L
+    rtcFramesDroppedLast = 0L
+    rtcFramesDroppedSpikeMax = 0L
     rtcIcePolicyDegradeStreak = 0
     rtcIcePolicyRecoveryAttempts = 0
     rtcIcePolicyLastActionAtMs = 0L
@@ -732,6 +781,12 @@ class MainActivity : AppCompatActivity() {
     val recvKbpsAvg = averageMetric(rtcNetRecvKbpsSampleSum, rtcNetRecvKbpsSampleCount)
     val rttMsAvg = averageMetric(rtcNetRttMsSampleSum, rtcNetRttMsSampleCount)
     val iceState = rtcPeerConnection?.iceConnectionState()?.name ?: "-"
+    val controllerQualityHint = inferRtcQualityHintCode(
+      renderFpsAvg = renderFpsAvg,
+      recvKbpsAvg = recvKbpsAvg,
+      candidateTier = rtcLastCandidateTier,
+      rttMs = rtcLastRttMs,
+    )
     val frameWidthLast = if (renderedFrameWidth > 0) renderedFrameWidth else 0
     val frameHeightLast = if (renderedFrameHeight > 0) renderedFrameHeight else 0
     val frameSize = if (renderedFrameWidth > 0 && renderedFrameHeight > 0) {
@@ -741,7 +796,7 @@ class MainActivity : AppCompatActivity() {
     }
     Log.i(
       RTC_TAG,
-      "session_summary session=$sessionId reason=$reason duration_ms=${if (sessionDurationMs >= 0L) sessionDurationMs else "-"} first_frame_ms=${firstFrameMs ?: "-"} render_fps_avg=${formatMetric(renderFpsAvg)} rendered_frames=$rtcRenderedFrameCount recv_kbps_avg=${formatMetric(recvKbpsAvg)} rtt_ms_avg=${formatMetric(rttMsAvg)} candidate_pair_last=$rtcLastCandidatePair candidate_tier_last=$rtcLastCandidateTier pair_state_last=$rtcLastPairState ice_policy_restarts=$rtcIcePolicyRecoveryAttempts frame_size_last=$frameSize ice_state_last=$iceState",
+      "session_summary session=$sessionId reason=$reason duration_ms=${if (sessionDurationMs >= 0L) sessionDurationMs else "-"} first_frame_ms=${firstFrameMs ?: "-"} render_fps_avg=${formatMetric(renderFpsAvg)} rendered_frames=$rtcRenderedFrameCount recv_kbps_avg=${formatMetric(recvKbpsAvg)} rtt_ms_avg=${formatMetric(rttMsAvg)} longest_frame_gap_ms=$rtcLongestFrameGapMs low_fps_streak_ms=$rtcLongestLowFpsStreakMs frames_dropped_last=$rtcFramesDroppedLast frames_dropped_spike_max=$rtcFramesDroppedSpikeMax controller_quality_hint=$controllerQualityHint candidate_pair_last=$rtcLastCandidatePair candidate_tier_last=$rtcLastCandidateTier pair_state_last=$rtcLastPairState ice_policy_restarts=$rtcIcePolicyRecoveryAttempts frame_size_last=$frameSize ice_state_last=$iceState",
     )
     val metricsPayload = mapOf<String, Any?>(
       "duration_ms" to if (sessionDurationMs >= 0L) sessionDurationMs else -1L,
@@ -750,6 +805,13 @@ class MainActivity : AppCompatActivity() {
       "rendered_frames" to rtcRenderedFrameCount,
       "recv_kbps_avg" to metricOrMinusOne(recvKbpsAvg),
       "rtt_ms_avg" to metricOrMinusOne(rttMsAvg),
+      "render_longest_frame_gap_ms" to rtcLongestFrameGapMs,
+      "render_frame_gap_spike_count" to rtcFrameGapSpikeCount,
+      "render_low_fps_sample_count" to rtcLowFpsSampleCount,
+      "render_longest_low_fps_streak_ms" to rtcLongestLowFpsStreakMs,
+      "frames_dropped_last" to rtcFramesDroppedLast,
+      "frames_dropped_spike_max" to rtcFramesDroppedSpikeMax,
+      "controller_quality_hint" to controllerQualityHint,
       "candidate_pair_last" to rtcLastCandidatePair,
       "candidate_tier_last" to rtcLastCandidateTier,
       "pair_state_last" to rtcLastPairState,
@@ -1005,6 +1067,22 @@ class MainActivity : AppCompatActivity() {
     val framesDropped = inboundMembers?.let { readMemberLong(it, "framesDropped") }
     val packetsLost = inboundMembers?.let { readMemberLong(it, "packetsLost") }
     val jitterMs = inboundMembers?.let { readMemberDouble(it, "jitter") }?.times(1000.0)
+    if (framesDropped != null && framesDropped >= 0L) {
+      rtcFramesDroppedLast = framesDropped
+      if (rtcLastFramesDroppedValue >= 0L && framesDropped >= rtcLastFramesDroppedValue) {
+        val droppedSpike = framesDropped - rtcLastFramesDroppedValue
+        if (droppedSpike > rtcFramesDroppedSpikeMax) {
+          rtcFramesDroppedSpikeMax = droppedSpike
+        }
+        if (droppedSpike >= RTC_QUALITY_DROPPED_FRAME_SPIKE_THRESHOLD) {
+          Log.w(
+            RTC_TAG,
+            "frames_dropped_spike session=${rtcCurrentSessionId ?: "-"} spike=$droppedSpike max_spike=$rtcFramesDroppedSpikeMax total=$framesDropped",
+          )
+        }
+      }
+      rtcLastFramesDroppedValue = framesDropped
+    }
 
     val selectedPair = findSelectedCandidatePair(statsMap)
     val pairMembers = selectedPair?.members
@@ -1055,6 +1133,7 @@ class MainActivity : AppCompatActivity() {
       append("fps_decoded=${formatMetric(framesPerSecond)} ")
       append("frames_decoded=${framesDecoded ?: "-"} ")
       append("frames_dropped=${framesDropped ?: "-"} ")
+      append("frames_dropped_spike_max=$rtcFramesDroppedSpikeMax ")
       append("packets_lost=${packetsLost ?: "-"} ")
       append("jitter_ms=${formatMetric(jitterMs)} ")
       append("rtt_ms=${formatMetric(rttMs)} ")
@@ -1250,7 +1329,7 @@ class MainActivity : AppCompatActivity() {
     return "%.${digits}f".format(Locale.US, value)
   }
 
-  private fun inferRtcQualityHint(
+  private fun inferRtcQualityHintCode(
     renderFpsAvg: Double?,
     recvKbpsAvg: Double?,
     candidateTier: String,
@@ -1260,26 +1339,55 @@ class MainActivity : AppCompatActivity() {
       return "-"
     }
     if (rtcRemoteVideoTrack == null) {
-      return "等待轨道"
+      return "waiting_track"
     }
     if (rtcFirstFrameAtMs <= 0L) {
-      return "等待首帧"
+      return "waiting_first_frame"
     }
     val tier = candidateTier.lowercase(Locale.US)
     if (tier == "relay_tcp" || tier == "p2p_tcp" || tier == "relay_udp_high_rtt") {
-      return "链路受限($candidateTier)"
+      return "path_$tier"
     }
     if (rttMs != null && rttMs.isFinite() && rttMs >= RTC_QUALITY_RTT_HIGH_MS) {
-      return "RTT偏高"
+      return "rtt_high"
+    }
+    if (rtcLongestFrameGapMs >= RTC_QUALITY_FRAME_GAP_SPIKE_MS) {
+      return "render_frame_stutter"
+    }
+    if (rtcLongestLowFpsStreakMs >= RTC_QUALITY_LOW_FPS_STREAK_THRESHOLD_MS) {
+      return "render_fps_streak"
+    }
+    if (rtcFramesDroppedSpikeMax >= RTC_QUALITY_DROPPED_FRAME_SPIKE_THRESHOLD) {
+      return "frames_dropped_spike"
     }
     if (renderFpsAvg != null && renderFpsAvg.isFinite() && renderFpsAvg >= 0.0 && renderFpsAvg < RTC_QUALITY_FPS_LOW_THRESHOLD) {
-      return "渲染FPS偏低"
+      return "render_fps_low"
     }
     val likelyStall = renderFpsAvg != null && renderFpsAvg.isFinite() && renderFpsAvg >= 0.0 && renderFpsAvg < RTC_QUALITY_STALL_FPS_THRESHOLD
     if (likelyStall && recvKbpsAvg != null && recvKbpsAvg.isFinite() && recvKbpsAvg >= 0.0 && recvKbpsAvg < RTC_QUALITY_BITRATE_LOW_KBPS) {
-      return "接收码率偏低"
+      return "recv_bitrate_low"
     }
-    return "稳定"
+    return "stable"
+  }
+
+  private fun displayRtcQualityHint(qualityHintCode: String, candidateTier: String): String {
+    return when (qualityHintCode) {
+      "-" -> "-"
+      "waiting_track" -> "等待轨道"
+      "waiting_first_frame" -> "等待首帧"
+      "rtt_high" -> "RTT偏高"
+      "render_frame_stutter" -> "帧间隔卡顿"
+      "render_fps_streak" -> "连续低FPS"
+      "frames_dropped_spike" -> "掉帧尖峰"
+      "render_fps_low" -> "渲染FPS偏低"
+      "recv_bitrate_low" -> "接收码率偏低"
+      "stable" -> "稳定"
+      else -> if (qualityHintCode.startsWith("path_")) {
+        "链路受限($candidateTier)"
+      } else {
+        qualityHintCode
+      }
+    }
   }
 
   private fun updateLiveMetricsPanel() {
@@ -1290,12 +1398,13 @@ class MainActivity : AppCompatActivity() {
     }
     val renderFpsAvg = averageMetric(rtcRenderFpsSampleSum, rtcRenderFpsSampleCount)
     val recvKbpsAvg = averageMetric(rtcNetRecvKbpsSampleSum, rtcNetRecvKbpsSampleCount)
-    val qualityHint = inferRtcQualityHint(
+    val qualityHintCode = inferRtcQualityHintCode(
       renderFpsAvg = renderFpsAvg,
       recvKbpsAvg = recvKbpsAvg,
       candidateTier = rtcLastCandidateTier,
       rttMs = rtcLastRttMs,
     )
+    val qualityHint = displayRtcQualityHint(qualityHintCode, rtcLastCandidateTier)
     val candidateLabel = if (rtcLastCandidatePair != "-" || rtcLastCandidateTier != "-") {
       "${rtcLastCandidatePair} / ${rtcLastCandidateTier}"
     } else {
@@ -1309,6 +1418,8 @@ class MainActivity : AppCompatActivity() {
       append("渲染FPS：avg ${formatMetricOrDash(renderFpsAvg)} / latest ${formatMetricOrDash(rtcLastDecodedFps)}")
       append('\n')
       append("接收码率：avg ${formatMetricOrDash(recvKbpsAvg)}kbps / latest ${formatMetricOrDash(rtcLastRecvKbps)}kbps")
+      append('\n')
+      append("卡顿追踪：gap ${rtcLongestFrameGapMs}ms / low ${rtcLongestLowFpsStreakMs}ms / drop ${rtcFramesDroppedSpikeMax}")
       append('\n')
       append("发送FPS/码率：由 mac 端上报")
       append('\n')
@@ -2083,16 +2194,21 @@ class MainActivity : AppCompatActivity() {
               setStatus("鉴权失效，请重新注册")
             }
             "DEVICE_OFFLINE", "DEVICE_NOT_FOUND" -> {
-              val maybeOfflineId = payload.optNonBlank("agent_device_id")
-                ?: payload.optNonBlank("target_device_id")
-                ?: payload.optNonBlank("device_id")
-                ?: binding.targetDeviceInput.text.toString().trim()
-              if (wasRecoveryRequest && reconnectSessionRestoreAttempt < RELAY_SESSION_RECOVERY_MAX_ATTEMPTS) {
+              val maybeOfflineId = if (wasRecoveryRequest) {
+                resolveRecoveryOfflineTarget(payload)
+              } else {
+                payload.optNonBlank("agent_device_id")
+                  ?: payload.optNonBlank("target_device_id")
+                  ?: payload.optNonBlank("device_id")
+                  ?: binding.targetDeviceInput.text.toString().trim()
+              }
+              if (wasRecoveryRequest && maybeOfflineId.isNotBlank()) {
+                reconnectTargetDeviceId = maybeOfflineId
                 isRecoveringSession = true
-                setStatus("短断线恢复待重试")
+                setStatus("短断线恢复等待目标上线")
                 appendLog("短断线恢复：目标暂时离线，继续等待 $maybeOfflineId")
                 refreshDevicesList(force = true)
-                maybeScheduleReconnectSessionRestore(source = "device_offline")
+                scheduleSessionRecoveryTargetWait(source = "device_offline", targetDeviceId = maybeOfflineId)
               } else if (maybeOfflineId.isNotBlank()) {
                 handleTargetDeviceOffline(maybeOfflineId, source = "error.rsp")
               } else if (sessionId.isNullOrBlank()) {
@@ -3717,15 +3833,18 @@ class MainActivity : AppCompatActivity() {
       return
     }
     val targetDevice = relayDevices.find { it.deviceId == targetDeviceId }
-    if (targetDevice != null && !targetDevice.canReceiveRemoteControl()) {
+    if (targetDevice == null) {
+      scheduleSessionRecoveryTargetWait(source = "target_missing", targetDeviceId = targetDeviceId)
+      return
+    }
+    if (!targetDevice.canReceiveRemoteControl()) {
       appendLog("短断线恢复停止：目标设备未上报可被控制能力")
       clearSessionRecoveryIntent("target_not_controllable")
       updateSessionButtonState()
       return
     }
-    if (targetDevice != null && !targetDevice.isReachable()) {
-      appendLog("短断线恢复等待：目标设备暂不在线")
-      refreshDevicesList(force = true)
+    if (!targetDevice.isReachable()) {
+      scheduleSessionRecoveryTargetWait(source = "target_unreachable", targetDeviceId = targetDeviceId)
       return
     }
     if (reconnectSessionRestoreAttempt >= RELAY_SESSION_RECOVERY_MAX_ATTEMPTS) {
@@ -3756,6 +3875,43 @@ class MainActivity : AppCompatActivity() {
       appendLog("短断线恢复：自动重新请求会话 -> $targetDeviceId")
       requestSession(isRecovery = true)
     }, delayMs)
+  }
+
+  private fun resolveRecoveryOfflineTarget(payload: JSONObject?): String {
+    val rememberedTarget = reconnectTargetDeviceId?.trim().orEmpty()
+    if (rememberedTarget.isNotBlank()) {
+      return rememberedTarget
+    }
+    return payload.optNonBlank("agent_device_id")
+      ?: payload.optNonBlank("target_device_id")
+      ?: payload.optNonBlank("device_id")
+      ?: binding.targetDeviceInput.text.toString().trim()
+  }
+
+  private fun scheduleSessionRecoveryTargetWait(source: String, targetDeviceId: String) {
+    if (!canRestoreSessionNow(targetDeviceId) || reconnectSessionRestoreScheduled) {
+      return
+    }
+    reconnectSessionRestoreScheduled = true
+    isRecoveringSession = true
+    binding.frameMetaText.text = "当前画面：等待原 Mac 受控端重新上线"
+    setStatus("短断线恢复等待目标上线")
+    updateSessionButtonState()
+    // long: 短断线时 Mac 端通常晚于安卓重新注册，先等设备列表确认原目标上线，避免把恢复次数耗在必然失败的请求上。
+    if (!isFetchingDevices) {
+      refreshDevicesList(force = true)
+    }
+    appendLog("短断线恢复等待：原目标 $targetDeviceId 暂未重新上线，来源=$source")
+    reconnectHandler.postDelayed({
+      reconnectSessionRestoreScheduled = false
+      if (!isActivityAlive || !canRestoreSessionNow(targetDeviceId)) {
+        return@postDelayed
+      }
+      if (!isFetchingDevices) {
+        refreshDevicesList(force = true)
+      }
+      maybeScheduleReconnectSessionRestore(source = "target_wait")
+    }, RELAY_SESSION_RECOVERY_RETRY_DELAY_MS)
   }
 
   private fun maybeScheduleAutoRequestSession() {

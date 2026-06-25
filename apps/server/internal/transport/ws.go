@@ -32,6 +32,9 @@ const (
 	qualityHintBitrateLowKbps     = 350.0
 	qualityHintCanvasHeavyPct     = 80.0
 	qualityHintRttHighMs          = 220.0
+	qualityHintFrameGapSpikeMs    = 1000.0
+	qualityHintLowFpsStreakMs     = 6000.0
+	qualityHintDroppedFrameSpike  = 12.0
 )
 
 var targetE2ERoutes = []struct {
@@ -1225,6 +1228,12 @@ func extractSessionCombinedSummary(controllerReport, agentReport map[string]any)
 	renderedFrames, renderedFramesOk := asNumber(controller["rendered_frames"])
 	rttMsAvg, rttMsAvgOk := asNumber(controller["rtt_ms_avg"])
 	icePolicyRestarts, icePolicyRestartsOk := asNumber(controller["ice_policy_restarts"])
+	renderLongestFrameGapMs, renderLongestFrameGapMsOK := asNumber(controller["render_longest_frame_gap_ms"])
+	renderFrameGapSpikeCount, renderFrameGapSpikeCountOK := asNumber(controller["render_frame_gap_spike_count"])
+	renderLowFpsSampleCount, renderLowFpsSampleCountOK := asNumber(controller["render_low_fps_sample_count"])
+	renderLongestLowFpsStreakMs, renderLongestLowFpsStreakMsOK := asNumber(controller["render_longest_low_fps_streak_ms"])
+	framesDroppedLast, framesDroppedLastOK := asNumber(controller["frames_dropped_last"])
+	framesDroppedSpikeMax, framesDroppedSpikeMaxOK := asNumber(controller["frames_dropped_spike_max"])
 	controllerQualityHint, controllerQualityHintOK := asTrimmedString(controller["controller_quality_hint"])
 	remoteInputResultCount, remoteInputResultCountOK := asNumber(controller["remote_input_result_count"])
 	remoteInputResultAppliedCount, remoteInputResultAppliedCountOK := asNumber(controller["remote_input_result_applied_count"])
@@ -1329,6 +1338,24 @@ func extractSessionCombinedSummary(controllerReport, agentReport map[string]any)
 	}
 	if icePolicyRestartsOk {
 		summary["ice_policy_restarts"] = icePolicyRestarts
+	}
+	if renderLongestFrameGapMsOK {
+		summary["render_longest_frame_gap_ms"] = renderLongestFrameGapMs
+	}
+	if renderFrameGapSpikeCountOK {
+		summary["render_frame_gap_spike_count"] = renderFrameGapSpikeCount
+	}
+	if renderLowFpsSampleCountOK {
+		summary["render_low_fps_sample_count"] = renderLowFpsSampleCount
+	}
+	if renderLongestLowFpsStreakMsOK {
+		summary["render_longest_low_fps_streak_ms"] = renderLongestLowFpsStreakMs
+	}
+	if framesDroppedLastOK {
+		summary["frames_dropped_last"] = framesDroppedLast
+	}
+	if framesDroppedSpikeMaxOK {
+		summary["frames_dropped_spike_max"] = framesDroppedSpikeMax
 	}
 	if controllerQualityHintOK {
 		summary["controller_quality_hint"] = controllerQualityHint
@@ -1643,16 +1670,22 @@ func extractSessionCombinedSummary(controllerReport, agentReport map[string]any)
 		recvKbpsAvg, recvKbpsOk,
 		sendFps, sendFpsOk,
 		rttMsAvg, rttMsAvgOk,
+		renderLongestFrameGapMs, renderLongestFrameGapMsOK,
+		renderLongestLowFpsStreakMs, renderLongestLowFpsStreakMsOK,
+		framesDroppedSpikeMax, framesDroppedSpikeMaxOK,
 		resolvedTier, resolvedTierOK,
 		canvasSharePct, canvasShareOk,
 		bridgeCapabilityTier, bridgeCapabilityTierOk,
 	)
 	summary["session_perf_summary"] = fmt.Sprintf(
-		"route=%s first_frame_ms=%s render_fps_avg=%s recv_kbps_avg=%s send_fps=%s send_kbps=%s path=%s tier=%s canvas_share=%s remote_input_applied=%s/%s input_coverage=%s last_executor=%s last_status=%s",
+		"route=%s first_frame_ms=%s render_fps_avg=%s recv_kbps_avg=%s stutter_gap_ms=%s low_fps_streak_ms=%s drop_spike=%s send_fps=%s send_kbps=%s path=%s tier=%s canvas_share=%s remote_input_applied=%s/%s input_coverage=%s last_executor=%s last_status=%s",
 		formatSummaryString(sessionRouteLabel, sessionRouteOK),
 		formatSummaryNumber(firstFrameMs, firstFrameOk, 0),
 		formatSummaryNumber(renderFpsAvg, renderFpsOk, 2),
 		formatSummaryNumber(recvKbpsAvg, recvKbpsOk, 2),
+		formatSummaryNumber(renderLongestFrameGapMs, renderLongestFrameGapMsOK, 0),
+		formatSummaryNumber(renderLongestLowFpsStreakMs, renderLongestLowFpsStreakMsOK, 0),
+		formatSummaryNumber(framesDroppedSpikeMax, framesDroppedSpikeMaxOK, 0),
 		formatSummaryNumber(sendFps, sendFpsOk, 2),
 		formatSummaryNumber(sendKbps, sendKbpsOk, 2),
 		formatSummaryString(resolvedPath, resolvedPathOK),
@@ -1791,6 +1824,12 @@ func inferSessionQualityHint(
 	sendFpsOK bool,
 	rttMs float64,
 	rttMsOK bool,
+	renderLongestFrameGapMs float64,
+	renderLongestFrameGapMsOK bool,
+	renderLongestLowFpsStreakMs float64,
+	renderLongestLowFpsStreakMsOK bool,
+	framesDroppedSpikeMax float64,
+	framesDroppedSpikeMaxOK bool,
 	candidateTier string,
 	candidateTierOK bool,
 	canvasSharePct float64,
@@ -1812,6 +1851,15 @@ func inferSessionQualityHint(
 	}
 	if canvasShareOK && canvasSharePct >= qualityHintCanvasHeavyPct {
 		return "canvas_fallback_heavy"
+	}
+	if renderLongestFrameGapMsOK && renderLongestFrameGapMs >= qualityHintFrameGapSpikeMs {
+		return "render_frame_stutter"
+	}
+	if renderLongestLowFpsStreakMsOK && renderLongestLowFpsStreakMs >= qualityHintLowFpsStreakMs {
+		return "render_fps_streak"
+	}
+	if framesDroppedSpikeMaxOK && framesDroppedSpikeMax >= qualityHintDroppedFrameSpike {
+		return "frames_dropped_spike"
 	}
 	if renderFpsOK && renderFps > 0 && renderFps < qualityHintFpsLowThreshold {
 		return "render_fps_low"

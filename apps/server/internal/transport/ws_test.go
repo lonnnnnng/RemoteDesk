@@ -1039,6 +1039,12 @@ func TestUpsertSessionMetricsIncludesBridgeSummary(t *testing.T) {
 			"first_frame_ms":                     1200.0,
 			"render_fps_avg":                     22.5,
 			"recv_kbps_avg":                      130.0,
+			"render_longest_frame_gap_ms":        96.0,
+			"render_frame_gap_spike_count":       0.0,
+			"render_low_fps_sample_count":        0.0,
+			"render_longest_low_fps_streak_ms":   0.0,
+			"frames_dropped_last":                2.0,
+			"frames_dropped_spike_max":           1.0,
 			"candidate_pair_last":                "srflx/srflx/udp",
 			"candidate_tier_last":                "p2p_udp",
 			"controller_quality_hint":            "stable",
@@ -1166,6 +1172,12 @@ func TestUpsertSessionMetricsIncludesBridgeSummary(t *testing.T) {
 	if renderFps, ok := combined["render_fps_avg"].(float64); !ok || renderFps != 22.5 {
 		t.Fatalf("expected render_fps_avg=22.5, got %#v", combined["render_fps_avg"])
 	}
+	if longestGap, ok := combined["render_longest_frame_gap_ms"].(float64); !ok || longestGap != 96 {
+		t.Fatalf("expected render_longest_frame_gap_ms=96, got %#v", combined["render_longest_frame_gap_ms"])
+	}
+	if dropSpike, ok := combined["frames_dropped_spike_max"].(float64); !ok || dropSpike != 1 {
+		t.Fatalf("expected frames_dropped_spike_max=1, got %#v", combined["frames_dropped_spike_max"])
+	}
 	if sendFps, ok := combined["send_fps"].(float64); !ok || sendFps != 23.5 {
 		t.Fatalf("expected send_fps=23.5, got %#v", combined["send_fps"])
 	}
@@ -1213,6 +1225,9 @@ func TestUpsertSessionMetricsIncludesBridgeSummary(t *testing.T) {
 	}
 	if perfSummary, _ := combined["session_perf_summary"].(string); !strings.Contains(perfSummary, "first_frame_ms=1200") {
 		t.Fatalf("expected session_perf_summary with first_frame_ms, got %#v", combined["session_perf_summary"])
+	}
+	if perfSummary, _ := combined["session_perf_summary"].(string); !strings.Contains(perfSummary, "stutter_gap_ms=96") || !strings.Contains(perfSummary, "drop_spike=1") {
+		t.Fatalf("expected session_perf_summary with stutter metrics, got %#v", combined["session_perf_summary"])
 	}
 	if perfSummary, _ := combined["session_perf_summary"].(string); !strings.Contains(perfSummary, "remote_input_applied=4/4") {
 		t.Fatalf("expected session_perf_summary with remote_input_applied=4/4, got %#v", combined["session_perf_summary"])
@@ -2024,6 +2039,9 @@ func TestInferSessionQualityHintRelayThresholds(t *testing.T) {
 		120.0, true,
 		26.0, true,
 		30.0, true,
+		80.0, true,
+		0.0, true,
+		0.0, true,
 		"p2p_udp", true,
 		0.0, true,
 		"no_canvas_ready", true,
@@ -2037,6 +2055,9 @@ func TestInferSessionQualityHintRelayThresholds(t *testing.T) {
 		500.0, true,
 		23.0, true,
 		260.0, true,
+		80.0, true,
+		0.0, true,
+		0.0, true,
 		"relay_udp_high_rtt", true,
 		0.0, true,
 		"no_canvas_ready", true,
@@ -2050,12 +2071,63 @@ func TestInferSessionQualityHintRelayThresholds(t *testing.T) {
 		500.0, true,
 		23.0, true,
 		250.0, true,
+		80.0, true,
+		0.0, true,
+		0.0, true,
 		"p2p_udp", true,
 		0.0, true,
 		"no_canvas_ready", true,
 	)
 	if highRtt != "rtt_high" {
 		t.Fatalf("expected rtt_high, got %q", highRtt)
+	}
+
+	frameStutter := inferSessionQualityHint(
+		24.0, true,
+		900.0, true,
+		24.0, true,
+		20.0, true,
+		1400.0, true,
+		0.0, true,
+		0.0, true,
+		"p2p_udp", true,
+		0.0, true,
+		"no_canvas_ready", true,
+	)
+	if frameStutter != "render_frame_stutter" {
+		t.Fatalf("expected render_frame_stutter, got %q", frameStutter)
+	}
+
+	lowFpsStreak := inferSessionQualityHint(
+		17.0, true,
+		900.0, true,
+		24.0, true,
+		20.0, true,
+		80.0, true,
+		7000.0, true,
+		0.0, true,
+		"p2p_udp", true,
+		0.0, true,
+		"no_canvas_ready", true,
+	)
+	if lowFpsStreak != "render_fps_streak" {
+		t.Fatalf("expected render_fps_streak, got %q", lowFpsStreak)
+	}
+
+	dropSpike := inferSessionQualityHint(
+		24.0, true,
+		900.0, true,
+		24.0, true,
+		20.0, true,
+		80.0, true,
+		0.0, true,
+		18.0, true,
+		"p2p_udp", true,
+		0.0, true,
+		"no_canvas_ready", true,
+	)
+	if dropSpike != "frames_dropped_spike" {
+		t.Fatalf("expected frames_dropped_spike, got %q", dropSpike)
 	}
 }
 
