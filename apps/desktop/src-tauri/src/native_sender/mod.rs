@@ -250,6 +250,7 @@ struct NativeSenderOutboundRtpSnapshot {
 const NATIVE_SENDER_PROBE_DEFAULT_INTERVAL_MS: u64 = 42;
 const NATIVE_SENDER_PROBE_SAMPLE_WINDOW_MS: u64 = 2000;
 const NATIVE_SENDER_FORCE_INTRA_INTERVAL_FRAMES: u64 = 72;
+const NATIVE_SENDER_ENCODER_THREADS: u16 = 2;
 
 fn target_loop_interval_ms(capture_fps: u32) -> u64 {
     let fps = capture_fps.max(1);
@@ -510,7 +511,8 @@ fn build_h264_encoder(target_fps: u16) -> Result<Encoder, String> {
         .bitrate(BitRate::from_bps(2_500_000))
         .max_frame_rate(FrameRate::from_hz(fps))
         .intra_frame_period(intra_period)
-        .num_threads(0)
+        // 作者: long；720p 真机远控的编码耗时贴近 24fps 下沿，固定 2 线程减少单帧尾延迟，同时避免过多线程抢占 UI/信令。
+        .num_threads(NATIVE_SENDER_ENCODER_THREADS)
         .skip_frames(false);
     Encoder::with_api_config(openh264::OpenH264API::from_source(), config)
         .map_err(|error| format!("native sender build h264 encoder failed: {error}"))
@@ -1280,8 +1282,10 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                                         trace_native_sender(
                                             "encoder.ready",
                                             format!(
-                                                "session={} mime=video/H264 capture_fps={}",
-                                                session_for_thread, capture_fps
+                                                "session={} mime=video/H264 capture_fps={} encoder_threads={}",
+                                                session_for_thread,
+                                                capture_fps,
+                                                NATIVE_SENDER_ENCODER_THREADS
                                             ),
                                         );
                                     }

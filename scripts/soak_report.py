@@ -20,6 +20,7 @@ NET_STATS_RE = re.compile(
 )
 SESSION_ENTER_RE = re.compile(r"进入会话 (?P<session>\S+)")
 TS_RE = re.compile(r"^(?P<md>\d{2}-\d{2}) (?P<hms>\d{2}:\d{2}:\d{2}\.\d{3})")
+REQUIRED_INPUT_CATEGORIES = ("click", "drag", "keyboard", "wheel")
 
 
 @dataclass
@@ -42,6 +43,38 @@ def extract_kv(raw_line: str, key: str) -> str | None:
     if not match:
         return None
     return match.group(1)
+
+
+def as_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        return parse_float(value)
+    return None
+
+
+def as_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "-"}:
+            return False
+    return None
+
+
+def parse_coverage(value: Any) -> set[str]:
+    if isinstance(value, list):
+        return {str(item).strip().lower() for item in value if str(item).strip()}
+    if isinstance(value, str):
+        return {part.strip().lower() for part in value.split(",") if part.strip() and part.strip() != "-"}
+    return set()
 
 
 def parse_ts(line: str, year: int) -> datetime | None:
@@ -81,9 +114,11 @@ def main() -> int:
     parser.add_argument("--stall-window-sec", type=float, default=30.0)
     parser.add_argument("--rtt-high-ms", type=float, default=220.0)
     parser.add_argument("--frames-drop-spike", type=int, default=30)
+    parser.add_argument("--require-input-proof", choices=["true", "false"], default="true")
     parser.add_argument("--out-md", required=True)
     parser.add_argument("--out-json", required=True)
     args = parser.parse_args()
+    require_input_proof = args.require_input_proof == "true"
 
     android_lines = load_text(Path(args.android_log))
     relay_lines = load_text(Path(args.relay_log))
@@ -172,6 +207,14 @@ def main() -> int:
 
     non_user_end_reasons: list[str] = []
     combined_quality_hint = "-"
+    combined_remote_input_count = 0.0
+    combined_remote_input_applied = 0.0
+    combined_remote_input_failed = 0.0
+    combined_remote_input_coverage: set[str] = set()
+    combined_proof_status = "-"
+    combined_target_route = False
+    combined_last_executor = "-"
+    combined_last_status = "-"
     for line in relay_lines:
         line = line.strip()
         if not line.startswith("{"):
@@ -189,6 +232,36 @@ def main() -> int:
                 non_user_end_reasons.append(reason)
         elif event == "session.metrics.combined":
             combined_quality_hint = str(payload.get("session_quality_hint") or "-")
+            combined_proof_status = str(payload.get("session_e2e_proof_status") or combined_proof_status or "-")
+            combined_target_route = as_bool(payload.get("session_e2e_target_route")) or combined_target_route
+            combined_last_executor = str(payload.get("remote_input_last_executor") or combined_last_executor or "-")
+            combined_last_status = str(payload.get("remote_input_last_status_code") or combined_last_status or "-")
+            combined_remote_input_count = as_float(payload.get("remote_input_result_count")) or combined_remote_input_count
+            combined_remote_input_applied = (
+                as_float(payload.get("remote_input_result_applied_count")) or combined_remote_input_applied
+            )
+            combined_remote_input_failed = (
+                as_float(payload.get("remote_input_result_failed_count")) or combined_remote_input_failed
+            )
+            combined_remote_input_coverage |= parse_coverage(payload.get("remote_input_coverage"))
+            combined_remote_input_coverage |= parse_coverage(payload.get("remote_input_applied_categories"))
+            for category in REQUIRED_INPUT_CATEGORIES:
+                if as_bool(payload.get(f"remote_input_applied_{category}")):
+                    combined_remote_input_coverage.add(category)
+
+    missing_input_categories = [
+        category for category in REQUIRED_INPUT_CATEGORIES if category not in combined_remote_input_coverage
+    ]
+    input_detail = (
+        "skipped"
+        if not require_input_proof
+        else (
+            f"proof={combined_proof_status}, route={combined_target_route}, "
+            f"applied={combined_remote_input_applied:g}/{combined_remote_input_count:g}, "
+            f"failed={combined_remote_input_failed:g}, coverage={','.join(sorted(combined_remote_input_coverage)) or '-'}, "
+            f"missing={','.join(missing_input_categories) or '-'}, executor={combined_last_executor}, status={combined_last_status}"
+        )
+    )
 
     verdicts = [
         Verdict(
@@ -216,6 +289,22 @@ def main() -> int:
             passed=rtt_high_samples < 10 and "relay_tcp" not in candidate_tiers and "p2p_tcp" not in candidate_tiers,
             detail=f"rtt_high_samples={rtt_high_samples}, tiers={','.join(sorted(candidate_tiers)) or '-'}",
         ),
+        Verdict(
+            "5) Android 输入控制覆盖 click/drag/keyboard/wheel",
+            passed=(
+                True
+                if not require_input_proof
+                else (
+                    combined_proof_status == "video_and_input_observed"
+                    and combined_target_route
+                    and combined_remote_input_count > 0
+                    and combined_remote_input_applied >= combined_remote_input_count
+                    and combined_remote_input_failed == 0
+                    and not missing_input_categories
+                )
+            ),
+            detail=input_detail,
+        ),
     ]
 
     overall_pass = all(v.passed for v in verdicts)
@@ -233,6 +322,15 @@ def main() -> int:
         "rtt_high_samples": rtt_high_samples,
         "candidate_tiers": sorted(candidate_tiers),
         "non_user_end_reasons": non_user_end_reasons,
+        "remote_input_result_count": combined_remote_input_count,
+        "remote_input_result_applied_count": combined_remote_input_applied,
+        "remote_input_result_failed_count": combined_remote_input_failed,
+        "remote_input_coverage": sorted(combined_remote_input_coverage),
+        "remote_input_missing_coverage": missing_input_categories,
+        "session_e2e_proof_status": combined_proof_status,
+        "session_e2e_target_route": combined_target_route,
+        "remote_input_last_executor": combined_last_executor,
+        "remote_input_last_status_code": combined_last_status,
         "verdicts": [v.__dict__ for v in verdicts],
     }
 
@@ -248,6 +346,9 @@ def main() -> int:
         f"- frames_dropped_last: `{summary_frames_dropped}`",
         f"- longest_low_fps_streak_sec: `{low_streak_max:.1f}`",
         f"- max_frames_dropped_spike: `{max_drop_spike}`",
+        f"- remote_input_applied: `{combined_remote_input_applied:g}/{combined_remote_input_count:g}`",
+        f"- remote_input_coverage: `{','.join(sorted(combined_remote_input_coverage)) or '-'}`",
+        f"- session_e2e_proof_status: `{combined_proof_status}`",
         "",
         "## Verdicts",
     ]

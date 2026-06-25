@@ -384,6 +384,10 @@ main() {
   ts="$(date '+%Y%m%d_%H%M%S')"
   local out_md="${REPORT_DIR}/soak_6_5_${ts}.md"
   local out_json="${REPORT_DIR}/soak_6_5_${ts}.json"
+  local require_input_proof="false"
+  if (( AUTO_PROOF_INPUT == 1 )); then
+    require_input_proof="true"
+  fi
   log "building report -> ${out_md}"
   python3 "${ROOT_DIR}/scripts/soak_report.py" \
     --session-id "${sid}" \
@@ -391,6 +395,7 @@ main() {
     --mac-log "${MAC_LOG}" \
     --relay-log "${RELAY_LOG}" \
     --turn-log "${TURN_LOG}" \
+    --require-input-proof "${require_input_proof}" \
     --out-md "${out_md}" \
     --out-json "${out_json}" >/dev/null
 
