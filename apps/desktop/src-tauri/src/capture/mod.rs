@@ -18,6 +18,7 @@ const DEFAULT_CAPTURE_MAX_FPS: u16 = 24;
 const DEFAULT_CAPTURE_CODEC: &str = "jpeg-frame-stream";
 const CAPTURE_STREAM_BOUNDARY: &str = "rdframe";
 const CAPTURE_STREAM_PATH: &str = "/capture.mjpeg";
+const CAPTURE_SNAPSHOT_FAST_PATH_MAX_AGE_MS: u64 = 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CaptureLifecycleState {
@@ -181,6 +182,16 @@ pub struct CaptureFrameBytes {
     pub frame_height: u32,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CaptureFrameSnapshot {
+    // 作者: long；原生 sender 和 MJPEG 流共用最新帧缓存，避免 720p raw 帧在热路径里反复整帧复制。
+    pub(crate) mime_type: &'static str,
+    pub(crate) encoded_bytes: Arc<[u8]>,
+    pub(crate) capture_ts: u64,
+    pub(crate) frame_width: u32,
+    pub(crate) frame_height: u32,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CaptureStreamEndpoint {
     pub url: String,
@@ -212,18 +223,9 @@ impl Default for CaptureRuntimeState {
     }
 }
 
-#[derive(Debug, Clone)]
-struct CachedCaptureFrame {
-    encoded_bytes: Vec<u8>,
-    mime_type: &'static str,
-    frame_width: u32,
-    frame_height: u32,
-    capture_ts: u64,
-}
-
 #[derive(Debug, Default)]
 struct CaptureFrameWorkerState {
-    latest_frame: Option<CachedCaptureFrame>,
+    latest_frame: Option<CaptureFrameSnapshot>,
     stop_tx: Option<Sender<()>>,
     handle: Option<JoinHandle<()>>,
 }
@@ -334,6 +336,29 @@ pub fn capture_take_frame() -> Result<CaptureFrameEnvelope, String> {
 }
 
 pub fn capture_take_frame_bytes() -> Result<CaptureFrameBytes, String> {
+    let frame = capture_take_frame_snapshot()?;
+    Ok(CaptureFrameBytes {
+        mime_type: frame.mime_type,
+        encoded_bytes: frame.encoded_bytes.to_vec(),
+        capture_ts: frame.capture_ts,
+        frame_width: frame.frame_width,
+        frame_height: frame.frame_height,
+    })
+}
+
+pub(crate) fn capture_take_frame_snapshot() -> Result<CaptureFrameSnapshot, String> {
+    // 作者: long；native sender 逐帧取缓存时不能重复触发系统权限探测，过旧帧再回到完整校验路径避免输出停滞画面。
+    if let Some(frame) = latest_cached_frame() {
+        if now_ms().saturating_sub(frame.capture_ts) <= CAPTURE_SNAPSHOT_FAST_PATH_MAX_AGE_MS {
+            if let Ok(mut state) = capture_runtime_state().lock() {
+                clear_error(&mut state);
+                state.lifecycle = CaptureLifecycleState::Running;
+                state.last_transition_at = frame.capture_ts;
+            }
+            return Ok(frame);
+        }
+    }
+
     let (source, config) = {
         let mut state = capture_runtime_state()
             .lock()
@@ -371,18 +396,14 @@ pub fn capture_take_frame_bytes() -> Result<CaptureFrameBytes, String> {
     };
 
     if let Some(frame) = latest_cached_frame() {
-        if let Ok(mut state) = capture_runtime_state().lock() {
-            clear_error(&mut state);
-            state.lifecycle = CaptureLifecycleState::Running;
-            state.last_transition_at = frame.capture_ts;
+        if now_ms().saturating_sub(frame.capture_ts) <= CAPTURE_SNAPSHOT_FAST_PATH_MAX_AGE_MS {
+            if let Ok(mut state) = capture_runtime_state().lock() {
+                clear_error(&mut state);
+                state.lifecycle = CaptureLifecycleState::Running;
+                state.last_transition_at = frame.capture_ts;
+            }
+            return Ok(frame);
         }
-        return Ok(CaptureFrameBytes {
-            mime_type: frame.mime_type,
-            encoded_bytes: frame.encoded_bytes,
-            capture_ts: frame.capture_ts,
-            frame_width: frame.frame_width,
-            frame_height: frame.frame_height,
-        });
     }
 
     let frame = platform::capture_take_frame(&source, &config).map_err(|detail| {
@@ -403,9 +424,9 @@ pub fn capture_take_frame_bytes() -> Result<CaptureFrameBytes, String> {
         state.last_transition_at = capture_ts;
     }
 
-    Ok(CaptureFrameBytes {
+    Ok(CaptureFrameSnapshot {
         mime_type: frame.mime_type,
-        encoded_bytes: frame.encoded_bytes,
+        encoded_bytes: Arc::from(frame.encoded_bytes.into_boxed_slice()),
         capture_ts,
         frame_width: frame.width,
         frame_height: frame.height,
@@ -646,7 +667,7 @@ fn capture_frame_interval(config: &CaptureConfig) -> Duration {
     Duration::from_millis(interval_ms)
 }
 
-fn latest_cached_frame() -> Option<CachedCaptureFrame> {
+fn latest_cached_frame() -> Option<CaptureFrameSnapshot> {
     capture_frame_worker_state()
         .lock()
         .ok()
@@ -678,9 +699,8 @@ fn start_capture_worker() -> Result<(), String> {
                 match platform::capture_take_frame(&source, &config) {
                     Ok(frame) => {
                         let capture_ts = now_ms();
-                        let encoded_bytes = frame.encoded_bytes;
-                        let cached_frame = CachedCaptureFrame {
-                            encoded_bytes,
+                        let cached_frame = CaptureFrameSnapshot {
+                            encoded_bytes: Arc::from(frame.encoded_bytes.into_boxed_slice()),
                             mime_type: frame.mime_type,
                             frame_width: frame.width,
                             frame_height: frame.height,
@@ -970,9 +990,8 @@ Content-Type: multipart/x-mixed-replace; boundary={boundary}\r\n\r\n",
         if frame_for_stream.is_none() && last_capture_ts == 0 {
             if let Ok(frame) = platform::capture_take_frame(&source, &config) {
                 let capture_ts = now_ms();
-                let encoded_bytes = frame.encoded_bytes;
-                let bootstrapped_frame = CachedCaptureFrame {
-                    encoded_bytes,
+                let bootstrapped_frame = CaptureFrameSnapshot {
+                    encoded_bytes: Arc::from(frame.encoded_bytes.into_boxed_slice()),
                     mime_type: frame.mime_type,
                     frame_width: frame.width,
                     frame_height: frame.height,
@@ -1013,7 +1032,7 @@ X-Capture-Ts: {capture_ts}\r\n\r\n",
                 .write_all(frame_header.as_bytes())
                 .map_err(|error| format!("failed to write stream frame header: {error}"))?;
             stream
-                .write_all(&frame.encoded_bytes)
+                .write_all(frame.encoded_bytes.as_ref())
                 .map_err(|error| format!("failed to write stream frame bytes: {error}"))?;
             stream
                 .write_all(b"\r\n")

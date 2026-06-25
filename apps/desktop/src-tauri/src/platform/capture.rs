@@ -434,7 +434,7 @@ fn macos_capture_take_frame_via_stream(
     };
     let (bgra_bytes, frame_width, frame_height) = sample_to_bgra_bytes(&sample, &source.source_id)?;
     let (encoded_bytes, mime_type) =
-        encode_frame_bgra(&bgra_bytes, frame_width, frame_height, config)?;
+        encode_owned_bgra(bgra_bytes, frame_width, frame_height, config)?;
     Ok(CaptureFrameData {
         encoded_bytes,
         mime_type,
@@ -677,7 +677,7 @@ fn macos_capture_take_frame_via_core_graphics(
         )?;
     }
     let (encoded_bytes, mime_type) =
-        encode_frame_bgra(&bgra_bytes, target_width, target_height, config)?;
+        encode_owned_bgra(bgra_bytes, target_width, target_height, config)?;
     Ok(CaptureFrameData {
         encoded_bytes,
         mime_type,
@@ -1167,7 +1167,7 @@ fn windows_capture_take_frame(
     }
 
     let (encoded_bytes, mime_type) =
-        encode_frame_bgra(&bgra_bytes, target_width, target_height, config)?;
+        encode_owned_bgra(bgra_bytes, target_width, target_height, config)?;
     Ok(CaptureFrameData {
         encoded_bytes,
         mime_type,
@@ -1289,6 +1289,18 @@ fn encode_frame_bgra(
             let rgba_bytes = bgra_to_rgba_bytes(bgra_bytes)?;
             Ok((encode_png_rgba(&rgba_bytes, width, height)?, PNG_MIME_TYPE))
         }
+    }
+}
+
+fn encode_owned_bgra(
+    bgra_bytes: Vec<u8>,
+    width: u32,
+    height: u32,
+    config: &CaptureConfig,
+) -> Result<(Vec<u8>, &'static str), String> {
+    match selected_capture_codec(config) {
+        RAW_BGRA_FRAME_CODEC => Ok((bgra_bytes, RAW_BGRA_MIME_TYPE)),
+        _ => encode_frame_bgra(&bgra_bytes, width, height, config),
     }
 }
 

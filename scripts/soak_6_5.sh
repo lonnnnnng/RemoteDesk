@@ -247,11 +247,44 @@ current_line_count() {
 }
 
 latest_session_id() {
-  local start_line="${1:-0}"
-  tail -n +"$((start_line + 1))" "${ANDROID_LOG}" 2>/dev/null \
-    | rg -n "进入会话 sess-" \
+  local android_start_line="${1:-0}"
+  local relay_start_line="${2:-0}"
+  local session=""
+  session="$(
+    tail -n +"$((android_start_line + 1))" "${ANDROID_LOG}" 2>/dev/null \
+      | rg -n "进入会话 sess-|session_summary session=sess-|first_rendered_frame session=sess-" \
+      | tail -n 1 \
+      | sed -E 's/.*(进入会话 |session_summary session=|first_rendered_frame session=)(sess-[^ ]+).*/\2/' || true
+  )"
+  if [[ -n "${session}" ]]; then
+    printf '%s\n' "${session}"
+    return 0
+  fi
+  tail -n +"$((relay_start_line + 1))" "${RELAY_LOG}" 2>/dev/null \
+    | rg -n '"event":"session.created".*"session_id":"sess-' \
     | tail -n 1 \
-    | sed -E 's/.*进入会话 (sess-[^ ]+).*/\1/' || true
+    | sed -E 's/.*"session_id":"(sess-[^"]+)".*/\1/' || true
+}
+
+wait_for_session_start() {
+  local timeout_sec="$1"
+  local android_start_line="$2"
+  local relay_start_line="$3"
+  local waited=0
+  while (( waited < timeout_sec )); do
+    # 作者: long；真机重建 Activity 时 UI 文案可能错过 logcat，验证会话启动要以渲染/relay 会话事件为准。
+    if tail -n +"$((android_start_line + 1))" "${ANDROID_LOG}" 2>/dev/null \
+      | rg -n "进入会话 sess-|session_summary session=sess-|first_rendered_frame session=sess-" >/dev/null 2>&1; then
+      return 0
+    fi
+    if tail -n +"$((relay_start_line + 1))" "${RELAY_LOG}" 2>/dev/null \
+      | rg -n '"event":"session.created".*"session_id":"sess-' >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    (( waited += 1 ))
+  done
+  return 1
 }
 
 countdown() {
@@ -301,6 +334,8 @@ main() {
   log "launching android app and starting session"
   local before_enter_lines
   before_enter_lines="$(current_line_count "${ANDROID_LOG}")"
+  local before_relay_lines
+  before_relay_lines="$(current_line_count "${RELAY_LOG}")"
   local target_device_id=""
   if (( AUTO_LAUNCH == 1 )); then
     target_device_id="$(resolve_target_device_id || true)"
@@ -313,14 +348,14 @@ main() {
     adb_cmd shell input tap "${TAP_X}" "${TAP_Y}" >/dev/null 2>&1 || true
   fi
 
-  if ! wait_for_new_pattern "${ANDROID_LOG}" "进入会话 sess-" 45 "${before_enter_lines}"; then
+  if ! wait_for_session_start 45 "${before_enter_lines}" "${before_relay_lines}"; then
     log "ERROR: session did not start within timeout"
     exit 1
   fi
 
   local sid="${SESSION_ID}"
   if [[ -z "${sid}" ]]; then
-    sid="$(latest_session_id "${before_enter_lines}")"
+    sid="$(latest_session_id "${before_enter_lines}" "${before_relay_lines}")"
   fi
   log "session started: ${sid:-unknown}"
 

@@ -1,9 +1,10 @@
 use openh264::encoder::{
-    BitRate, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, Profile,
+    BitRate, Complexity, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, Profile,
     RateControlMode, UsageType,
 };
 use openh264::formats::{BgraSliceU8, RgbSliceU8, YUVBuffer};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::io::Cursor;
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
@@ -254,7 +255,11 @@ fn target_loop_interval_ms(capture_fps: u32) -> u64 {
     let fps = capture_fps.max(1);
     let base = (1000_u64 / u64::from(fps)).max(1);
     // Give a small pacing headroom so end-to-end stays closer to >=24fps under real processing cost.
-    if fps >= 20 { base.saturating_sub(2).max(1) } else { base }
+    if fps >= 20 {
+        base.saturating_sub(2).max(1)
+    } else {
+        base
+    }
 }
 
 fn native_sender_state() -> &'static Mutex<NativeSenderRuntimeState> {
@@ -499,16 +504,21 @@ fn build_h264_encoder(target_fps: u16) -> Result<Encoder, String> {
     let config = EncoderConfig::new()
         .usage_type(UsageType::ScreenContentRealTime)
         .rate_control_mode(RateControlMode::Bitrate)
+        // 作者: long；真机远控优先守住 720p 下的实时帧率，低复杂度换取编码耗时下降，清晰度仍由码率和分辨率兜底。
+        .complexity(Complexity::Low)
         .profile(Profile::Baseline)
         .bitrate(BitRate::from_bps(2_500_000))
         .max_frame_rate(FrameRate::from_hz(fps))
         .intra_frame_period(intra_period)
+        .num_threads(0)
         .skip_frames(false);
     Encoder::with_api_config(openh264::OpenH264API::from_source(), config)
         .map_err(|error| format!("native sender build h264 encoder failed: {error}"))
 }
 
-fn crop_bgra_even(frame: &crate::capture::CaptureFrameBytes) -> Result<(Vec<u8>, u32, u32), String> {
+fn crop_bgra_even(
+    frame: &crate::capture::CaptureFrameSnapshot,
+) -> Result<(Cow<'_, [u8]>, u32, u32), String> {
     let width = frame.frame_width;
     let height = frame.frame_height;
     let target_width = width - (width % 2);
@@ -530,7 +540,7 @@ fn crop_bgra_even(frame: &crate::capture::CaptureFrameBytes) -> Result<(Vec<u8>,
         ));
     }
     if target_width == width && target_height == height {
-        return Ok((frame.encoded_bytes.clone(), width, height));
+        return Ok((Cow::Borrowed(frame.encoded_bytes.as_ref()), width, height));
     }
     let src_row_bytes = width as usize * 4;
     let dst_row_bytes = target_width as usize * 4;
@@ -541,7 +551,7 @@ fn crop_bgra_even(frame: &crate::capture::CaptureFrameBytes) -> Result<(Vec<u8>,
         cropped[dst_offset..dst_offset + dst_row_bytes]
             .copy_from_slice(&frame.encoded_bytes[src_offset..src_offset + dst_row_bytes]);
     }
-    Ok((cropped, target_width, target_height))
+    Ok((Cow::Owned(cropped), target_width, target_height))
 }
 
 fn crop_rgb_even(rgb_bytes: &[u8], width: u32, height: u32) -> Result<(Vec<u8>, u32, u32), String> {
@@ -578,8 +588,10 @@ fn crop_rgb_even(rgb_bytes: &[u8], width: u32, height: u32) -> Result<(Vec<u8>, 
     Ok((cropped, target_width, target_height))
 }
 
-fn decode_jpeg_to_rgb(frame: &crate::capture::CaptureFrameBytes) -> Result<(Vec<u8>, u32, u32), String> {
-    let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(&frame.encoded_bytes));
+fn decode_jpeg_to_rgb(
+    frame: &crate::capture::CaptureFrameSnapshot,
+) -> Result<(Vec<u8>, u32, u32), String> {
+    let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(frame.encoded_bytes.as_ref()));
     let decoded = decoder
         .decode()
         .map_err(|error| format!("native sender jpeg decode failed: {error}"))?;
@@ -599,11 +611,11 @@ fn decode_jpeg_to_rgb(frame: &crate::capture::CaptureFrameBytes) -> Result<(Vec<
 
 fn encode_h264_sample_from_capture_frame(
     encoder: &mut Encoder,
-    frame: &crate::capture::CaptureFrameBytes,
+    frame: &crate::capture::CaptureFrameSnapshot,
 ) -> Result<(Vec<u8>, FrameType), String> {
     let yuv = if frame.mime_type == "application/x-rd-raw-bgra" {
         let (bgra_bytes, width, height) = crop_bgra_even(frame)?;
-        let bgra = BgraSliceU8::new(&bgra_bytes, (width as usize, height as usize));
+        let bgra = BgraSliceU8::new(bgra_bytes.as_ref(), (width as usize, height as usize));
         YUVBuffer::from_rgb_source(bgra)
     } else if frame.mime_type.eq_ignore_ascii_case("image/jpeg") {
         let (rgb_bytes, width, height) = decode_jpeg_to_rgb(frame)?;
@@ -666,7 +678,8 @@ fn collect_webrtc_outbound_rtp_snapshot(
                 if stats.kind == "video" {
                     snapshot.report_count = snapshot.report_count.saturating_add(1);
                     snapshot.bytes_sent = snapshot.bytes_sent.saturating_add(stats.bytes_sent);
-                    snapshot.packets_sent = snapshot.packets_sent.saturating_add(stats.packets_sent);
+                    snapshot.packets_sent =
+                        snapshot.packets_sent.saturating_add(stats.packets_sent);
                     snapshot.header_bytes_sent = snapshot
                         .header_bytes_sent
                         .saturating_add(stats.header_bytes_sent);
@@ -740,16 +753,18 @@ fn enqueue_outbound_signal(
     }
     runtime.outbound_signal_seq = runtime.outbound_signal_seq.saturating_add(1);
     let trace_id = format!("ns-{}-{}", now_ms(), runtime.outbound_signal_seq);
-    runtime.outbound_signals.push_back(NativeSenderOutgoingSignal {
-        session_id: session_id.to_string(),
-        signal_type: signal_type.to_string(),
-        signal_direction: "outbound".to_string(),
-        trace_id: trace_id.clone(),
-        sdp: sdp.to_string(),
-        candidate: candidate.to_string(),
-        sdp_mid: sdp_mid.to_string(),
-        sdp_mline_index,
-    });
+    runtime
+        .outbound_signals
+        .push_back(NativeSenderOutgoingSignal {
+            session_id: session_id.to_string(),
+            signal_type: signal_type.to_string(),
+            signal_direction: "outbound".to_string(),
+            trace_id: trace_id.clone(),
+            sdp: sdp.to_string(),
+            candidate: candidate.to_string(),
+            sdp_mid: sdp_mid.to_string(),
+            sdp_mline_index,
+        });
     while runtime.outbound_signals.len() > 1024 {
         runtime.outbound_signals.pop_front();
     }
@@ -855,7 +870,11 @@ fn create_shadow_peer_connection(
                         "webrtc.local_ice.queued",
                         format!(
                             "session={} candidate_type={} protocol={} mid={} mline={}",
-                            session_id, candidate_type, candidate_protocol, sdp_mid, sdp_mline_index
+                            session_id,
+                            candidate_type,
+                            candidate_protocol,
+                            sdp_mid,
+                            sdp_mline_index
                         ),
                     );
                 }
@@ -873,9 +892,8 @@ fn create_shadow_peer_connection(
             mime_type: MIME_TYPE_H264.to_string(),
             clock_rate: 90_000,
             channels: 0,
-            sdp_fmtp_line:
-                "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
-                    .to_string(),
+            sdp_fmtp_line: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
+                .to_string(),
             ..Default::default()
         },
         "rd-native-video".to_string(),
@@ -1090,13 +1108,12 @@ fn create_and_queue_local_offer(session_id: &str, ice_restart: bool) -> Result<S
             .clone()
             .ok_or_else(|| "native sender peer connection runtime unavailable".to_string())?
     };
-    let offer = tauri::async_runtime::block_on(peer_connection.create_offer(Some(
-        RTCOfferOptions {
+    let offer =
+        tauri::async_runtime::block_on(peer_connection.create_offer(Some(RTCOfferOptions {
             ice_restart,
             voice_activity_detection: false,
-        },
-    )))
-    .map_err(|error| format!("native sender create_offer failed: {error}"))?;
+        })))
+        .map_err(|error| format!("native sender create_offer failed: {error}"))?;
     let sdp = offer.sdp.clone();
     tauri::async_runtime::block_on(peer_connection.set_local_description(offer))
         .map_err(|error| format!("native sender set_local_description(offer) failed: {error}"))?;
@@ -1140,7 +1157,12 @@ fn create_and_queue_local_answer(session_id: &str) -> Result<String, String> {
         .unwrap_or_else(|| "-".to_string());
     trace_native_sender(
         "webrtc.local_answer.queued",
-        format!("session={} trace={} sdp_len={}", session_id, trace_id, sdp.len()),
+        format!(
+            "session={} trace={} sdp_len={}",
+            session_id,
+            trace_id,
+            sdp.len()
+        ),
     );
     Ok("queued.local_answer".to_string())
 }
@@ -1171,6 +1193,11 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
             let mut sample_bytes = 0_u64;
             let mut sample_captured_frames = 0_u64;
             let mut sample_captured_bytes = 0_u64;
+            let mut sample_loop_count = 0_u64;
+            let mut sample_loop_ms = 0_u64;
+            let mut sample_capture_ms = 0_u64;
+            let mut sample_encode_ms = 0_u64;
+            let mut sample_write_ms = 0_u64;
             let mut sample_started_at = now_ms();
             let mut first_frame_logged = false;
             let mut h264_encoder: Option<Encoder> = None;
@@ -1202,8 +1229,11 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                     break;
                 }
 
-                match crate::capture::capture_take_frame_bytes() {
+                let capture_started_at = now_ms();
+                match crate::capture::capture_take_frame_snapshot() {
                     Ok(frame) => {
+                        sample_capture_ms = sample_capture_ms
+                            .saturating_add(now_ms().saturating_sub(capture_started_at));
                         let frame_bytes = frame.encoded_bytes.len() as u64;
                         sample_captured_frames = sample_captured_frames.saturating_add(1);
                         sample_captured_bytes = sample_captured_bytes.saturating_add(frame_bytes);
@@ -1272,16 +1302,22 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                                     encoder.force_intra_frame();
                                 }
                                 force_intra_counter = force_intra_counter.saturating_add(1);
+                                let encode_started_at = now_ms();
                                 let encoded = encode_h264_sample_from_capture_frame(encoder, &frame);
+                                sample_encode_ms = sample_encode_ms
+                                    .saturating_add(now_ms().saturating_sub(encode_started_at));
                                 match encoded {
                                     Ok((bitstream, frame_type)) => {
                                         let mut sample = webrtc::media::Sample::default();
                                         let sample_len_bytes = bitstream.len() as u64;
                                         sample.data = bitstream.into();
                                         sample.duration = Duration::from_millis(frame_duration_ms);
+                                        let write_started_at = now_ms();
                                         let write_result = tauri::async_runtime::block_on(
                                             track.write_sample(&sample),
                                         );
+                                        sample_write_ms = sample_write_ms
+                                            .saturating_add(now_ms().saturating_sub(write_started_at));
                                         match write_result {
                                             Ok(()) => {
                                                 published_frames = published_frames.saturating_add(1);
@@ -1346,6 +1382,8 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                         }
                     }
                     Err(detail) => {
+                        sample_capture_ms = sample_capture_ms
+                            .saturating_add(now_ms().saturating_sub(capture_started_at));
                         if let Ok(mut state) = native_sender_state().lock() {
                             state.media_probe_running = true;
                             state.last_error_code =
@@ -1355,6 +1393,10 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                         }
                     }
                 }
+
+                let loop_elapsed_ms = now_ms().saturating_sub(loop_started_at);
+                sample_loop_count = sample_loop_count.saturating_add(1);
+                sample_loop_ms = sample_loop_ms.saturating_add(loop_elapsed_ms);
 
                 let elapsed = now.saturating_sub(sample_started_at);
                 if elapsed >= NATIVE_SENDER_PROBE_SAMPLE_WINDOW_MS {
@@ -1454,10 +1496,17 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                             format!("webrtc_stats=error detail={}", detail.replace('\n', " "))
                         }
                     };
+                    let avg_ms = |total: u64, count: u64| -> f64 {
+                        if count > 0 {
+                            total as f64 / count as f64
+                        } else {
+                            0.0
+                        }
+                    };
                     trace_native_sender(
                         "probe.sample",
                         format!(
-                            "session={} fps={:.2} kbps={:.1} frames={} bytes={} captured_frames={} captured_bytes={} {}",
+                            "session={} fps={:.2} kbps={:.1} frames={} bytes={} captured_frames={} captured_bytes={} loop_ms_avg={:.1} capture_ms_avg={:.1} encode_ms_avg={:.1} write_ms_avg={:.1} target_ms={} wait_ms_last={} {}",
                             session_for_thread,
                             fps,
                             kbps,
@@ -1465,6 +1514,12 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                             sample_bytes,
                             sample_captured_frames,
                             sample_captured_bytes,
+                            avg_ms(sample_loop_ms, sample_loop_count),
+                            avg_ms(sample_capture_ms, sample_loop_count),
+                            avg_ms(sample_encode_ms, sample_captured_frames),
+                            avg_ms(sample_write_ms, sample_frames),
+                            loop_target_interval_ms,
+                            loop_wait_ms,
                             outbound_sample_log
                         ),
                     );
@@ -1472,9 +1527,13 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                     sample_bytes = 0;
                     sample_captured_frames = 0;
                     sample_captured_bytes = 0;
+                    sample_loop_count = 0;
+                    sample_loop_ms = 0;
+                    sample_capture_ms = 0;
+                    sample_encode_ms = 0;
+                    sample_write_ms = 0;
                     sample_started_at = now;
                 }
-                let loop_elapsed_ms = now_ms().saturating_sub(loop_started_at);
                 loop_wait_ms = loop_target_interval_ms.saturating_sub(loop_elapsed_ms);
             }
 

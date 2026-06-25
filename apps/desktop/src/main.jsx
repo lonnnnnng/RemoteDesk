@@ -241,7 +241,7 @@ const EMULATOR_SESSION_MAX_SCALE_DOWN_BY = 1.0
 const ANDROID_PHONE_SESSION_PROFILE_INDEX = 1
 const ANDROID_PHONE_SESSION_MAX_WIDTH = 1280
 const ANDROID_PHONE_SESSION_MAX_HEIGHT = 720
-const ANDROID_PHONE_SESSION_MAX_FPS = 20
+const ANDROID_PHONE_SESSION_MAX_FPS = 24
 const ANDROID_PHONE_SESSION_MAX_BITRATE = 5200000
 const ANDROID_PHONE_SESSION_MAX_SCALE_DOWN_BY = 1.15
 const CAPTURE_FRAME_INTERVAL_MS = 1200
@@ -2146,7 +2146,7 @@ function resolveInitialAdaptiveProfileIndex() {
   if (currentSessionControllerProfile() === "emulator") {
     return EMULATOR_SESSION_PROFILE_INDEX
   }
-  // long: Android 真机控制 Mac 时以 720p/20fps 均衡档起步，后续仍交给自适应逻辑按实测 FPS/RTT 升降级，避免首屏清晰度被模拟器策略拖低。
+  // long: Android 真机控制 Mac 时以 720p/24fps 均衡档起步，先满足肉眼流畅线，再由自适应逻辑按实测 FPS/RTT 做保护。
   if (currentSessionControllerProfile() === "android_phone") {
     return ANDROID_PHONE_SESSION_PROFILE_INDEX
   }
@@ -2156,6 +2156,10 @@ function resolveInitialAdaptiveProfileIndex() {
 function minAdaptiveProfileIndexForCurrentSession() {
   if (currentSessionControllerProfile() === "emulator") {
     return EMULATOR_SESSION_MIN_PROFILE_INDEX
+  }
+  // long: Android 真机路线的最低画质守在 720p 均衡档，避免启动预热样本把 Mac 画面降到 480p 后长时间不清晰。
+  if (currentSessionControllerProfile() === "android_phone") {
+    return ANDROID_PHONE_SESSION_PROFILE_INDEX
   }
   return 0
 }
