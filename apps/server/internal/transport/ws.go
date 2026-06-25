@@ -39,6 +39,7 @@ var targetE2ERoutes = []struct {
 	label string
 }{
 	{key: "android_to_windows", label: "android->windows"},
+	{key: "android_to_macos", label: "android->macos"},
 	{key: "windows_to_windows", label: "windows->windows"},
 	{key: "windows_to_macos", label: "windows->macos"},
 }
@@ -916,6 +917,12 @@ func (h *Hub) recordSessionE2EProofLocked(now time.Time, combined map[string]any
 	if value, ok := asTrimmedString(combined["session_perf_summary"]); ok {
 		record.SessionPerfSummary = value
 	}
+	if h.e2eLatest == nil {
+		h.e2eLatest = make(map[string]sessionE2EProofRecord)
+	}
+	if h.e2eSuccess == nil {
+		h.e2eSuccess = make(map[string]sessionE2EProofRecord)
+	}
 	h.e2eLatest[routeKey] = record
 	if record.ProofStatus == "video_and_input_observed" && remoteInputCoverageComplete(record.RemoteInputCoverage) {
 		h.e2eSuccess[routeKey] = record
@@ -1768,7 +1775,7 @@ func deriveSessionE2ERoute(
 
 func isTargetE2ERoute(routeKey string) bool {
 	switch routeKey {
-	case "android_to_windows", "windows_to_windows", "windows_to_macos":
+	case "android_to_windows", "android_to_macos", "windows_to_windows", "windows_to_macos":
 		return true
 	default:
 		return false

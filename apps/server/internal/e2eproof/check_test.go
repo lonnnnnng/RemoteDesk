@@ -10,8 +10,8 @@ func TestCheckSnapshotComplete(t *testing.T) {
 	snapshot := Snapshot{
 		Event:                "session.e2e_proof.snapshot",
 		Complete:             true,
-		TargetRoutesComplete: 3,
-		TargetRoutesTotal:    3,
+		TargetRoutesComplete: len(RequiredRoutes()),
+		TargetRoutesTotal:    len(RequiredRoutes()),
 	}
 	for _, key := range RequiredRoutes() {
 		snapshot.Routes = append(snapshot.Routes, RouteState{
@@ -46,7 +46,7 @@ func TestCheckSnapshotRequiresEveryRouteAndInputCategory(t *testing.T) {
 		Event:                "session.e2e_proof.snapshot",
 		Complete:             false,
 		TargetRoutesComplete: 1,
-		TargetRoutesTotal:    3,
+		TargetRoutesTotal:    len(RequiredRoutes()),
 		Routes: []RouteState{
 			{
 				RouteKey: "android_to_windows",
@@ -79,6 +79,7 @@ func TestCheckSnapshotRequiresEveryRouteAndInputCategory(t *testing.T) {
 	for _, expected := range []string{
 		"snapshot complete=false",
 		"android_to_windows: missing remote_input_coverage=drag,wheel",
+		"android_to_macos: missing from snapshot",
 		"windows_to_windows: route complete=false",
 		"windows_to_windows: missing last_success proof",
 		"windows_to_macos: missing from snapshot",
@@ -94,7 +95,7 @@ func TestCheckResetSnapshotRequiresEmptyProofState(t *testing.T) {
 		Event:                "session.e2e_proof.snapshot",
 		Complete:             false,
 		TargetRoutesComplete: 0,
-		TargetRoutesTotal:    3,
+		TargetRoutesTotal:    len(RequiredRoutes()),
 	}
 	for _, key := range RequiredRoutes() {
 		clean.Routes = append(clean.Routes, RouteState{
@@ -137,8 +138,8 @@ func TestDecodeSnapshotIgnoresRelayProofExtraFields(t *testing.T) {
 	body := []byte(`{
 		"event": "session.e2e_proof.snapshot",
 		"complete": true,
-		"target_routes_complete": 3,
-		"target_routes_total": 3,
+		"target_routes_complete": 4,
+		"target_routes_total": 4,
 		"routes": [
 			{
 				"route_key": "android_to_windows",
@@ -169,6 +170,29 @@ func TestDecodeSnapshotIgnoresRelayProofExtraFields(t *testing.T) {
 					"session_e2e_proof_summary": "ok",
 					"session_perf_summary": "ok",
 					"updated_at": "2026-05-29T00:00:00Z"
+				}
+			},
+			{
+				"route_key": "android_to_macos",
+				"route": "android -> macos",
+				"status": "complete",
+				"complete": true,
+				"last_success": {
+					"route_key": "android_to_macos",
+					"route": "android -> macos",
+					"target_route": true,
+					"proof_status": "video_and_input_observed",
+					"video_observed": true,
+					"input_observed": true,
+					"session_id": "sess-android-mac",
+					"controller_device_id": "android-1",
+					"agent_device_id": "macos-1",
+					"controller_platform": "android",
+					"agent_platform": "macos",
+					"remote_input_executor": "macos.cg_event",
+					"remote_input_status": "applied",
+					"remote_input_coverage": ["click", "drag", "keyboard", "wheel"],
+					"session_quality_hint": "stable"
 				}
 			},
 			{

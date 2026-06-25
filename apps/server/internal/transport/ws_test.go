@@ -1205,8 +1205,8 @@ func TestUpsertSessionMetricsIncludesBridgeSummary(t *testing.T) {
 	if route, _ := combined["session_e2e_route"].(string); route != "android->macos" {
 		t.Fatalf("expected session_e2e_route=android->macos, got %#v", combined["session_e2e_route"])
 	}
-	if targetRoute, ok := combined["session_e2e_target_route"].(bool); !ok || targetRoute {
-		t.Fatalf("expected session_e2e_target_route=false, got %#v", combined["session_e2e_target_route"])
+	if targetRoute, ok := combined["session_e2e_target_route"].(bool); !ok || !targetRoute {
+		t.Fatalf("expected session_e2e_target_route=true, got %#v", combined["session_e2e_target_route"])
 	}
 	if proofSummary, _ := combined["session_e2e_proof_summary"].(string); !strings.Contains(proofSummary, "route_key=android_to_macos") {
 		t.Fatalf("expected session_e2e_proof_summary with route key, got %#v", combined["session_e2e_proof_summary"])
@@ -1522,7 +1522,7 @@ func TestDeriveSessionE2ERoute(t *testing.T) {
 			wantAgentSource:      true,
 		},
 		{
-			name: "android to macos non-target",
+			name: "android to macos target",
 			controllerReport: map[string]any{
 				"source_platform": "android",
 			},
@@ -1533,6 +1533,7 @@ func TestDeriveSessionE2ERoute(t *testing.T) {
 			wantAgent:            "macos",
 			wantRouteKey:         "android_to_macos",
 			wantRoute:            "android->macos",
+			wantTargetRoute:      true,
 			wantRouteAvailable:   true,
 			wantControllerSource: true,
 			wantAgentSource:      true,
@@ -1584,6 +1585,7 @@ func TestHubE2EProofSnapshotTracksTargetRoutes(t *testing.T) {
 	}
 
 	seedCombinedMetricsForRoute(t, hub, "sess-android-windows-ok", "android", "windows", "windows.send_input", true)
+	seedCombinedMetricsForRoute(t, hub, "sess-android-macos-ok", "android", "macos", "macos.cg_event", true)
 	seedCombinedMetricsForRoute(t, hub, "sess-windows-windows-ok", "windows", "windows", "windows.send_input", true)
 	seedCombinedMetricsForRoute(t, hub, "sess-windows-macos-ok", "windows", "macos", "macos.cg_event", true)
 
@@ -1591,10 +1593,10 @@ func TestHubE2EProofSnapshotTracksTargetRoutes(t *testing.T) {
 	if !snapshot.Complete {
 		t.Fatalf("expected proof snapshot complete, got %#v", snapshot)
 	}
-	if snapshot.TargetRoutesComplete != 3 || snapshot.TargetRoutesTotal != 3 {
-		t.Fatalf("expected target routes 3/3, got %d/%d", snapshot.TargetRoutesComplete, snapshot.TargetRoutesTotal)
+	if snapshot.TargetRoutesComplete != 4 || snapshot.TargetRoutesTotal != 4 {
+		t.Fatalf("expected target routes 4/4, got %d/%d", snapshot.TargetRoutesComplete, snapshot.TargetRoutesTotal)
 	}
-	for _, routeKey := range []string{"android_to_windows", "windows_to_windows", "windows_to_macos"} {
+	for _, routeKey := range []string{"android_to_windows", "android_to_macos", "windows_to_windows", "windows_to_macos"} {
 		state := findProofRouteState(t, snapshot, routeKey)
 		if !state.Complete {
 			t.Fatalf("expected route %s complete, got %#v", routeKey, state)
@@ -1622,7 +1624,7 @@ func TestHubE2EProofSnapshotTracksTargetRoutes(t *testing.T) {
 	if androidWindows.Status != "complete" || androidWindows.NextAction != "done" || len(androidWindows.Missing) != 0 {
 		t.Fatalf("expected completed android_to_windows to keep done diagnostics after failed retry, got status=%q next=%q missing=%#v", androidWindows.Status, androidWindows.NextAction, androidWindows.Missing)
 	}
-	if !snapshot.Complete || snapshot.TargetRoutesComplete != 3 {
+	if !snapshot.Complete || snapshot.TargetRoutesComplete != 4 {
 		t.Fatalf("expected snapshot to remain complete after failed retry, got %#v", snapshot)
 	}
 }
@@ -1760,8 +1762,8 @@ func TestHubE2EProofEndpoint(t *testing.T) {
 	if snapshot.Complete {
 		t.Fatalf("expected empty proof snapshot incomplete, got %#v", snapshot)
 	}
-	if snapshot.TargetRoutesTotal != 3 || len(snapshot.Routes) != 3 {
-		t.Fatalf("expected 3 target routes in empty snapshot, got total=%d len=%d", snapshot.TargetRoutesTotal, len(snapshot.Routes))
+	if snapshot.TargetRoutesTotal != len(targetE2ERoutes) || len(snapshot.Routes) != len(targetE2ERoutes) {
+		t.Fatalf("expected %d target routes in empty snapshot, got total=%d len=%d", len(targetE2ERoutes), snapshot.TargetRoutesTotal, len(snapshot.Routes))
 	}
 }
 
@@ -1799,6 +1801,7 @@ func TestHubE2EProofEndpointRecordsWebSocketMetricsRoute(t *testing.T) {
 	defer server.Close()
 
 	proveRouteThroughWebSocketMetrics(t, server, "android_to_windows", "android", "windows", "windows.send_input")
+	proveRouteThroughWebSocketMetrics(t, server, "android_to_macos", "android", "macos", "macos.cg_event")
 	proveRouteThroughWebSocketMetrics(t, server, "windows_to_windows", "windows", "windows", "windows.send_input")
 	proveRouteThroughWebSocketMetrics(t, server, "windows_to_macos", "windows", "macos", "macos.cg_event")
 
@@ -1814,7 +1817,7 @@ func TestHubE2EProofEndpointRecordsWebSocketMetricsRoute(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&snapshot); err != nil {
 		t.Fatalf("decode e2e-proof failed: %v", err)
 	}
-	if !snapshot.Complete || snapshot.TargetRoutesComplete != 3 {
+	if !snapshot.Complete || snapshot.TargetRoutesComplete != 4 {
 		t.Fatalf("expected complete proof snapshot, got %#v", snapshot)
 	}
 	for _, route := range []struct {
@@ -1823,6 +1826,7 @@ func TestHubE2EProofEndpointRecordsWebSocketMetricsRoute(t *testing.T) {
 		agentDeviceID      string
 	}{
 		{"android_to_windows", "android-controller", "windows-agent-android"},
+		{"android_to_macos", "android-controller", "macos-agent-android"},
 		{"windows_to_windows", "windows-controller", "windows-agent-windows"},
 		{"windows_to_macos", "windows-controller-macos", "macos-agent"},
 	} {

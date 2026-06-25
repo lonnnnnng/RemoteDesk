@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	requiredRoutes          = []string{"android_to_windows", "windows_to_windows", "windows_to_macos"}
+	requiredRoutes          = []string{"android_to_windows", "android_to_macos", "windows_to_windows", "windows_to_macos"}
 	requiredInputCategories = []string{"click", "drag", "keyboard", "wheel"}
 )
 

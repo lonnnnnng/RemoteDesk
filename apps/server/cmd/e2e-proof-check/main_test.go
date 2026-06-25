@@ -18,7 +18,7 @@ func TestWaitForProofReturnsIncompleteSnapshot(t *testing.T) {
 			Event:                "session.e2e_proof.snapshot",
 			Complete:             false,
 			TargetRoutesComplete: 0,
-			TargetRoutesTotal:    3,
+			TargetRoutesTotal:    len(e2eproof.RequiredRoutes()),
 		})
 	}))
 	defer server.Close()
@@ -43,7 +43,7 @@ func TestWaitForProofPollsUntilComplete(t *testing.T) {
 		snapshot := completeSnapshot()
 		if requests == 1 {
 			snapshot.Complete = false
-			snapshot.TargetRoutesComplete = 2
+			snapshot.TargetRoutesComplete = len(e2eproof.RequiredRoutes()) - 1
 			snapshot.Routes[2].Complete = false
 			snapshot.Routes[2].Status = "video_only"
 			snapshot.Routes[2].Missing = []string{"input"}
@@ -114,8 +114,8 @@ func completeSnapshot() e2eproof.Snapshot {
 	snapshot := e2eproof.Snapshot{
 		Event:                "session.e2e_proof.snapshot",
 		Complete:             true,
-		TargetRoutesComplete: 3,
-		TargetRoutesTotal:    3,
+		TargetRoutesComplete: len(e2eproof.RequiredRoutes()),
+		TargetRoutesTotal:    len(e2eproof.RequiredRoutes()),
 	}
 	for _, key := range e2eproof.RequiredRoutes() {
 		snapshot.Routes = append(snapshot.Routes, e2eproof.RouteState{
@@ -140,7 +140,7 @@ func incompleteSnapshot() e2eproof.Snapshot {
 		Event:                "session.e2e_proof.snapshot",
 		Complete:             false,
 		TargetRoutesComplete: 0,
-		TargetRoutesTotal:    3,
+		TargetRoutesTotal:    len(e2eproof.RequiredRoutes()),
 	}
 	for _, key := range e2eproof.RequiredRoutes() {
 		snapshot.Routes = append(snapshot.Routes, e2eproof.RouteState{
