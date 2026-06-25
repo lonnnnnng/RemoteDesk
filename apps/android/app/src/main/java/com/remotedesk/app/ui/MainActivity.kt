@@ -2164,7 +2164,11 @@ class MainActivity : AppCompatActivity() {
               ?: payload.optNonBlank("target_device_id")
               ?: binding.targetDeviceInput.text.toString().trim()
             if (maybeOfflineId.isNotBlank()) {
-              handleTargetDeviceOffline(maybeOfflineId, source = "session.end.push")
+              val recoveryStarted = handleTargetDeviceOffline(maybeOfflineId, source = "session.end.push")
+              if (recoveryStarted) {
+                appendLog("会话结束：$reason，已进入短断线恢复")
+                return
+              }
             }
           }
           pendingSessionRequest = false
@@ -4147,7 +4151,7 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
-  private fun handleTargetDeviceOffline(offlineDeviceId: String, source: String) {
+  private fun handleTargetDeviceOffline(offlineDeviceId: String, source: String): Boolean {
     val targetDeviceId = when {
       hasActiveSession() && !activeSessionPeerDeviceId.isNullOrBlank() -> activeSessionPeerDeviceId.orEmpty()
       else -> binding.targetDeviceInput.text.toString().trim()
@@ -4158,13 +4162,13 @@ class MainActivity : AppCompatActivity() {
     appendLog("目标设备离线（$offlineDeviceId），来源=$source")
 
     if (targetDeviceId != offlineDeviceId) {
-      return
+      return false
     }
     val wasSessionActive = hasActiveSession() || pendingSessionRequest
     if (!wasSessionActive) {
       setStatus(readyStatusText("目标设备离线"))
       updateSessionButtonState()
-      return
+      return false
     }
     val shouldRecover = rememberSessionRecoveryIntent(reason = "target_offline_$source")
     pendingSessionRequest = false
@@ -4177,7 +4181,7 @@ class MainActivity : AppCompatActivity() {
       setStatus("短断线恢复等待目标上线")
       updateSessionButtonState()
       scheduleSessionRecoveryTargetWait(source = "target_offline_$source", targetDeviceId = targetDeviceId)
-      return
+      return true
     }
     clearSessionRecoveryIntent("target_offline_$source")
     resetSessionUi(clearFrame = true)
@@ -4185,6 +4189,7 @@ class MainActivity : AppCompatActivity() {
     setStatus(readyStatusText("目标设备离线"))
     updateSessionButtonState()
     appendLog("当前控制目标已离线，已自动关闭远端画面")
+    return false
   }
 
   private fun readyStatusText(base: String): String {
