@@ -241,6 +241,8 @@ const EMULATOR_SESSION_MAX_SCALE_DOWN_BY = 1.0
 const CAPTURE_FRAME_INTERVAL_MS = 1200
 const AUTO_CONNECT_DELAY_MS = 1200
 const SETTINGS_AUTO_CONNECT_DELAY_MS = 500
+const WS_RECONNECT_INITIAL_DELAY_MS = 1000
+const WS_RECONNECT_MAX_DELAY_MS = 15000
 const AUTO_SEND_DEDUP_MS = 1200
 const MAX_INCOMING_FRAME_B64_LENGTH = 12 * 1024 * 1024
 const MAX_INCOMING_FRAME_DIMENSION = 4096
@@ -381,6 +383,8 @@ const state = {
   autoBootstrapped: false,
   autoConnectTimer: null,
   settingsAutoConnectTimer: null,
+  wsReconnectTimer: null,
+  wsReconnectAttempt: 0,
   connectionKey: "",
   connectAttemptSeq: 0,
   lastRegisterAt: 0,
@@ -2352,6 +2356,39 @@ function clearAutoConnectTimer() {
     window.clearTimeout(state.autoConnectTimer)
     state.autoConnectTimer = null
   }
+}
+
+function clearWsReconnectTimer(options = {}) {
+  if (state.wsReconnectTimer) {
+    window.clearTimeout(state.wsReconnectTimer)
+    state.wsReconnectTimer = null
+  }
+  if (options.resetAttempt) {
+    state.wsReconnectAttempt = 0
+  }
+}
+
+function wsReconnectDelayForAttempt(attempt) {
+  const shift = Math.min(Math.max(attempt - 1, 0), 4)
+  return Math.min(WS_RECONNECT_INITIAL_DELAY_MS * (2 ** shift), WS_RECONNECT_MAX_DELAY_MS)
+}
+
+function scheduleWsReconnect(source = "closed") {
+  if (!state.autoConnect || !isValidRelayWsUrl(state.wsUrl) || state.wsReconnectTimer || connectionReady()) {
+    return
+  }
+  state.wsReconnectAttempt += 1
+  const attempt = state.wsReconnectAttempt
+  const delayMs = wsReconnectDelayForAttempt(attempt)
+  appendLog(`WebSocket 已断开，${delayMs}ms 后自动重连（第 ${attempt} 次，来源=${source}）`)
+  state.wsReconnectTimer = window.setTimeout(() => {
+    state.wsReconnectTimer = null
+    if (!state.autoConnect || connectionReady()) {
+      return
+    }
+    void connect({ source: "reconnect" })
+  }, delayMs)
+  render()
 }
 
 function scheduleAutoConnect() {
@@ -9034,6 +9071,7 @@ async function connect(options = {}) {
     device_id: state.deviceId,
   })
   clearAutoConnectTimer()
+  clearWsReconnectTimer({ resetAttempt: options.source !== "reconnect" })
   if (state.settingsAutoConnectTimer) {
     window.clearTimeout(state.settingsAutoConnectTimer)
     state.settingsAutoConnectTimer = null
@@ -9127,6 +9165,10 @@ async function connect(options = {}) {
     if (state.ws !== socket) {
       return
     }
+    if (state.wsReconnectAttempt > 0) {
+      appendLog(`WebSocket 自动重连成功（第 ${state.wsReconnectAttempt} 次尝试）`)
+    }
+    state.wsReconnectAttempt = 0
     appendLog("WebSocket 已连接")
     traceLog("ws.open", {
       ws_url: state.wsUrl,
@@ -9186,6 +9228,7 @@ async function connect(options = {}) {
       was_clean: event?.wasClean ?? false,
     })
     render()
+    scheduleWsReconnect("close")
   }
 
   socket.onerror = (event) => {

@@ -103,7 +103,11 @@ class MainActivity : AppCompatActivity() {
     private const val LIVE_E2E_PROOF_REPORT_MIN_INTERVAL_MS = 1500L
     private const val LEGACY_FRAME_IGNORED_LOG_INTERVAL_MS = 3000L
     private const val LEGACY_DECODE_FAILURE_UI_INTERVAL_MS = 1200L
-    private const val RELAY_RECONNECT_DELAY_MS = 2000L
+    private const val RELAY_RECONNECT_INITIAL_DELAY_MS = 1000L
+    private const val RELAY_RECONNECT_MAX_DELAY_MS = 15000L
+    private const val RELAY_SESSION_RECOVERY_DELAY_MS = 800L
+    private const val RELAY_SESSION_RECOVERY_RETRY_DELAY_MS = 2500L
+    private const val RELAY_SESSION_RECOVERY_MAX_ATTEMPTS = 6
     private const val RTC_NEGOTIATION_OWNER_UNKNOWN = "unknown"
     private const val RTC_NEGOTIATION_OWNER_CONTROLLER = "controller"
     private const val RTC_NEGOTIATION_OWNER_REMOTE = "remote"
@@ -165,6 +169,14 @@ class MainActivity : AppCompatActivity() {
   private var autoRequestSentForTargetDeviceId = ""
   private var autoProofInputSentForSessionId = ""
   private var reconnectScheduled = false
+  private var reconnectAttempt = 0
+  private var reconnectShouldRestoreSession = false
+  private var reconnectTargetDeviceId: String? = null
+  private var reconnectSessionRestoreScheduled = false
+  private var reconnectSessionRestoreAttempt = 0
+  private var isRecoveringSession = false
+  private var pendingSessionRequestIsRecovery = false
+  private var sessionEndRequestedByUser = false
   private var sessionClockToken = 0L
   private var lastDevicesPushAtMs = 0L
   private val rtcPendingRemoteCandidates = ArrayDeque<IceCandidate>()
@@ -306,6 +318,10 @@ class MainActivity : AppCompatActivity() {
         if (!isActivityAlive) {
           return@runOnUiThread
         }
+        if (reconnectAttempt > 0) {
+          appendLog("中继信令已自动重连成功（第 $reconnectAttempt 次尝试）")
+        }
+        reconnectAttempt = 0
         isSocketConnected = true
         isRegistered = false
         isPresenceReady = false
@@ -546,6 +562,7 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun handleDisconnectedState(statusLine: String, logLine: String) {
+    val shouldRestoreSession = rememberSessionRecoveryIntent(reason = "signal_disconnected")
     isSocketConnected = false
     if (normalizeWsUrl(binding.wsUrlInput.text.toString()).isBlank()) {
       lastAutoConnectUrl = null
@@ -555,6 +572,7 @@ class MainActivity : AppCompatActivity() {
     token = "stub-token"
     pendingSessionRequest = false
     pendingSessionRequestId = null
+    pendingSessionRequestIsRecovery = false
     autoRequestSentForTargetDeviceId = ""
     autoProofInputSentForSessionId = ""
     autoProofHandler.removeCallbacksAndMessages(null)
@@ -562,9 +580,15 @@ class MainActivity : AppCompatActivity() {
     lastDevicesUrl = null
     releaseRemoteInputState(sendMouseUp = false)
     binding.tokenText.text = "访问凭证：未注册"
-    closeWebRtcSession(reason = "signal_disconnected")
-    resetSessionUi(clearFrame = true)
-    setStatus(statusLine)
+    closeWebRtcSession(reason = "signal_disconnected", clearRendererImage = !shouldRestoreSession)
+    resetSessionUi(clearFrame = !shouldRestoreSession)
+    if (shouldRestoreSession) {
+      isRecoveringSession = true
+      binding.frameMetaText.text = "当前画面：信令短断，正在自动恢复，输入已暂停"
+      setStatus("短断线恢复中")
+    } else {
+      setStatus(statusLine)
+    }
     updateDevicesStatus(
       if (relayDevices.isEmpty()) {
         "连接关闭后无法确认设备在线状态；重新连接后可再次同步。"
@@ -610,7 +634,7 @@ class MainActivity : AppCompatActivity() {
     rtcEglBase = null
   }
 
-  private fun closeWebRtcSession(reason: String = "reset") {
+  private fun closeWebRtcSession(reason: String = "reset", clearRendererImage: Boolean = true) {
     stopRtcWatchdog(resetState = false)
     val closingSessionId = rtcCurrentSessionId
     if (!closingSessionId.isNullOrBlank()) {
@@ -634,7 +658,9 @@ class MainActivity : AppCompatActivity() {
     resetRtcNetworkStats()
     resetLegacyFrameStats()
     resetLegacyFailureThrottleState()
-    binding.remoteVideoView.clearImage()
+    if (clearRendererImage) {
+      binding.remoteVideoView.clearImage()
+    }
     updateLiveMetricsPanel()
   }
 
@@ -1826,6 +1852,7 @@ class MainActivity : AppCompatActivity() {
           )
           updateSessionButtonState()
           appendLog("心跳成功，状态=$deviceStatus")
+          maybeScheduleReconnectSessionRestore(source = "presence_ready")
           maybeScheduleAutoRequestSession()
         }
         "device.presence.push" -> {
@@ -1843,8 +1870,10 @@ class MainActivity : AppCompatActivity() {
             return
           }
           val result = payload.optNonBlank("result") ?: "unknown"
+          val wasRecoveryRequest = pendingSessionRequestIsRecovery
           pendingSessionRequest = false
           pendingSessionRequestId = null
+          pendingSessionRequestIsRecovery = false
           sessionId = if (result == "approved") {
             payload.optNonBlank("session_id")
           } else {
@@ -1853,13 +1882,23 @@ class MainActivity : AppCompatActivity() {
           updateSessionText()
           updateSessionButtonState()
           if (result != "approved") {
-            setStatus(readyStatusText("会话未建立"))
+            if (wasRecoveryRequest && reconnectSessionRestoreAttempt < RELAY_SESSION_RECOVERY_MAX_ATTEMPTS) {
+              isRecoveringSession = true
+              setStatus("短断线恢复待重试")
+              maybeScheduleReconnectSessionRestore(source = "session_request_$result")
+            } else {
+              clearSessionRecoveryIntent("session_request_$result")
+              setStatus(readyStatusText("会话未建立"))
+            }
           }
           appendLog("会话请求结果：$result${sessionId?.let { " session=$it" } ?: ""}")
         }
         "session.start.push" -> {
           pendingSessionRequest = false
           pendingSessionRequestId = null
+          pendingSessionRequestIsRecovery = false
+          clearSessionRecoveryIntent("session_started")
+          sessionEndRequestedByUser = false
           frameGeneration += 1
           sessionId = payload.optNonBlank("session_id") ?: json.optNonBlank("session_id")
           sessionStartedAtWallClockMs = System.currentTimeMillis()
@@ -2018,15 +2057,19 @@ class MainActivity : AppCompatActivity() {
           }
           pendingSessionRequest = false
           pendingSessionRequestId = null
+          pendingSessionRequestIsRecovery = false
           isPresenceReady = true
+          clearSessionRecoveryIntent("session_end_$reason")
           resetSessionUi(clearFrame = true)
           setStatus(readyStatusText("会话已结束"))
           updateSessionButtonState()
           appendLog("会话结束：$reason")
         }
         "error.rsp" -> {
+          val wasRecoveryRequest = pendingSessionRequestIsRecovery
           pendingSessionRequest = false
           pendingSessionRequestId = null
+          pendingSessionRequestIsRecovery = false
           val name = payload.optNonBlank("name") ?: "UNKNOWN"
           val message = payload.optNonBlank("message") ?: "unknown error"
           when (name) {
@@ -2035,14 +2078,22 @@ class MainActivity : AppCompatActivity() {
               isPresenceReady = false
               token = "stub-token"
               binding.tokenText.text = "访问凭证：未注册"
+              clearSessionRecoveryIntent("auth_invalid_token")
               resetSessionUi(clearFrame = true)
               setStatus("鉴权失效，请重新注册")
             }
-            "DEVICE_OFFLINE" -> {
+            "DEVICE_OFFLINE", "DEVICE_NOT_FOUND" -> {
               val maybeOfflineId = payload.optNonBlank("agent_device_id")
                 ?: payload.optNonBlank("target_device_id")
+                ?: payload.optNonBlank("device_id")
                 ?: binding.targetDeviceInput.text.toString().trim()
-              if (maybeOfflineId.isNotBlank()) {
+              if (wasRecoveryRequest && reconnectSessionRestoreAttempt < RELAY_SESSION_RECOVERY_MAX_ATTEMPTS) {
+                isRecoveringSession = true
+                setStatus("短断线恢复待重试")
+                appendLog("短断线恢复：目标暂时离线，继续等待 $maybeOfflineId")
+                refreshDevicesList(force = true)
+                maybeScheduleReconnectSessionRestore(source = "device_offline")
+              } else if (maybeOfflineId.isNotBlank()) {
                 handleTargetDeviceOffline(maybeOfflineId, source = "error.rsp")
               } else if (sessionId.isNullOrBlank()) {
                 setStatus(readyStatusText("目标设备离线"))
@@ -2050,13 +2101,14 @@ class MainActivity : AppCompatActivity() {
             }
             "SESSION_NOT_FOUND", "INPUT_NOT_ALLOWED" -> {
               isPresenceReady = true
+              clearSessionRecoveryIntent("error_$name")
               resetSessionUi(clearFrame = true)
               setStatus(readyStatusText("会话不可用"))
             }
           }
           updateSessionButtonState()
           appendLog("错误：$name - $message")
-          if (name == "DEVICE_OFFLINE" || name == "AUTH_INVALID_TOKEN") {
+          if (name == "DEVICE_OFFLINE" || name == "DEVICE_NOT_FOUND" || name == "AUTH_INVALID_TOKEN") {
             refreshDevicesList(force = true)
           }
         }
@@ -2886,7 +2938,7 @@ class MainActivity : AppCompatActivity() {
     sessionStartedAtWallClockMs = 0L
     stopSessionClockTicker()
     activeSessionPeerDeviceId = null
-    closeWebRtcSession(reason = "reset_session_ui")
+    closeWebRtcSession(reason = "reset_session_ui", clearRendererImage = clearFrame)
     renderedFrameWidth = 0
     renderedFrameHeight = 0
     resetLegacyFrameStats()
@@ -2913,7 +2965,8 @@ class MainActivity : AppCompatActivity() {
   private fun updateSessionButtonState() {
     val hasSession = hasActiveSession()
     val targetDeviceId = binding.targetDeviceInput.text?.toString().orEmpty().trim()
-    val canStartAssist = isSocketConnected && isRegistered && isPresenceReady && targetDeviceId.isNotBlank() && !pendingSessionRequest && !hasSession
+    val canStartAssist = isSocketConnected && isRegistered && isPresenceReady && targetDeviceId.isNotBlank() &&
+      !pendingSessionRequest && !hasSession && !isRecoveringSession
 
     binding.registerButton.isEnabled = isSocketConnected
     binding.heartbeatButton.isEnabled = isSocketConnected && isRegistered
@@ -2929,8 +2982,8 @@ class MainActivity : AppCompatActivity() {
     binding.remoteKeyboardBackspaceButton.isEnabled = hasSession
     binding.remoteKeyboardEnterButton.isEnabled = hasSession
 
-    binding.targetDeviceInput.isEnabled = !hasSession && !pendingSessionRequest
-    binding.remoteFrameCard.isVisible = pendingSessionRequest || hasSession
+    binding.targetDeviceInput.isEnabled = !hasSession && !pendingSessionRequest && !isRecoveringSession
+    binding.remoteFrameCard.isVisible = pendingSessionRequest || hasSession || isRecoveringSession
     if (binding.myDevicesPage.isVisible) {
       renderDeviceList()
     }
@@ -2940,7 +2993,7 @@ class MainActivity : AppCompatActivity() {
     binding.statusText.text = "当前状态：$statusLine"
     binding.topConnectionStatusText.text = "连接状态：${mapTopConnectionStatus(statusLine)}"
     val hasSession = hasActiveSession()
-    binding.remoteFrameCard.isVisible = pendingSessionRequest || hasSession
+    binding.remoteFrameCard.isVisible = pendingSessionRequest || hasSession || isRecoveringSession
   }
 
   private fun mapTopConnectionStatus(statusLine: String): String {
@@ -2950,6 +3003,7 @@ class MainActivity : AppCompatActivity() {
     return when {
       statusLine.contains("连接失败") -> "连接失败"
       statusLine.contains("已关闭") -> "已断开"
+      statusLine.contains("恢复") -> "恢复中"
       statusLine.contains("连接中") -> "连接中"
       else -> "未连接"
     }
@@ -3061,6 +3115,7 @@ class MainActivity : AppCompatActivity() {
             lastDevicesUrl = devicesUrl
             updateDevicesStatus(buildDevicesStatus(relayDevices))
             renderDeviceList()
+            maybeScheduleReconnectSessionRestore(source = "devices_sync")
             if (userInitiated) {
               appendLog("已同步设备列表：${relayDevices.size} 台可控设备")
             }
@@ -3308,6 +3363,7 @@ class MainActivity : AppCompatActivity() {
     lastDevicesPushAtMs = SystemClock.elapsedRealtime()
     updateDevicesStatus(buildDevicesStatus(relayDevices))
     renderDeviceList()
+    maybeScheduleReconnectSessionRestore(source = "presence_push")
     val currentTargetDeviceId = binding.targetDeviceInput.text.toString().trim()
     val targetOnline = currentTargetDeviceId.isNotBlank() &&
       relayDevices.any { it.deviceId == currentTargetDeviceId && it.isReachable() }
@@ -3531,7 +3587,7 @@ class MainActivity : AppCompatActivity() {
 
     val hasSession = hasActiveSession()
     val showDisconnect = hasSession && selected && isOnline && !isSelf
-    val showConnecting = pendingSessionRequest && selected
+    val showConnecting = (pendingSessionRequest || isRecoveringSession) && selected
     val canConnect = canStartAssistNow() && isOnline && !isSelf && device.canReceiveRemoteControl()
     if (!isSelf) {
       Log.i(
@@ -3598,7 +3654,108 @@ class MainActivity : AppCompatActivity() {
 
   private fun canStartAssistNow(): Boolean {
     val hasSession = hasActiveSession()
-    return isSocketConnected && isRegistered && isPresenceReady && !pendingSessionRequest && !hasSession
+    return isSocketConnected && isRegistered && isPresenceReady && !pendingSessionRequest && !hasSession && !isRecoveringSession
+  }
+
+  private fun canRestoreSessionNow(targetDeviceId: String): Boolean {
+    return reconnectShouldRestoreSession &&
+      targetDeviceId.isNotBlank() &&
+      isSocketConnected &&
+      isRegistered &&
+      isPresenceReady &&
+      !pendingSessionRequest &&
+      !hasActiveSession()
+  }
+
+  private fun resolveSessionRecoveryTarget(): String {
+    return when {
+      !activeSessionPeerDeviceId.isNullOrBlank() -> activeSessionPeerDeviceId.orEmpty()
+      !reconnectTargetDeviceId.isNullOrBlank() -> reconnectTargetDeviceId.orEmpty()
+      else -> binding.targetDeviceInput.text?.toString().orEmpty().trim()
+    }.trim()
+  }
+
+  private fun rememberSessionRecoveryIntent(reason: String): Boolean {
+    val targetDeviceId = resolveSessionRecoveryTarget()
+    val hadSessionIntent = hasActiveSession() || pendingSessionRequest || reconnectShouldRestoreSession || isRecoveringSession
+    if (sessionEndRequestedByUser || !hadSessionIntent || targetDeviceId.isBlank()) {
+      return false
+    }
+    val wasAlreadyRecovering = reconnectShouldRestoreSession || isRecoveringSession
+    reconnectShouldRestoreSession = true
+    reconnectTargetDeviceId = targetDeviceId
+    isRecoveringSession = true
+    reconnectSessionRestoreScheduled = false
+    if (!wasAlreadyRecovering) {
+      reconnectSessionRestoreAttempt = 0
+    }
+    Log.i(
+      RTC_TAG,
+      "session_recovery_intent target=$targetDeviceId reason=$reason session=${sessionId ?: "-"} pending=$pendingSessionRequest",
+    )
+    appendLog("已记录短断线恢复目标：$targetDeviceId")
+    return true
+  }
+
+  private fun clearSessionRecoveryIntent(reason: String) {
+    if (reconnectShouldRestoreSession || isRecoveringSession || reconnectSessionRestoreScheduled) {
+      Log.i(
+        RTC_TAG,
+        "session_recovery_clear reason=$reason target=${reconnectTargetDeviceId ?: "-"} attempts=$reconnectSessionRestoreAttempt",
+      )
+    }
+    reconnectShouldRestoreSession = false
+    reconnectTargetDeviceId = null
+    reconnectSessionRestoreScheduled = false
+    reconnectSessionRestoreAttempt = 0
+    isRecoveringSession = false
+  }
+
+  private fun maybeScheduleReconnectSessionRestore(source: String) {
+    val targetDeviceId = reconnectTargetDeviceId?.trim().orEmpty()
+    if (!canRestoreSessionNow(targetDeviceId) || reconnectSessionRestoreScheduled) {
+      return
+    }
+    val targetDevice = relayDevices.find { it.deviceId == targetDeviceId }
+    if (targetDevice != null && !targetDevice.canReceiveRemoteControl()) {
+      appendLog("短断线恢复停止：目标设备未上报可被控制能力")
+      clearSessionRecoveryIntent("target_not_controllable")
+      updateSessionButtonState()
+      return
+    }
+    if (targetDevice != null && !targetDevice.isReachable()) {
+      appendLog("短断线恢复等待：目标设备暂不在线")
+      refreshDevicesList(force = true)
+      return
+    }
+    if (reconnectSessionRestoreAttempt >= RELAY_SESSION_RECOVERY_MAX_ATTEMPTS) {
+      appendLog("短断线恢复已达到重试上限，请手动重新连接")
+      clearSessionRecoveryIntent("restore_attempt_limit")
+      updateSessionButtonState()
+      return
+    }
+
+    val nextAttempt = reconnectSessionRestoreAttempt + 1
+    val delayMs = if (nextAttempt == 1) RELAY_SESSION_RECOVERY_DELAY_MS else RELAY_SESSION_RECOVERY_RETRY_DELAY_MS
+    reconnectSessionRestoreScheduled = true
+    isRecoveringSession = true
+    binding.frameMetaText.text = "当前画面：信令已恢复，等待重新建立会话"
+    setStatus("短断线恢复中")
+    updateSessionButtonState()
+    appendLog("短断线恢复：${delayMs}ms 后自动请求原目标（第 $nextAttempt 次，来源=$source）")
+    reconnectHandler.postDelayed({
+      reconnectSessionRestoreScheduled = false
+      if (!isActivityAlive || !canRestoreSessionNow(targetDeviceId)) {
+        return@postDelayed
+      }
+      if (binding.targetDeviceInput.text?.toString().orEmpty().trim() != targetDeviceId) {
+        binding.targetDeviceInput.setText(targetDeviceId)
+        binding.targetDeviceInput.setSelection(binding.targetDeviceInput.text?.length ?: 0)
+      }
+      reconnectSessionRestoreAttempt = nextAttempt
+      appendLog("短断线恢复：自动重新请求会话 -> $targetDeviceId")
+      requestSession(isRecovery = true)
+    }, delayMs)
   }
 
   private fun maybeScheduleAutoRequestSession() {
@@ -3652,6 +3809,8 @@ class MainActivity : AppCompatActivity() {
 
   private fun handleEndSessionAction() {
     val currentSessionId = resolveActiveSessionId()
+    sessionEndRequestedByUser = true
+    clearSessionRecoveryIntent("manual_end_session")
     if (currentSessionId.isNullOrBlank()) {
       appendLog("当前没有 session，不能结束")
     } else {
@@ -3693,8 +3852,12 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
-  private fun beginConnectFlow() {
-    cancelAutoReconnect()
+  private fun beginConnectFlow(isAutoReconnect: Boolean = false) {
+    cancelAutoReconnect(resetAttempt = !isAutoReconnect)
+    if (!isAutoReconnect) {
+      sessionEndRequestedByUser = false
+      clearSessionRecoveryIntent("manual_connect")
+    }
     val wsUrl = normalizeWsUrl(binding.wsUrlInput.text.toString())
     lastAutoConnectUrl = wsUrl
     if (binding.wsUrlInput.text.toString() != wsUrl) {
@@ -3727,12 +3890,20 @@ class MainActivity : AppCompatActivity() {
     hasLoadedDevices = false
     lastDevicesUrl = null
     binding.tokenText.text = "访问凭证：未注册"
-    resetSessionUi(clearFrame = true)
-    setStatus("连接中")
-    updateDevicesStatus("正在连接中继服务，稍后将自动同步设备列表。")
+    val preserveFrameForRecovery = isAutoReconnect && reconnectShouldRestoreSession
+    resetSessionUi(clearFrame = !preserveFrameForRecovery)
+    if (preserveFrameForRecovery) {
+      isRecoveringSession = true
+      binding.frameMetaText.text = "当前画面：正在恢复信令连接，输入已暂停"
+      setStatus("短断线恢复中")
+      updateDevicesStatus("正在自动重连中继服务；成功后会尝试恢复原 Mac 会话。")
+    } else {
+      setStatus("连接中")
+      updateDevicesStatus("正在连接中继服务，稍后将自动同步设备列表。")
+    }
     renderDeviceList()
     updateSessionButtonState()
-    appendLog("连接 $wsUrl")
+    appendLog(if (isAutoReconnect) "自动重连 $wsUrl" else "连接 $wsUrl")
     socketClient.connect(wsUrl)
   }
 
@@ -3741,23 +3912,36 @@ class MainActivity : AppCompatActivity() {
     if (!isActivityAlive || wsUrl.isBlank() || reconnectScheduled || isSocketConnected) {
       return
     }
+    reconnectAttempt += 1
+    val delayMs = reconnectDelayForAttempt(reconnectAttempt)
     reconnectScheduled = true
+    appendLog("中继连接中断，${delayMs}ms 后自动重连（第 $reconnectAttempt 次）")
     reconnectHandler.postDelayed({
       reconnectScheduled = false
       if (!isActivityAlive || isSocketConnected) {
         return@postDelayed
       }
       appendLog("中继连接中断，正在自动重连…")
-      beginConnectFlow()
-    }, RELAY_RECONNECT_DELAY_MS)
+      beginConnectFlow(isAutoReconnect = true)
+    }, delayMs)
   }
 
-  private fun cancelAutoReconnect() {
+  private fun reconnectDelayForAttempt(attempt: Int): Long {
+    val shift = (attempt - 1).coerceIn(0, 4)
+    val delay = RELAY_RECONNECT_INITIAL_DELAY_MS * (1L shl shift)
+    return min(delay, RELAY_RECONNECT_MAX_DELAY_MS)
+  }
+
+  private fun cancelAutoReconnect(resetAttempt: Boolean = true) {
     reconnectScheduled = false
     reconnectHandler.removeCallbacksAndMessages(null)
+    reconnectSessionRestoreScheduled = false
+    if (resetAttempt) {
+      reconnectAttempt = 0
+    }
   }
 
-  private fun requestSession() {
+  private fun requestSession(isRecovery: Boolean = false) {
     val targetDeviceId = binding.targetDeviceInput.text.toString().trim()
     if (targetDeviceId.isBlank()) {
       appendLog("请先填写目标设备 ID")
@@ -3782,12 +3966,19 @@ class MainActivity : AppCompatActivity() {
       wsUrl = binding.wsUrlInput.text.toString().trim(),
       targetDeviceId = targetDeviceId,
     )
+    if (!isRecovery) {
+      sessionEndRequestedByUser = false
+      clearSessionRecoveryIntent("manual_session_request")
+    } else {
+      isRecoveringSession = true
+    }
     val controllerProfile = if (isLikelyEmulator()) "emulator" else "standard"
     val request = controller.requestSessionMessage(targetDeviceId, controllerProfile = controllerProfile)
     if (sendSocketMessage(request.message, "发送 session.request.req -> $targetDeviceId")) {
       pendingSessionRequest = true
       pendingSessionRequestId = request.requestId
-      setStatus("会话请求中")
+      pendingSessionRequestIsRecovery = isRecovery
+      setStatus(if (isRecovery) "短断线恢复中" else "会话请求中")
       updateSessionButtonState()
     }
   }
@@ -3813,7 +4004,9 @@ class MainActivity : AppCompatActivity() {
     }
     pendingSessionRequest = false
     pendingSessionRequestId = null
+    pendingSessionRequestIsRecovery = false
     isPresenceReady = true
+    clearSessionRecoveryIntent("target_offline_$source")
     resetSessionUi(clearFrame = true)
     binding.remoteFrameCard.isVisible = false
     setStatus(readyStatusText("目标设备离线"))
