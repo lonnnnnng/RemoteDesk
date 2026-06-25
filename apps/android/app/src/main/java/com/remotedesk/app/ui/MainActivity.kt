@@ -108,6 +108,7 @@ class MainActivity : AppCompatActivity() {
     private const val LEGACY_DECODE_FAILURE_UI_INTERVAL_MS = 1200L
     private const val RELAY_RECONNECT_INITIAL_DELAY_MS = 1000L
     private const val RELAY_RECONNECT_MAX_DELAY_MS = 15000L
+    private const val RELAY_RECONNECT_RECOVERY_MAX_DELAY_MS = 3000L
     private const val RELAY_SESSION_RECOVERY_DELAY_MS = 800L
     private const val RELAY_SESSION_RECOVERY_RETRY_DELAY_MS = 2500L
     private const val RELAY_SESSION_RECOVERY_MAX_ATTEMPTS = 6
@@ -4085,7 +4086,13 @@ class MainActivity : AppCompatActivity() {
   private fun reconnectDelayForAttempt(attempt: Int): Long {
     val shift = (attempt - 1).coerceIn(0, 4)
     val delay = RELAY_RECONNECT_INITIAL_DELAY_MS * (1L shl shift)
-    return min(delay, RELAY_RECONNECT_MAX_DELAY_MS)
+    // long: 已经有远控会话时，用户看到的是“画面短断”，重连间隔需要比普通待机连接更激进，避免 relay 恢复后还继续等十几秒。
+    val maxDelay = if (reconnectShouldRestoreSession || isRecoveringSession) {
+      RELAY_RECONNECT_RECOVERY_MAX_DELAY_MS
+    } else {
+      RELAY_RECONNECT_MAX_DELAY_MS
+    }
+    return min(delay, maxDelay)
   }
 
   private fun cancelAutoReconnect(resetAttempt: Boolean = true) {
@@ -4159,10 +4166,19 @@ class MainActivity : AppCompatActivity() {
       updateSessionButtonState()
       return
     }
+    val shouldRecover = rememberSessionRecoveryIntent(reason = "target_offline_$source")
     pendingSessionRequest = false
     pendingSessionRequestId = null
     pendingSessionRequestIsRecovery = false
     isPresenceReady = true
+    if (shouldRecover) {
+      resetSessionUi(clearFrame = false)
+      binding.frameMetaText.text = "当前画面：原 Mac 短暂离线，等待重新上线"
+      setStatus("短断线恢复等待目标上线")
+      updateSessionButtonState()
+      scheduleSessionRecoveryTargetWait(source = "target_offline_$source", targetDeviceId = targetDeviceId)
+      return
+    }
     clearSessionRecoveryIntent("target_offline_$source")
     resetSessionUi(clearFrame = true)
     binding.remoteFrameCard.isVisible = false
