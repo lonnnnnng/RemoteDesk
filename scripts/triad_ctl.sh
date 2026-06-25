@@ -17,6 +17,12 @@ RD_MAC_DEV_PORT="${RD_MAC_DEV_PORT:-5173}"
 RD_AVD_NAME="${RD_AVD_NAME:-Pixel_6_API_29}"
 RD_ANDROID_APP_ID="${RD_ANDROID_APP_ID:-com.remotedesk.app}"
 RD_ANDROID_ACTIVITY="${RD_ANDROID_ACTIVITY:-com.remotedesk.app/.ui.MainActivity}"
+RD_ANDROID_MODE="${RD_ANDROID_MODE:-emulator}"
+RD_ANDROID_SERIAL="${RD_ANDROID_SERIAL:-}"
+RD_ANDROID_WS_URL="${RD_ANDROID_WS_URL:-}"
+RD_ANDROID_AUTO_CONNECT="${RD_ANDROID_AUTO_CONNECT:-1}"
+RD_ANDROID_AUTO_REQUEST_SESSION="${RD_ANDROID_AUTO_REQUEST_SESSION:-1}"
+RD_ANDROID_AUTO_PROOF_INPUT="${RD_ANDROID_AUTO_PROOF_INPUT:-1}"
 RD_EMULATOR_ARGS="${RD_EMULATOR_ARGS:--no-snapshot-load -no-snapshot-save}"
 RD_SCREEN_PREFIX="${RD_SCREEN_PREFIX:-rdtriad}"
 RD_AGENT_DEVICE_ID="${RD_AGENT_DEVICE_ID:-auto}"
@@ -40,6 +46,14 @@ log() {
 
 warn() {
   printf '[triad_ctl] %s WARN: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >&2
+}
+
+adb_cmd() {
+  if [[ -n "${RD_ANDROID_SERIAL}" ]]; then
+    adb -s "${RD_ANDROID_SERIAL}" "$@"
+  else
+    adb "$@"
+  fi
 }
 
 clear_history_logs() {
@@ -243,15 +257,44 @@ select_turn_port() {
   fi
 }
 
+detect_emulator_android_serial() {
+  adb devices 2>/dev/null | awk 'NR>1 && $2=="device" && $1 ~ /^emulator-/ {print $1; exit}'
+}
+
+detect_physical_android_serial() {
+  adb devices 2>/dev/null | awk 'NR>1 && $2=="device" && $1 !~ /^emulator-/ {print $1; exit}'
+}
+
 has_running_emulator() {
-  adb devices 2>/dev/null | awk 'NR>1 && $2=="device" && $1 ~ /^emulator-/ {found=1} END{exit found?0:1}'
+  [[ -n "$(detect_emulator_android_serial)" ]]
 }
 
 wait_for_emulator_device() {
   local timeout_sec="${1:-120}"
   local waited=0
+  local serial=""
   while (( waited < timeout_sec )); do
-    if has_running_emulator; then
+    serial="$(detect_emulator_android_serial)"
+    if [[ -n "${serial}" ]]; then
+      RD_ANDROID_SERIAL="${serial}"
+      return 0
+    fi
+    sleep 1
+    (( waited += 1 ))
+  done
+  return 1
+}
+
+wait_for_physical_android_device() {
+  local timeout_sec="${1:-45}"
+  local waited=0
+  local serial="${RD_ANDROID_SERIAL}"
+  while (( waited < timeout_sec )); do
+    if [[ -z "${serial}" ]]; then
+      serial="$(detect_physical_android_serial)"
+    fi
+    if [[ -n "${serial}" ]] && adb -s "${serial}" get-state >/dev/null 2>&1; then
+      RD_ANDROID_SERIAL="${serial}"
       return 0
     fi
     sleep 1
@@ -265,7 +308,7 @@ emulator_has_default_network() {
     return 1
   fi
   local active_line
-  active_line="$(adb shell dumpsys connectivity 2>/dev/null | awk -F': ' '/Active default network:/ {print $2; exit}' | tr -d '\r' | xargs || true)"
+  active_line="$(adb_cmd shell dumpsys connectivity 2>/dev/null | awk -F': ' '/Active default network:/ {print $2; exit}' | tr -d '\r' | xargs || true)"
   [[ -n "${active_line}" ]] && [[ "${active_line}" != "none" ]]
 }
 
@@ -303,10 +346,10 @@ ensure_android_network_routes() {
     return 1
   fi
 
-  adb root >/dev/null 2>&1 || true
-  adb wait-for-device >/dev/null 2>&1 || true
+  adb_cmd root >/dev/null 2>&1 || true
+  adb_cmd wait-for-device >/dev/null 2>&1 || true
 
-  adb shell 'ip link set radio0 up >/dev/null 2>&1 || true
+  adb_cmd shell 'ip link set radio0 up >/dev/null 2>&1 || true
 ip route add 10.0.2.0/24 dev radio0 src 10.0.2.15 >/dev/null 2>&1 || true
 ip route add default via 10.0.2.2 dev radio0 >/dev/null 2>&1 || true
 for tbl in legacy_system legacy_network local_network; do
@@ -314,7 +357,7 @@ for tbl in legacy_system legacy_network local_network; do
   ip route add default via 10.0.2.2 dev radio0 table ${tbl} >/dev/null 2>&1 || true
 done' >/dev/null 2>&1 || true
 
-  if adb shell "echo > /dev/null | nc -w 2 10.0.2.2 ${RD_WS_PORT}" >/dev/null 2>&1; then
+  if adb_cmd shell "echo > /dev/null | nc -w 2 10.0.2.2 ${RD_WS_PORT}" >/dev/null 2>&1; then
     log "android emulator route to 10.0.2.2:${RD_WS_PORT} is ready"
   else
     warn "android emulator route to 10.0.2.2:${RD_WS_PORT} is not ready"
@@ -325,8 +368,8 @@ done' >/dev/null 2>&1 || true
 setup_android_reverse_port() {
   local port="$1"
   local spec="tcp:${port}"
-  adb reverse --remove "${spec}" >/dev/null 2>&1 || true
-  if adb reverse "${spec}" "${spec}" >/dev/null 2>&1; then
+  adb_cmd reverse --remove "${spec}" >/dev/null 2>&1 || true
+  if adb_cmd reverse "${spec}" "${spec}" >/dev/null 2>&1; then
     log "configured adb reverse ${spec} -> ${spec}"
     return 0
   fi
@@ -342,6 +385,46 @@ setup_android_reverse() {
     warn "android reverse setup incomplete; emulator media path may fail"
     return 1
   fi
+}
+
+android_launch_ws_url() {
+  if [[ -n "${RD_ANDROID_WS_URL}" ]]; then
+    printf '%s\n' "${RD_ANDROID_WS_URL}"
+    return 0
+  fi
+  printf 'ws://127.0.0.1:%s/ws\n' "${RD_WS_PORT}"
+}
+
+android_launch_target_device_id() {
+  if [[ -n "${RD_DETECTED_AGENT_DEVICE_ID}" ]]; then
+    printf '%s\n' "${RD_DETECTED_AGENT_DEVICE_ID}"
+    return 0
+  fi
+  if [[ "${RD_AGENT_DEVICE_ID}" != "auto" ]] && [[ -n "${RD_AGENT_DEVICE_ID}" ]]; then
+    printf '%s\n' "${RD_AGENT_DEVICE_ID}"
+  fi
+}
+
+launch_android_app() {
+  local ws_url
+  local target_device_id
+  ws_url="$(android_launch_ws_url)"
+  target_device_id="$(android_launch_target_device_id)"
+  local cmd=(shell am start -S -n "${RD_ANDROID_ACTIVITY}")
+  if [[ "${RD_ANDROID_AUTO_CONNECT}" == "1" ]]; then
+    cmd+=(-e rd_ws_url "${ws_url}" --ez rd_auto_connect true)
+  fi
+  if [[ -n "${target_device_id}" ]]; then
+    cmd+=(-e rd_target_device_id "${target_device_id}")
+    if [[ "${RD_ANDROID_AUTO_REQUEST_SESSION}" == "1" ]]; then
+      cmd+=(--ez rd_auto_request_session true)
+    fi
+  fi
+  if [[ "${RD_ANDROID_AUTO_PROOF_INPUT}" == "1" ]]; then
+    cmd+=(--ez rd_auto_proof_input true)
+  fi
+  log "launching android app ${RD_ANDROID_ACTIVITY} serial=${RD_ANDROID_SERIAL:-default} ws=${ws_url} target=${target_device_id:-manual}"
+  adb_cmd "${cmd[@]}" >/dev/null
 }
 
 screen_has_session() {
@@ -397,7 +480,7 @@ start_mac() {
     return 0
   fi
   log "starting mac desktop dev app"
-  screen_start "${MAC_SCREEN}" bash -lc "cd '${ROOT_DIR}/apps/desktop' && RD_DESKTOP_AUTO_CONNECT=1 RD_DESKTOP_AUTO_REGISTER=1 RD_DESKTOP_AUTO_HEARTBEAT=1 npm exec tauri dev --no-watch >> '${MAC_LOG}' 2>&1"
+  screen_start "${MAC_SCREEN}" bash -lc "cd '${ROOT_DIR}/apps/desktop' && RD_DESKTOP_AUTO_CONNECT=1 RD_DESKTOP_AUTO_REGISTER=1 RD_DESKTOP_AUTO_HEARTBEAT=1 npm exec tauri dev -- --no-watch >> '${MAC_LOG}' 2>&1"
   if ! wait_for_tcp_listen "${RD_MAC_DEV_PORT}" 60; then
     warn "mac app did not expose port ${RD_MAC_DEV_PORT} in time, check ${MAC_LOG}"
     return 1
@@ -409,53 +492,67 @@ start_android() {
     warn "adb not found, skip android startup"
     return 1
   fi
-  local boot_attempt=0
-  while :; do
-    if ! has_running_emulator; then
-      if [[ ! -x "${ANDROID_EMULATOR_BIN}" ]]; then
-        warn "emulator binary not found at ${ANDROID_EMULATOR_BIN}"
-        return 1
-      fi
-      log "starting android emulator: ${RD_AVD_NAME} (${RD_EMULATOR_ARGS})"
-      screen_start "${ANDROID_SCREEN}" bash -lc "'${ANDROID_EMULATOR_BIN}' -avd '${RD_AVD_NAME}' ${RD_EMULATOR_ARGS} >> '${ANDROID_LOG}' 2>&1"
-    else
-      log "android emulator already running, skip boot"
-    fi
-
-    log "waiting for android emulator to be ready"
-    if ! wait_for_emulator_device 180; then
-      warn "android emulator not ready in time, check ${ANDROID_LOG}"
+  if [[ "${RD_ANDROID_MODE}" == "physical" ]]; then
+    if ! wait_for_physical_android_device 45; then
+      warn "physical android device not ready; set RD_ANDROID_SERIAL or connect a device"
       return 1
     fi
+    log "using physical android device: ${RD_ANDROID_SERIAL}"
+    setup_android_reverse || true
+  else
+    RD_ANDROID_MODE="emulator"
+    local boot_attempt=0
+    while :; do
+      if ! has_running_emulator; then
+        if [[ ! -x "${ANDROID_EMULATOR_BIN}" ]]; then
+          warn "emulator binary not found at ${ANDROID_EMULATOR_BIN}"
+          return 1
+        fi
+        log "starting android emulator: ${RD_AVD_NAME} (${RD_EMULATOR_ARGS})"
+        screen_start "${ANDROID_SCREEN}" bash -lc "'${ANDROID_EMULATOR_BIN}' -avd '${RD_AVD_NAME}' ${RD_EMULATOR_ARGS} >> '${ANDROID_LOG}' 2>&1"
+      else
+        log "android emulator already running, skip boot"
+      fi
 
-    if wait_for_emulator_default_network 45; then
-      break
-    fi
+      log "waiting for android emulator to be ready"
+      if ! wait_for_emulator_device 180; then
+        warn "android emulator not ready in time, check ${ANDROID_LOG}"
+        return 1
+      fi
 
-    if (( boot_attempt >= 1 )); then
-      warn "android emulator default network is still missing after retry"
-      break
-    fi
+      if wait_for_emulator_default_network 45; then
+        break
+      fi
 
-    warn "android emulator default network missing; restarting emulator once with cold boot args"
-    (( boot_attempt += 1 ))
-    kill_android_emulator
-    sleep 2
-  done
+      if (( boot_attempt >= 1 )); then
+        warn "android emulator default network is still missing after retry"
+        break
+      fi
 
-  ensure_android_network_routes || true
-  setup_android_reverse || true
+      warn "android emulator default network missing; restarting emulator once with cold boot args"
+      (( boot_attempt += 1 ))
+      kill_android_emulator
+      sleep 2
+    done
+
+    ensure_android_network_routes || true
+    setup_android_reverse || true
+  fi
 
   log "installing android debug app"
-  (cd "${ROOT_DIR}/apps/android" && ./gradlew :app:installDebug >> "${ANDROID_LOG}" 2>&1)
-
-  log "launching android app ${RD_ANDROID_ACTIVITY}"
-  adb shell am start -n "${RD_ANDROID_ACTIVITY}" >/dev/null
+  (cd "${ROOT_DIR}/apps/android" && ./gradlew :app:assembleDebug >> "${ANDROID_LOG}" 2>&1)
+  adb_cmd install -r "${ROOT_DIR}/apps/android/app/build/outputs/apk/debug/app-debug.apk" >> "${ANDROID_LOG}" 2>&1
 
   log "starting android logcat capture (RemoteDesk* tags)"
-  adb logcat -c >/dev/null 2>&1 || true
+  adb_cmd logcat -c >/dev/null 2>&1 || true
   screen_stop "${ANDROID_LOGCAT_SCREEN}"
-  screen_start "${ANDROID_LOGCAT_SCREEN}" bash -lc "adb logcat -v time RemoteDeskRtc:I RemoteDeskWs:I RemoteDeskUi:I *:S >> '${ANDROID_LOG}' 2>&1"
+  if [[ -n "${RD_ANDROID_SERIAL}" ]]; then
+    screen_start "${ANDROID_LOGCAT_SCREEN}" bash -lc "adb -s '${RD_ANDROID_SERIAL}' logcat -v time RemoteDeskRtc:I RemoteDeskWs:I RemoteDeskUi:I '*:S' >> '${ANDROID_LOG}' 2>&1"
+  else
+    screen_start "${ANDROID_LOGCAT_SCREEN}" bash -lc "adb logcat -v time RemoteDeskRtc:I RemoteDeskWs:I RemoteDeskUi:I '*:S' >> '${ANDROID_LOG}' 2>&1"
+  fi
+
+  launch_android_app
 }
 
 stop_relay() {
@@ -481,15 +578,17 @@ stop_mac() {
 }
 
 stop_android() {
-  log "stopping android emulator/app/logcat"
+  log "stopping android app/logcat"
   if command -v adb >/dev/null 2>&1; then
-    adb shell am force-stop "${RD_ANDROID_APP_ID}" >/dev/null 2>&1 || true
-    adb reverse --remove "tcp:${RD_WS_PORT}" >/dev/null 2>&1 || true
-    adb reverse --remove "tcp:${RD_ACTIVE_TURN_PORT}" >/dev/null 2>&1 || true
+    adb_cmd shell am force-stop "${RD_ANDROID_APP_ID}" >/dev/null 2>&1 || true
+    adb_cmd reverse --remove "tcp:${RD_WS_PORT}" >/dev/null 2>&1 || true
+    adb_cmd reverse --remove "tcp:${RD_ACTIVE_TURN_PORT}" >/dev/null 2>&1 || true
   fi
 
   screen_stop "${ANDROID_LOGCAT_SCREEN}"
-  kill_android_emulator
+  if [[ "${RD_ANDROID_MODE}" != "physical" ]]; then
+    kill_android_emulator
+  fi
 }
 
 do_stop() {
@@ -510,21 +609,6 @@ do_start() {
   start_relay
   start_turn
   start_mac
-  start_android
-  if wait_for_android_controller 45; then
-    log "android controller is online"
-  else
-    warn "android controller did not appear in /devices, retrying android app launch once"
-    if command -v adb >/dev/null 2>&1; then
-      adb shell am force-stop "${RD_ANDROID_APP_ID}" >/dev/null 2>&1 || true
-      adb shell am start -n "${RD_ANDROID_ACTIVITY}" >/dev/null 2>&1 || true
-    fi
-    if wait_for_android_controller 45; then
-      log "android controller is online after retry"
-    else
-      warn "android controller is still offline after retry, check ${ANDROID_LOG}"
-    fi
-  fi
   if wait_for_relay_device "${RD_AGENT_DEVICE_ID}" 35; then
     log "agent ${RD_DETECTED_AGENT_DEVICE_ID:-unknown} is online"
   else
@@ -535,6 +619,21 @@ do_start() {
       log "agent ${RD_DETECTED_AGENT_DEVICE_ID:-unknown} is online after retry"
     else
       warn "online agent is still missing after retry, check ${MAC_LOG}"
+    fi
+  fi
+  start_android
+  if wait_for_android_controller 45; then
+    log "android controller is online"
+  else
+    warn "android controller did not appear in /devices, retrying android app launch once"
+    if command -v adb >/dev/null 2>&1; then
+      adb_cmd shell am force-stop "${RD_ANDROID_APP_ID}" >/dev/null 2>&1 || true
+      launch_android_app >/dev/null 2>&1 || true
+    fi
+    if wait_for_android_controller 45; then
+      log "android controller is online after retry"
+    else
+      warn "android controller is still offline after retry, check ${ANDROID_LOG}"
     fi
   fi
   log "all targets started"
@@ -561,6 +660,12 @@ Environment overrides:
   RD_AVD_NAME=Pixel_6_API_29
   RD_ANDROID_APP_ID=com.remotedesk.app
   RD_ANDROID_ACTIVITY=com.remotedesk.app/.ui.MainActivity
+  RD_ANDROID_MODE=emulator|physical
+  RD_ANDROID_SERIAL=<adb-serial-for-physical-or-explicit-emulator>
+  RD_ANDROID_WS_URL=ws://127.0.0.1:18081/ws
+  RD_ANDROID_AUTO_CONNECT=1
+  RD_ANDROID_AUTO_REQUEST_SESSION=1
+  RD_ANDROID_AUTO_PROOF_INPUT=1
   RD_EMULATOR_ARGS='-no-snapshot-load -no-snapshot-save'
   RD_AGENT_DEVICE_ID=auto
   RD_SCREEN_PREFIX=rdtriad
