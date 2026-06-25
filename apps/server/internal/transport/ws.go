@@ -371,7 +371,7 @@ func (h *Hub) handleSessionRequest(client *clientConn, msg protocol.Envelope) {
 	if rawProfile, ok := msg.Payload["controller_profile"].(string); ok {
 		normalizedProfile := strings.ToLower(strings.TrimSpace(rawProfile))
 		switch normalizedProfile {
-		case "emulator", "standard":
+		case "emulator", "standard", "android_phone":
 			controllerProfile = normalizedProfile
 		}
 	}

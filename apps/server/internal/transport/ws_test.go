@@ -258,6 +258,45 @@ func TestWSFlowRelayAndHTTPVisibility(t *testing.T) {
 	}
 }
 
+func TestSessionRequestPreservesAndroidPhoneControllerProfile(t *testing.T) {
+	server := newTestServer(t)
+	defer server.Close()
+
+	controller := dialWS(t, server, allowedOrigin)
+	defer controller.Close()
+
+	agent := dialWS(t, server, allowedOrigin)
+	defer agent.Close()
+
+	registerDeviceWithPlatformAndCapabilities(t, controller, "android-controller-01", "controller", "android", true, false)
+	registerDeviceWithPlatformAndCapabilities(t, agent, "macos-agent-01", "agent", "macos", false, true)
+
+	sendEnvelope(t, controller, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "request-android-phone",
+		Type:      "session.request.req",
+		Timestamp: time.Now().UnixMilli(),
+		TraceID:   "trace-request-android-phone",
+		From:      protocol.From{DeviceID: "android-controller-01", Role: "controller"},
+		Payload: map[string]any{
+			"target_device_id":   "macos-agent-01",
+			"request_id":         "req-android-phone",
+			"auth_mode":          "consent_required",
+			"controller_profile": "android_phone",
+		},
+	})
+
+	requestResult := readEnvelopeOfType(t, controller, "session.request.result.push")
+	sessionID, _ := requestResult.Payload["session_id"].(string)
+	if sessionID == "" {
+		t.Fatal("expected session_id in request result")
+	}
+	controllerStart := readEnvelopeOfType(t, controller, "session.start.push")
+	agentStart := readEnvelopeOfType(t, agent, "session.start.push")
+	assertStartControllerProfile(t, controllerStart, "android_phone")
+	assertStartControllerProfile(t, agentStart, "android_phone")
+}
+
 func TestWSPresencePushOnRegisterHeartbeatAndDisconnect(t *testing.T) {
 	server := newTestServer(t)
 	defer server.Close()
@@ -2394,6 +2433,18 @@ func readEnvelopeWithTimeout(conn *websocket.Conn, timeout time.Duration) (proto
 		return protocol.Envelope{}, false, err
 	}
 	return msg, true, nil
+}
+
+func assertStartControllerProfile(t *testing.T, message protocol.Envelope, expected string) {
+	t.Helper()
+	webrtc, ok := message.Payload["webrtc"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected webrtc payload in session.start.push, got %#v", message.Payload["webrtc"])
+	}
+	profile, _ := webrtc["controller_profile"].(string)
+	if profile != expected {
+		t.Fatalf("expected controller_profile=%q, got %q", expected, profile)
+	}
 }
 
 func assertHealthz(t *testing.T, server *httptest.Server) {

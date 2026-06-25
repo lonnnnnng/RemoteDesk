@@ -41,6 +41,7 @@ class StubSessionController(
   fun requestSessionMessage(targetDeviceId: String, controllerProfile: String = "standard"): SessionRequestMessage {
     val normalizedProfile = when (controllerProfile.trim().lowercase()) {
       "emulator" -> "emulator"
+      "android_phone" -> "android_phone"
       else -> "standard"
     }
     val requestId = "req-${System.currentTimeMillis()}"

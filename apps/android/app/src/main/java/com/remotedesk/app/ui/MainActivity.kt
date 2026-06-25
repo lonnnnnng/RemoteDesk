@@ -4128,7 +4128,8 @@ class MainActivity : AppCompatActivity() {
     } else {
       isRecoveringSession = true
     }
-    val controllerProfile = if (isLikelyEmulator()) "emulator" else "standard"
+    // long: 真机手机具备比模拟器更稳定的解码与网络表现，首档直接给桌面端 720p 目标，避免远控 Mac 时长期停在低清晰度档位。
+    val controllerProfile = if (isLikelyEmulator()) "emulator" else "android_phone"
     val request = controller.requestSessionMessage(targetDeviceId, controllerProfile = controllerProfile)
     if (sendSocketMessage(request.message, "发送 session.request.req -> $targetDeviceId")) {
       pendingSessionRequest = true

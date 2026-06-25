@@ -238,6 +238,12 @@ const EMULATOR_SESSION_PROFILE_INDEX = 0
 const EMULATOR_SESSION_MIN_PROFILE_INDEX = 0
 const EMULATOR_SESSION_MAX_PROFILE_INDEX = 0
 const EMULATOR_SESSION_MAX_SCALE_DOWN_BY = 1.0
+const ANDROID_PHONE_SESSION_PROFILE_INDEX = 1
+const ANDROID_PHONE_SESSION_MAX_WIDTH = 1280
+const ANDROID_PHONE_SESSION_MAX_HEIGHT = 720
+const ANDROID_PHONE_SESSION_MAX_FPS = 20
+const ANDROID_PHONE_SESSION_MAX_BITRATE = 5200000
+const ANDROID_PHONE_SESSION_MAX_SCALE_DOWN_BY = 1.15
 const CAPTURE_FRAME_INTERVAL_MS = 1200
 const AUTO_CONNECT_DELAY_MS = 1200
 const SETTINGS_AUTO_CONNECT_DELAY_MS = 500
@@ -2062,17 +2068,28 @@ function currentSessionControllerProfile() {
 }
 
 function currentSessionMediaCaps() {
-  if (currentSessionControllerProfile() !== "emulator") {
-    return null
+  const controllerProfile = currentSessionControllerProfile()
+  if (controllerProfile === "emulator") {
+    return {
+      source: "emulator",
+      maxWidth: EMULATOR_SESSION_MAX_WIDTH,
+      maxHeight: EMULATOR_SESSION_MAX_HEIGHT,
+      maxFps: EMULATOR_SESSION_MAX_FPS,
+      maxBitrate: EMULATOR_SESSION_MAX_BITRATE,
+      maxScaleResolutionDownBy: EMULATOR_SESSION_MAX_SCALE_DOWN_BY,
+    }
   }
-  return {
-    source: "emulator",
-    maxWidth: EMULATOR_SESSION_MAX_WIDTH,
-    maxHeight: EMULATOR_SESSION_MAX_HEIGHT,
-    maxFps: EMULATOR_SESSION_MAX_FPS,
-    maxBitrate: EMULATOR_SESSION_MAX_BITRATE,
-    maxScaleResolutionDownBy: EMULATOR_SESSION_MAX_SCALE_DOWN_BY,
+  if (controllerProfile === "android_phone") {
+    return {
+      source: "android_phone",
+      maxWidth: ANDROID_PHONE_SESSION_MAX_WIDTH,
+      maxHeight: ANDROID_PHONE_SESSION_MAX_HEIGHT,
+      maxFps: ANDROID_PHONE_SESSION_MAX_FPS,
+      maxBitrate: ANDROID_PHONE_SESSION_MAX_BITRATE,
+      maxScaleResolutionDownBy: ANDROID_PHONE_SESSION_MAX_SCALE_DOWN_BY,
+    }
   }
+  return null
 }
 
 function buildEffectiveAdaptiveProfile(profile) {
@@ -2129,6 +2146,10 @@ function resolveInitialAdaptiveProfileIndex() {
   if (currentSessionControllerProfile() === "emulator") {
     return EMULATOR_SESSION_PROFILE_INDEX
   }
+  // long: Android 真机控制 Mac 时以 720p/20fps 均衡档起步，后续仍交给自适应逻辑按实测 FPS/RTT 升降级，避免首屏清晰度被模拟器策略拖低。
+  if (currentSessionControllerProfile() === "android_phone") {
+    return ANDROID_PHONE_SESSION_PROFILE_INDEX
+  }
   return AGENT_ADAPTIVE_DEFAULT_PROFILE_INDEX
 }
 
@@ -2144,6 +2165,13 @@ function maxAdaptiveProfileIndexForCurrentSession() {
     return EMULATOR_SESSION_MAX_PROFILE_INDEX
   }
   return AGENT_ADAPTIVE_PROFILES.length - 1
+}
+
+function dynamicTargetProfileIndexForCurrentSession() {
+  if (currentSessionControllerProfile() === "android_phone") {
+    return ANDROID_PHONE_SESSION_PROFILE_INDEX
+  }
+  return AGENT_ADAPTIVE_SCENE_DYNAMIC_TARGET_PROFILE_INDEX
 }
 
 function resetAgentAdaptiveState() {
@@ -5169,7 +5197,7 @@ function resolveAdaptiveScenePolicy(sceneMode) {
       mode,
       label: adaptiveSceneLabel(mode),
       degradationPreference: "maintain-framerate",
-      targetProfileIndex: AGENT_ADAPTIVE_SCENE_DYNAMIC_TARGET_PROFILE_INDEX,
+      targetProfileIndex: dynamicTargetProfileIndexForCurrentSession(),
       badStreakForDegrade: 2,
       severeBadStreakForDegrade: 1,
       fpsDropRatio: 0.82,
@@ -9335,6 +9363,8 @@ async function handleMessage(msg) {
       if (payload.agent_device_id === state.deviceId) {
         appendLog(`进入受控端会话 ${state.sessionId}`)
         logSessionLinkMetricsSnapshot("session_start")
+        // long: 原生 sender 启动前必须先把控制端 profile 落到采集配置，否则常驻采集会沿用上一轮低清晰度参数。
+        ensureAgentAdaptiveSessionState(state.sessionId)
         const nativeCaptureReady = await ensureNativeCaptureSourceReadyForSession(state.sessionId, { log: true })
         traceLog("session.start.native_capture_ready", {
           session_id: state.sessionId || "-",
@@ -9342,6 +9372,9 @@ async function handleMessage(msg) {
           capture_lifecycle: state.captureStatus?.lifecycle || "-",
           capture_source: currentCaptureSource()?.source_id || "-",
         })
+        if (nativeCaptureReady) {
+          await applyNativeSenderCaptureConfig(state.sessionId, { log: true })
+        }
         const nativeStarted = nativeCaptureReady
           ? await startNativeSenderControlPlane(state.sessionId, { dryRun: false })
           : false
