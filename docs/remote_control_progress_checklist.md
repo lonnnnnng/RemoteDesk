@@ -8,8 +8,9 @@ Last updated: `2026-06-26 11:50:51 +0800`
 
 - 当前分支：`main`
 - 当前远端：`origin=https://github.com/lonnnnnng/RemoteDesk.git`
-- 当前已推送基线：`HEAD=origin/main=8836c5d 记录远控进度与验证清单`
-- 当前工作区有未提交源码/脚本/文档改动：
+- 上一已验证基线：`8836c5d 记录远控进度与验证清单`
+- 今日阶段保存提交：`a2e6d4d 保存安卓真机远控阶段进度` 已推送到 `origin/main`
+- 当前已阶段保存但仍待真机复测的源码/脚本/文档改动：
   - `apps/android/app/src/main/AndroidManifest.xml`
   - `apps/android/app/src/main/java/com/remotedesk/app/controller/StubSessionController.kt`
   - `apps/android/app/src/main/java/com/remotedesk/app/ui/MainActivity.kt`
@@ -28,7 +29,7 @@ Last updated: `2026-06-26 11:50:51 +0800`
 - 最新真机短断验证已通过：`.rd_runtime/reports/short_reconnect_20260626_105952.md`
 - 最新新版真机 soak 仍未通过：`.rd_runtime/reports/soak_6_5_20260626_110819.md`，失败点是 `render_fps_avg=23.52 < 24.0` 和 `visible_frame_gap_ms_max=3692`
 - 上一轮 soak `103151` 仍保留为历史对照：原报告 `visible_frame_gap_ms_max=0`、`phase_frame_gap_ms_max=-` 有统计不足，临时重算 `/tmp/rd_soak_report_103151_recalc.md` 得到可见最大帧间隔 `861ms`
-- 当前工作区已有一批针对 `110819` soak 失败点的修复/诊断改动，但这些改动还没有安装到真机，也没有重新跑短断和 soak；下次必须先安装新 APK 再验证，不能把 `105952` 和 `110819` 当作这些新改动的验收结果
+- 当前已保存一批针对 `110819` soak 失败点的修复/诊断改动，但这些改动还没有安装到真机，也没有重新跑短断和 soak；下次必须先安装新 APK 再验证，不能把 `105952` 和 `110819` 当作这些新改动的验收结果
 - 当前不能宣称最终目标完成：短断、首帧、输入和短窗口质量已经通过最新真机验证，但新版 soak 的平均 FPS 和可见帧间隔仍未达标，且人工肉眼流畅验收还没有记录
 
 ## 当前目标
@@ -70,7 +71,7 @@ Last updated: `2026-06-26 11:50:51 +0800`
 
 ## 已改但未重新真机验证
 
-这些项目已经出现在当前工作区 diff 中，但证据只到脚本语法/构建层面；还没有安装新 APK 到 `wsvwypiz7xwslvl7`，也没有跑出新的短断 PASS 和 soak PASS 报告。
+这些项目已经通过阶段保存提交进入仓库，但证据只到脚本语法/构建层面；还没有安装新 APK 到 `wsvwypiz7xwslvl7`，也没有跑出新的短断 PASS 和 soak PASS 报告。
 
 | ID | 改动 | 预期解决的问题 | 下一步验证 |
 | --- | --- | --- | --- |
@@ -115,7 +116,7 @@ Last updated: `2026-06-26 11:50:51 +0800`
 
 - 真机 `wsvwypiz7xwslvl7` 当前在线，今天按用户要求暂停，不继续启动短断或 soak 验证。
 - 已验证完成的事实仍以 `short_reconnect_20260626_105952` 和 `soak_6_5_20260626_110819` 为准：短断 PASS，最新版 soak FAIL。
-- 当前工作区里 U1-U3 是针对 soak 卡顿问题的候选修复/诊断改动，但还没有安装到真机复测，不能算通过。
+- U1-U3 是针对 soak 卡顿问题的候选修复/诊断改动，已阶段性提交并推送，但还没有安装到真机复测，不能算通过。
 - 下一次恢复任务时，不要直接继续提交；先构建/安装新 APK，再跑短断，短断 PASS 后跑新版 soak。
 - 如果新 soak 仍 FAIL，优先看 `RemoteDeskSoak soak_dynamic_bounds`、阶段 `soak_phase`、Android `render_frame_gap_spike/render_frame_sample/net_stats` 和 Mac sender probe 的时间对齐，不要简单放宽阈值。
 
@@ -239,7 +240,7 @@ rg -n 'RemoteDeskSoak.*soak_dynamic_bounds|RemoteDeskSoak.*soak_phase|render_fra
 
 ### Git 与忽略规则
 
-- [x] `HEAD=origin/main=8836c5d`
+- [x] 阶段保存提交 `a2e6d4d 保存安卓真机远控阶段进度` 已推送到 `origin/main`
 - [x] `git ls-files | rg '(^|/)(node_modules|dist|build|target|\.gradle|\.rd_runtime|__pycache__)(/|$)|\.(apk|aab|dmg|msi|exe|app\.tar\.gz|tar\.gz|log|pyc)$'` 当前无输出
 - [x] `git status --short --branch --ignored` 只出现当前任务相关源码改动和已知 ignored 产物
 - [x] 新报告继续落在 `.rd_runtime/reports/`，不要提交
@@ -322,9 +323,9 @@ rg -n 'RemoteDeskSoak.*soak_dynamic_bounds|RemoteDeskSoak.*soak_phase|render_fra
 - [ ] Soak PASS 报告路径写入本文档
 - [ ] 人工观察记录写入本文档或单独报告
 - [x] `git diff --check` 通过
-- [ ] 显式 stage 当前任务文件，不提交 `.rd_runtime/` 和构建产物
-- [ ] 中文 commit message 说明真实范围，不把未完成项写成已完成
-- [ ] `git push origin main` 后记录 commit hash
+- [x] 显式 stage 当前任务文件，不提交 `.rd_runtime/` 和构建产物
+- [x] 中文 commit message 说明真实范围，不把未完成项写成已完成：`保存安卓真机远控阶段进度`
+- [x] `git push origin main` 已完成，阶段保存 commit：`a2e6d4d`
 
 ## 关键文件
 
