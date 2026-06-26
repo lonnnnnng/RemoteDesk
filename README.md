@@ -18,17 +18,18 @@ Android/Desktop controller -> relay + TURN -> Windows/macOS Desktop agent
 
 ## 当前状态
 
-Last updated: `2026-06-02`
+Last updated: `2026-06-26`
 
 - Android 控制端可连接 relay、发现设备、发起/结束远控、渲染 WebRTC 视频，并发送点击、拖拽、键盘、滚轮输入。
 - Desktop 端可作为 Windows/macOS agent，也可作为 Desktop controller；UI 已支持在线设备列表、目标选择、Live Metrics、E2E proof 控制和桌面自检。
 - Relay 支持设备注册、心跳、会话建立/结束、WebRTC offer/answer/ICE 转发、输入转发、输入执行回执、跨端指标聚合和 proof API。
 - TURN 服务由 `apps/server/cmd/turn-server` 提供，本地联调可直接启动。
-- Windows 端已经完成 Android -> Windows 单路 proof：输入 `11/11` 落地，覆盖 `click,drag,keyboard,wheel`，执行器为 `windows.send_input`。
-- 仍未稳定通过：最新 Android -> Windows 约 5.7min 实跑中，视频 proof 成功但 `render_fps_avg=2.55`，proof 后出现长时间 `frame_stalled`。下一步重点是 Android WebRTC render stall 与 Windows sender 连续性。
+- Android 真机 -> macOS agent 的主链路已经进入稳定性收口：短断恢复、输入覆盖和恢复后质量窗口已有自动化报告证据。
+- 当前仍不能宣称最终“肉眼无明显卡顿”：较长真机 soak 虽然基础指标 PASS，但仍留下 `render_frame_stutter` 与 1s 级帧间隔 spike 线索。
 
 更详细的进度和证据见：
 
+- `docs/remote_control_progress_checklist.md`
 - `docs/development_notes.md`
 - `docs/webrtc_native_media_pipeline_plan.md`
 - `docs/windows_desktop_runbook.md`
