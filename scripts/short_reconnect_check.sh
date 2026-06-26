@@ -24,6 +24,13 @@ RESTART_TRIAD=1
 SESSION_TIMEOUT_SEC=50
 RECOVERY_TIMEOUT_SEC=70
 INPUT_PROOF_TIMEOUT_SEC=30
+QUALITY_TIMEOUT_SEC=35
+QUALITY_SAMPLE_COUNT=5
+MIN_QUALITY_FPS=23.5
+QUALITY_STALL_FPS=10
+QUALITY_STALL_WINDOW_MS=30000
+QUALITY_RTT_HIGH_MS=220
+QUALITY_DROP_SPIKE=30
 AUTO_PROOF_INPUT=1
 LEAVE_SESSION_RUNNING=1
 
@@ -50,6 +57,11 @@ Options:
   --session-timeout <sec>   Timeout for initial first frame, default: 50
   --recovery-timeout <sec>  Timeout for recovered first frame, default: 70
   --input-timeout <sec>     Timeout for recovered input proof, default: 30
+  --quality-timeout <sec>   Timeout for recovered quality proof, default: 35
+  --quality-samples <n>     Recent render samples required for quality proof, default: 5
+  --min-quality-fps <n>     Minimum recent average FPS after reconnect, default: 23.5
+  --quality-stall-fps <n>   FPS treated as a stall sample, default: 10
+  --quality-drop-spike <n>  Max recovered-window dropped-frame delta, default: 30
   --no-auto-proof-input     Do not ask Android to send proof input automatically
   --end-session             End the recovered session after report generation
   -h, --help                Show help
@@ -88,6 +100,26 @@ parse_args() {
         ;;
       --input-timeout)
         INPUT_PROOF_TIMEOUT_SEC="$2"
+        shift
+        ;;
+      --quality-timeout)
+        QUALITY_TIMEOUT_SEC="$2"
+        shift
+        ;;
+      --quality-samples)
+        QUALITY_SAMPLE_COUNT="$2"
+        shift
+        ;;
+      --min-quality-fps)
+        MIN_QUALITY_FPS="$2"
+        shift
+        ;;
+      --quality-stall-fps)
+        QUALITY_STALL_FPS="$2"
+        shift
+        ;;
+      --quality-drop-spike)
+        QUALITY_DROP_SPIKE="$2"
         shift
         ;;
       --no-auto-proof-input)
@@ -521,6 +553,165 @@ PY
   return 1
 }
 
+latest_quality_proof_after() {
+  local android_start_line="$1"
+  local session_id="$2"
+  # 作者: long；短断恢复后的质量验收只看新首帧之后的 Android 渲染/网络采样，避免 relay 断开期间的长 gap 被累计指标带进恢复质量判断。
+  python3 - "${ANDROID_LOG}" "${android_start_line}" "${session_id}" "${QUALITY_SAMPLE_COUNT}" "${MIN_QUALITY_FPS}" "${QUALITY_STALL_FPS}" "${QUALITY_STALL_WINDOW_MS}" "${QUALITY_RTT_HIGH_MS}" "${QUALITY_DROP_SPIKE}" <<'PY'
+import json
+import re
+import statistics
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+start_line = int(sys.argv[2])
+session_id = sys.argv[3]
+sample_count = int(sys.argv[4])
+min_quality_fps = float(sys.argv[5])
+stall_fps = float(sys.argv[6])
+stall_window_ms = int(float(sys.argv[7]))
+rtt_high_ms = float(sys.argv[8])
+drop_spike_limit = int(float(sys.argv[9]))
+
+render_re = re.compile(
+    r"render_frame_sample session=(?P<session>\S+) .*?fps=(?P<fps>[-\d.]+) "
+    r".*?low_fps_streak_ms=(?P<low>\d+) .*?longest_gap_ms=(?P<gap>\d+) size=(?P<size>\S+)"
+)
+net_re = re.compile(
+    r"net_stats session=(?P<session>\S+) .*?frames_dropped=(?P<dropped>\d+) "
+    r".*?frames_dropped_spike_max=(?P<spike>\d+) .*?rtt_ms=(?P<rtt>[-\d.]+) "
+    r".*?candidate_tier=(?P<tier>\S+)"
+)
+
+def parse_optional_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+render_samples = []
+net_samples = []
+if path.exists():
+    with path.open("r", errors="replace") as handle:
+        for line_no, line in enumerate(handle, start=1):
+            if line_no <= start_line or session_id not in line:
+                continue
+            render_match = render_re.search(line)
+            if render_match and render_match.group("session") == session_id:
+                render_samples.append(
+                    {
+                        "line": line_no,
+                        "fps": float(render_match.group("fps")),
+                        "low_fps_streak_ms": int(render_match.group("low")),
+                        "longest_gap_ms": int(render_match.group("gap")),
+                        "size": render_match.group("size"),
+                    }
+                )
+                continue
+            net_match = net_re.search(line)
+            if net_match and net_match.group("session") == session_id:
+                net_samples.append(
+                    {
+                        "line": line_no,
+                        "frames_dropped": int(net_match.group("dropped")),
+                        "frames_dropped_spike_max": int(net_match.group("spike")),
+                        "rtt_ms": parse_optional_float(net_match.group("rtt")),
+                        "candidate_tier": net_match.group("tier"),
+                    }
+                )
+
+if len(render_samples) < sample_count:
+    latest = {
+        "passed": False,
+        "reason": "not_enough_render_samples",
+        "session_id": session_id,
+        "render_sample_count": len(render_samples),
+        "required_render_sample_count": sample_count,
+    }
+    print(json.dumps(latest, ensure_ascii=False))
+    raise SystemExit(0)
+
+recent_render = render_samples[-sample_count:]
+recent_fps = [sample["fps"] for sample in recent_render]
+recent_net = [sample for sample in net_samples if sample["line"] >= recent_render[0]["line"]]
+if not recent_net:
+    recent_net = net_samples[-1:]
+
+fps_avg = statistics.fmean(recent_fps)
+fps_min = min(recent_fps)
+max_low_fps_streak_ms = max(sample["low_fps_streak_ms"] for sample in recent_render)
+drop_values = [sample["frames_dropped"] for sample in recent_net]
+frames_dropped_delta = (max(drop_values) - min(drop_values)) if len(drop_values) >= 2 else 0
+max_drop_spike = max((sample["frames_dropped_spike_max"] for sample in recent_net), default=0)
+rtt_high_samples = sum(1 for sample in recent_net if sample["rtt_ms"] is not None and sample["rtt_ms"] >= rtt_high_ms)
+candidate_tiers = sorted({sample["candidate_tier"] for sample in recent_net if sample["candidate_tier"] != "-"})
+tcp_tiers = [tier for tier in candidate_tiers if tier.endswith("_tcp")]
+passed = (
+    fps_avg >= min_quality_fps
+    and max_low_fps_streak_ms < stall_window_ms
+    and frames_dropped_delta < drop_spike_limit
+    and rtt_high_samples == 0
+    and not tcp_tiers
+)
+
+print(
+    json.dumps(
+        {
+            "passed": passed,
+            "session_id": session_id,
+            "render_sample_count": len(render_samples),
+            "recent_sample_count": len(recent_render),
+            "fps_avg_recent": round(fps_avg, 2),
+            "fps_min_recent": round(fps_min, 2),
+            "min_quality_fps": min_quality_fps,
+            "max_low_fps_streak_ms": max_low_fps_streak_ms,
+            "stall_window_ms": stall_window_ms,
+            "frames_dropped_delta_recent": frames_dropped_delta,
+            "max_frames_dropped_spike_observed": max_drop_spike,
+            "frames_drop_spike_limit": drop_spike_limit,
+            "rtt_high_samples": rtt_high_samples,
+            "rtt_high_ms": rtt_high_ms,
+            "candidate_tiers": candidate_tiers,
+            "first_recent_line": recent_render[0]["line"],
+            "last_recent_line": recent_render[-1]["line"],
+            "frame_size_last": recent_render[-1]["size"],
+        },
+        ensure_ascii=False,
+    )
+)
+PY
+}
+
+wait_for_quality_proof() {
+  local android_start_line="$1"
+  local session_id="$2"
+  local timeout_sec="$3"
+  local waited=0
+  local result=""
+  FOUND_QUALITY_PROOF=""
+  while (( waited < timeout_sec )); do
+    result="$(latest_quality_proof_after "${android_start_line}" "${session_id}")"
+    FOUND_QUALITY_PROOF="${result}"
+    if [[ -z "${result}" ]]; then
+      sleep 1
+      (( waited += 1 ))
+      continue
+    fi
+    if QUALITY_JSON="${result}" python3 - <<'PY'
+import json
+import os
+raise SystemExit(0 if json.loads(os.environ["QUALITY_JSON"]).get("passed") else 1)
+PY
+    then
+      return 0
+    fi
+    sleep 1
+    (( waited += 1 ))
+  done
+  return 1
+}
+
 write_report() {
   local out_md="$1"
   local out_json="$2"
@@ -535,6 +726,7 @@ write_report() {
   local recovery_intent="${11}"
   local recovery_request="${12}"
   local proof_json="${13:-}"
+  local quality_json="${14:-}"
 
   REPORT_OVERALL="${overall}" \
   REPORT_TARGET="${target_device_id}" \
@@ -548,6 +740,7 @@ write_report() {
   REPORT_RECOVERY_INTENT="${recovery_intent}" \
   REPORT_RECOVERY_REQUEST="${recovery_request}" \
   REPORT_PROOF_JSON="${proof_json}" \
+  REPORT_QUALITY_JSON="${quality_json}" \
   REPORT_OUT_MD="${out_md}" \
   REPORT_OUT_JSON="${out_json}" \
   python3 - <<'PY'
@@ -557,6 +750,8 @@ from pathlib import Path
 
 proof_raw = os.environ.get("REPORT_PROOF_JSON", "")
 proof = json.loads(proof_raw) if proof_raw else {}
+quality_raw = os.environ.get("REPORT_QUALITY_JSON", "")
+quality = json.loads(quality_raw) if quality_raw else {}
 data = {
     "overall": os.environ["REPORT_OVERALL"],
     "target_device_id": os.environ["REPORT_TARGET"],
@@ -570,6 +765,7 @@ data = {
     "recovery_intent_observed": os.environ["REPORT_RECOVERY_INTENT"] == "true",
     "recovery_request_observed": os.environ["REPORT_RECOVERY_REQUEST"] == "true",
     "input_proof": proof,
+    "quality_proof": quality,
 }
 
 Path(os.environ["REPORT_OUT_JSON"]).write_text(
@@ -582,6 +778,12 @@ coverage = ",".join(proof.get("remote_input_coverage", [])) or "-"
 applied = proof.get("remote_input_result_applied_count", 0)
 total = proof.get("remote_input_result_count", 0)
 failed = proof.get("remote_input_result_failed_count", 0)
+quality_passed = quality.get("passed", False)
+quality_fps = quality.get("fps_avg_recent", "-")
+quality_min_fps = quality.get("fps_min_recent", "-")
+quality_samples = quality.get("recent_sample_count", 0)
+quality_drop_spike = quality.get("frames_dropped_delta_recent", "-")
+quality_tiers = ",".join(quality.get("candidate_tiers", [])) or "-"
 md = [
     "# Short Reconnect Check",
     "",
@@ -598,6 +800,12 @@ md = [
     f"- remote_input_applied: `{applied:g}/{total:g}`",
     f"- remote_input_failed: `{failed:g}`",
     f"- remote_input_coverage: `{coverage}`",
+    f"- quality_proof_passed: `{quality_passed}`",
+    f"- quality_fps_avg_recent: `{quality_fps}`",
+    f"- quality_fps_min_recent: `{quality_min_fps}`",
+    f"- quality_recent_samples: `{quality_samples}`",
+    f"- quality_drop_delta_recent: `{quality_drop_spike}`",
+    f"- quality_candidate_tiers: `{quality_tiers}`",
     f"- render_fps_avg: `{proof.get('render_fps_avg', '-')}`",
     f"- rtt_ms_avg: `{proof.get('rtt_ms_avg', '-')}`",
     f"- candidate_tier_last: `{proof.get('candidate_tier_last', '-')}`",
@@ -739,11 +947,37 @@ main() {
         "${recovery_ms}" \
         "${recovery_intent_observed}" \
         "${recovery_request_observed}" \
-        "${proof_json}"
+        "${proof_json}" \
+        "${FOUND_QUALITY_PROOF:-}"
       exit 1
     fi
     proof_json="${FOUND_INPUT_PROOF}"
   fi
+
+  local quality_json=""
+  if ! wait_for_quality_proof "${new_frame_line}" "${new_session}" "${QUALITY_TIMEOUT_SEC}"; then
+    quality_json="${FOUND_QUALITY_PROOF}"
+    echo "recovered session did not satisfy quality proof within ${QUALITY_TIMEOUT_SEC}s" >&2
+    local ts_quality_fail
+    ts_quality_fail="$(date '+%Y%m%d_%H%M%S')"
+    write_report \
+      "${REPORT_DIR}/short_reconnect_${ts_quality_fail}.md" \
+      "${REPORT_DIR}/short_reconnect_${ts_quality_fail}.json" \
+      "FAIL" \
+      "${target_device_id}" \
+      "${old_session}" \
+      "${new_session}" \
+      "${old_frame_size}" \
+      "${new_frame_size}" \
+      "${new_frame_since}" \
+      "${recovery_ms}" \
+      "${recovery_intent_observed}" \
+      "${recovery_request_observed}" \
+      "${proof_json}" \
+      "${quality_json}"
+    exit 1
+  fi
+  quality_json="${FOUND_QUALITY_PROOF}"
 
   maybe_end_session
 
@@ -766,7 +1000,8 @@ main() {
     "${recovery_ms}" \
     "${recovery_intent_observed}" \
     "${recovery_request_observed}" \
-    "${proof_json}"
+    "${proof_json}" \
+    "${quality_json}"
 
   log "done -> ${out_md}"
   echo "${out_md}"
