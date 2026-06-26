@@ -435,7 +435,11 @@ pub fn run_desktop_self_test() -> DesktopSelfTestReport {
                 checks.push(DiagnosticCheck {
                     name: "capture.sources",
                     ok: selected.is_some(),
-                    status: if selected.is_some() { "passed" } else { "failed" },
+                    status: if selected.is_some() {
+                        "passed"
+                    } else {
+                        "failed"
+                    },
                     detail: format!("available_sources={}", sources.len()),
                 });
 
@@ -560,7 +564,11 @@ pub fn run_desktop_self_test() -> DesktopSelfTestReport {
                 checks.push(DiagnosticCheck {
                     name: "host_input.dispatch_sequence",
                     ok: dispatch_result.ok,
-                    status: if dispatch_result.ok { "passed" } else { "failed" },
+                    status: if dispatch_result.ok {
+                        "passed"
+                    } else {
+                        "failed"
+                    },
                     detail: dispatch_result.detail,
                 });
                 let _ = host::sync_session(None);

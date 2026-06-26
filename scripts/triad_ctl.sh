@@ -547,9 +547,9 @@ start_android() {
   adb_cmd logcat -c >/dev/null 2>&1 || true
   screen_stop "${ANDROID_LOGCAT_SCREEN}"
   if [[ -n "${RD_ANDROID_SERIAL}" ]]; then
-    screen_start "${ANDROID_LOGCAT_SCREEN}" bash -lc "adb -s '${RD_ANDROID_SERIAL}' logcat -v time RemoteDeskRtc:I RemoteDeskWs:I RemoteDeskUi:I '*:S' >> '${ANDROID_LOG}' 2>&1"
+    screen_start "${ANDROID_LOGCAT_SCREEN}" bash -lc "adb -s '${RD_ANDROID_SERIAL}' logcat -v time RemoteDeskRtc:I RemoteDeskWs:I RemoteDeskUi:I RemoteDeskSoak:I '*:S' >> '${ANDROID_LOG}' 2>&1"
   else
-    screen_start "${ANDROID_LOGCAT_SCREEN}" bash -lc "adb logcat -v time RemoteDeskRtc:I RemoteDeskWs:I RemoteDeskUi:I '*:S' >> '${ANDROID_LOG}' 2>&1"
+    screen_start "${ANDROID_LOGCAT_SCREEN}" bash -lc "adb logcat -v time RemoteDeskRtc:I RemoteDeskWs:I RemoteDeskUi:I RemoteDeskSoak:I '*:S' >> '${ANDROID_LOG}' 2>&1"
   fi
 
   launch_android_app

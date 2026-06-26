@@ -92,6 +92,14 @@ class StubSessionController(
     ),
   )
 
+  fun webrtcRestartIceMessage(sessionId: String, reason: String): String = buildMessage(
+    type = "webrtc.restart_ice",
+    sessionId = sessionId,
+    payload = mapOf(
+      "reason" to reason,
+    ),
+  )
+
   fun inputMessage(sessionId: String, x: Double, y: Double, inputCategory: String = ""): String = buildMessage(
     type = "input.mouse.move",
     sessionId = sessionId,

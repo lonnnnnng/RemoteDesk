@@ -108,6 +108,30 @@ func TestBuildTurnURLsTransportFilter(t *testing.T) {
 	}
 }
 
+func TestFilterTurnHostsForAndroidPhone(t *testing.T) {
+	hosts := []string{"127.0.0.1", "10.0.2.2", "192.168.1.20", "10.93.137.12"}
+	filtered := filterTurnHostsForControllerProfile(hosts, "android_phone")
+	joined := strings.Join(filtered, ",")
+	if strings.Contains(joined, "10.0.2.2") {
+		t.Fatalf("android_phone turn hosts should not include emulator gateway: %#v", filtered)
+	}
+	if len(filtered) != 3 {
+		t.Fatalf("expected three filtered hosts, got %#v", filtered)
+	}
+	if filtered[len(filtered)-1] != "127.0.0.1" {
+		t.Fatalf("expected loopback host to be last for android_phone, got %#v", filtered)
+	}
+}
+
+func TestFilterTurnHostsKeepsEmulatorGatewayForEmulator(t *testing.T) {
+	hosts := []string{"127.0.0.1", "10.0.2.2"}
+	filtered := filterTurnHostsForControllerProfile(hosts, "emulator")
+	joined := strings.Join(filtered, ",")
+	if !strings.Contains(joined, "10.0.2.2") {
+		t.Fatalf("emulator turn hosts should keep emulator gateway, got %#v", filtered)
+	}
+}
+
 func TestResolveRelayUdpHighRttMsDefault(t *testing.T) {
 	t.Setenv("RD_ICE_POLICY_RELAY_UDP_HIGH_RTT_MS", "")
 	value := resolveRelayUdpHighRttMs()

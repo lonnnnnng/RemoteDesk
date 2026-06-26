@@ -46,7 +46,7 @@ func BuildApprovedResult(req protocol.Envelope, sessionID string) protocol.Envel
 
 func BuildStart(current store.Session, traceID string, publicWSURL string) protocol.Envelope {
 	now := time.Now().UnixMilli()
-	turnHosts := resolveLocalTurnHosts(publicWSURL)
+	turnHosts := resolveTurnHostsForControllerProfile(publicWSURL, current.ControllerProfile)
 	turnPort := resolveTurnPort()
 	icePolicy := resolveIceServerPolicy()
 	iceServers := make([]map[string]any, 0, 2)
@@ -94,6 +94,44 @@ func BuildStart(current store.Session, traceID string, publicWSURL string) proto
 			},
 			"start_deadline_ms": 15000,
 		},
+	}
+}
+
+func resolveTurnHostsForControllerProfile(publicWSURL string, controllerProfile string) []string {
+	return filterTurnHostsForControllerProfile(
+		resolveLocalTurnHosts(publicWSURL),
+		controllerProfile,
+	)
+}
+
+func filterTurnHostsForControllerProfile(hosts []string, controllerProfile string) []string {
+	physicalAndroid := strings.EqualFold(strings.TrimSpace(controllerProfile), "android_phone")
+	result := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		normalized := strings.TrimSpace(strings.ToLower(host))
+		if normalized == "" {
+			continue
+		}
+		if physicalAndroid && normalized == "10.0.2.2" {
+			continue
+		}
+		result = append(result, normalized)
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		return turnHostPriority(result[i], physicalAndroid) < turnHostPriority(result[j], physicalAndroid)
+	})
+	return result
+}
+
+func turnHostPriority(host string, physicalAndroid bool) int {
+	if !physicalAndroid {
+		return 0
+	}
+	switch strings.TrimSpace(strings.ToLower(host)) {
+	case "127.0.0.1", "localhost", "::1":
+		return 2
+	default:
+		return 0
 	}
 }
 

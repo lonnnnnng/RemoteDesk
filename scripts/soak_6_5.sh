@@ -304,16 +304,70 @@ countdown() {
   done
 }
 
+mark_android_phase() {
+  local session="$1"
+  local phase="$2"
+  local duration="$3"
+  # 作者: long；阶段标记写入 Android logcat，报告才能把后台切换污染和可见播放卡顿分开判定。
+  adb_cmd shell log -t RemoteDeskSoak "soak_phase session=${session:-unknown} phase=${phase} duration_sec=${duration}" >/dev/null 2>&1 || true
+}
+
+remote_viewport_swipe_points() {
+  local bounds_xml=""
+  local bounds=""
+  adb_cmd shell uiautomator dump /sdcard/rd_soak_ui.xml >/dev/null 2>&1 || true
+  bounds_xml="$(adb_cmd exec-out cat /sdcard/rd_soak_ui.xml 2>/dev/null || true)"
+  bounds="$(printf '%s\n' "${bounds_xml}" \
+    | tr '>' '>\n' \
+    | sed -nE 's/.*resource-id="com\.remotedesk\.app:id\/remoteViewportContainer"[^>]*bounds="\[([0-9]+),([0-9]+)\]\[([0-9]+),([0-9]+)\]".*/\1 \2 \3 \4/p' \
+    | head -1)"
+  if [[ -n "${bounds}" ]]; then
+    local left top right bottom
+    read -r left top right bottom <<<"${bounds}"
+    local width=$(( right - left ))
+    local height=$(( bottom - top ))
+    if (( width > 120 && height > 120 )); then
+      local x=$(( left + width / 2 ))
+      local y1=$(( top + height * 72 / 100 ))
+      local y2=$(( top + height * 34 / 100 ))
+      # 作者: long；动态压测必须落在远端画面控件内部，否则固定坐标可能滚动 Android 外层页面，制造与远控画面无关的 Surface 重排卡顿。
+      printf '%s %s %s %s\n' "${x}" "${y1}" "${x}" "${y2}"
+      adb_cmd shell log -t RemoteDeskSoak "soak_dynamic_bounds source=remoteViewportContainer left=${left} top=${top} right=${right} bottom=${bottom} x=${x} y1=${y1} y2=${y2}" >/dev/null 2>&1 || true
+      return 0
+    fi
+  fi
+
+  local size_line=""
+  size_line="$(adb_cmd shell wm size 2>/dev/null | tr -d '\r' || true)"
+  if [[ "${size_line}" =~ ([0-9]+)x([0-9]+) ]]; then
+    local screen_w="${BASH_REMATCH[1]}"
+    local screen_h="${BASH_REMATCH[2]}"
+    local x=$(( screen_w / 2 ))
+    local y1=$(( screen_h * 62 / 100 ))
+    local y2=$(( screen_h * 42 / 100 ))
+    printf '%s %s %s %s\n' "${x}" "${y1}" "${x}" "${y2}"
+    adb_cmd shell log -t RemoteDeskSoak "soak_dynamic_bounds source=screen_fallback width=${screen_w} height=${screen_h} x=${x} y1=${y1} y2=${y2}" >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  printf '540 1560 540 980\n'
+  adb_cmd shell log -t RemoteDeskSoak "soak_dynamic_bounds source=legacy_fallback x=540 y1=1560 y2=980" >/dev/null 2>&1 || true
+}
+
 dynamic_pressure_phase() {
   local duration="$1"
   local elapsed=0
   local step=5
   adb_cmd shell am start -n "${ANDROID_ACTIVITY}" >/dev/null || true
   sleep 1
+  local swipe_points
+  swipe_points="$(remote_viewport_swipe_points)"
+  local swipe_x1 swipe_y1 swipe_x2 swipe_y2
+  read -r swipe_x1 swipe_y1 swipe_x2 swipe_y2 <<<"${swipe_points}"
   while (( elapsed < duration )); do
-    # Swipe inside remote frame area to generate scrolling/motion pressure.
-    adb_cmd shell input swipe 540 1560 540 980 220 >/dev/null 2>&1 || true
-    adb_cmd shell input swipe 540 980 540 1560 220 >/dev/null 2>&1 || true
+    # 作者: long；这里验证手机端连续控制 Mac 的拖拽链路，坐标来自远端画面 bounds，避免压到 Android 页面滚动本身。
+    adb_cmd shell input swipe "${swipe_x1}" "${swipe_y1}" "${swipe_x2}" "${swipe_y2}" 220 >/dev/null 2>&1 || true
+    adb_cmd shell input swipe "${swipe_x2}" "${swipe_y2}" "${swipe_x1}" "${swipe_y1}" 220 >/dev/null 2>&1 || true
     sleep "${step}"
     elapsed=$(( elapsed + step ))
     if (( elapsed % 30 == 0 )); then
@@ -360,21 +414,26 @@ main() {
   log "session started: ${sid:-unknown}"
 
   log "phase 1 foreground: ${PHASE_FG_SEC}s"
+  mark_android_phase "${sid}" "foreground" "${PHASE_FG_SEC}"
   adb_cmd shell am start -n "${ANDROID_ACTIVITY}" >/dev/null || true
   countdown "foreground" "${PHASE_FG_SEC}"
 
   log "phase 2 background: ${PHASE_BG_SEC}s"
+  mark_android_phase "${sid}" "background" "${PHASE_BG_SEC}"
   adb_cmd shell input keyevent KEYCODE_HOME >/dev/null 2>&1 || true
   countdown "background" "${PHASE_BG_SEC}"
 
   log "phase 3 dynamic pressure: ${PHASE_DYNAMIC_SEC}s"
+  mark_android_phase "${sid}" "dynamic" "${PHASE_DYNAMIC_SEC}"
   dynamic_pressure_phase "${PHASE_DYNAMIC_SEC}"
 
   log "phase 4 recovery foreground: ${PHASE_RECOVER_SEC}s"
+  mark_android_phase "${sid}" "recovery" "${PHASE_RECOVER_SEC}"
   adb_cmd shell am start -n "${ANDROID_ACTIVITY}" >/dev/null || true
   countdown "recovery" "${PHASE_RECOVER_SEC}"
 
   log "ending session"
+  mark_android_phase "${sid}" "ending" "0"
   local before_end_lines
   before_end_lines="$(current_line_count "${ANDROID_LOG}")"
   adb_cmd shell input tap "${TAP_X}" "${TAP_Y}" >/dev/null 2>&1 || true

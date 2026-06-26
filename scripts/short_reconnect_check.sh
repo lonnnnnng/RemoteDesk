@@ -574,9 +574,13 @@ stall_window_ms = int(float(sys.argv[7]))
 rtt_high_ms = float(sys.argv[8])
 drop_spike_limit = int(float(sys.argv[9]))
 
+# 作者: long；Android 渲染采样日志会继续追加 recent_* 字段，解析时只锚定质量验收需要的字段，避免指标扩展后把真实样本误判为 0。
 render_re = re.compile(
-    r"render_frame_sample session=(?P<session>\S+) .*?fps=(?P<fps>[-\d.]+) "
-    r".*?low_fps_streak_ms=(?P<low>\d+) .*?longest_gap_ms=(?P<gap>\d+) size=(?P<size>\S+)"
+    r"render_frame_sample session=(?P<session>\S+) "
+    r".*?\bfps=(?P<fps>[-\d.]+)\b "
+    r".*?\blow_fps_streak_ms=(?P<low>\d+)\b "
+    r".*?\blongest_gap_ms=(?P<gap>\d+)\b "
+    r".*?\bsize=(?P<size>\S+)"
 )
 net_re = re.compile(
     r"net_stats session=(?P<session>\S+) .*?frames_dropped=(?P<dropped>\d+) "

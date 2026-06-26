@@ -249,8 +249,9 @@ struct NativeSenderOutboundRtpSnapshot {
 
 const NATIVE_SENDER_PROBE_DEFAULT_INTERVAL_MS: u64 = 42;
 const NATIVE_SENDER_PROBE_SAMPLE_WINDOW_MS: u64 = 2000;
-const NATIVE_SENDER_FORCE_INTRA_INTERVAL_FRAMES: u64 = 72;
-const NATIVE_SENDER_ENCODER_THREADS: u16 = 2;
+const NATIVE_SENDER_INTRA_PERIOD_SECONDS: u32 = 4;
+const NATIVE_SENDER_FORCE_INTRA_INTERVAL_FRAMES: u64 = 156;
+const NATIVE_SENDER_ENCODER_THREADS: u16 = 4;
 
 fn target_loop_interval_ms(capture_fps: u32) -> u64 {
     let fps = capture_fps.max(1);
@@ -501,7 +502,9 @@ fn normalize_signal_direction(direction: &str) -> &'static str {
 fn build_h264_encoder(target_fps: u16) -> Result<Encoder, String> {
     let fps_u16 = target_fps.max(1);
     let fps = fps_u16 as f32;
-    let intra_period = IntraFramePeriod::from_num_frames(fps_u16.max(10) as u32);
+    let intra_period_frames =
+        u32::from(fps_u16.max(10)).saturating_mul(NATIVE_SENDER_INTRA_PERIOD_SECONDS);
+    let intra_period = IntraFramePeriod::from_num_frames(intra_period_frames);
     let config = EncoderConfig::new()
         .usage_type(UsageType::ScreenContentRealTime)
         .rate_control_mode(RateControlMode::Bitrate)
@@ -511,7 +514,7 @@ fn build_h264_encoder(target_fps: u16) -> Result<Encoder, String> {
         .bitrate(BitRate::from_bps(2_500_000))
         .max_frame_rate(FrameRate::from_hz(fps))
         .intra_frame_period(intra_period)
-        // 作者: long；720p 真机远控的编码耗时贴近 24fps 下沿，固定 2 线程减少单帧尾延迟，同时避免过多线程抢占 UI/信令。
+        // 作者: long；720p 真机远控的 soak 低点集中在关键帧和高码率窗口，拉长周期关键帧并增加编码线程，为 26fps 采集留出 24fps 以上的稳定余量。
         .num_threads(NATIVE_SENDER_ENCODER_THREADS)
         .skip_frames(false);
     Encoder::with_api_config(openh264::OpenH264API::from_source(), config)
@@ -1282,10 +1285,12 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                                         trace_native_sender(
                                             "encoder.ready",
                                             format!(
-                                                "session={} mime=video/H264 capture_fps={} encoder_threads={}",
+                                                "session={} mime=video/H264 capture_fps={} encoder_threads={} intra_period_sec={} force_intra_frames={}",
                                                 session_for_thread,
                                                 capture_fps,
-                                                NATIVE_SENDER_ENCODER_THREADS
+                                                NATIVE_SENDER_ENCODER_THREADS,
+                                                NATIVE_SENDER_INTRA_PERIOD_SECONDS,
+                                                NATIVE_SENDER_FORCE_INTRA_INTERVAL_FRAMES
                                             ),
                                         );
                                     }

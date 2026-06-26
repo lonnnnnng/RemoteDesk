@@ -1224,17 +1224,29 @@ func extractSessionCombinedSummary(controllerReport, agentReport map[string]any)
 
 	firstFrameMs, firstFrameOk := asNumber(controller["first_frame_ms"])
 	renderFpsAvg, renderFpsOk := asNumber(controller["render_fps_avg"])
+	renderFpsRecent, renderFpsRecentOK := asNumber(controller["render_fps_recent"])
+	renderRecentSampleCount, renderRecentSampleCountOK := asNumber(controller["render_recent_sample_count"])
+	renderRecentWindowMs, renderRecentWindowMsOK := asNumber(controller["render_recent_window_ms"])
 	recvKbpsAvg, recvKbpsOk := asNumber(controller["recv_kbps_avg"])
 	renderedFrames, renderedFramesOk := asNumber(controller["rendered_frames"])
 	rttMsAvg, rttMsAvgOk := asNumber(controller["rtt_ms_avg"])
 	icePolicyRestarts, icePolicyRestartsOk := asNumber(controller["ice_policy_restarts"])
 	renderLongestFrameGapMs, renderLongestFrameGapMsOK := asNumber(controller["render_longest_frame_gap_ms"])
+	renderRecentMaxFrameGapMs, renderRecentMaxFrameGapMsOK := asNumber(controller["render_recent_max_frame_gap_ms"])
 	renderFrameGapSpikeCount, renderFrameGapSpikeCountOK := asNumber(controller["render_frame_gap_spike_count"])
 	renderLowFpsSampleCount, renderLowFpsSampleCountOK := asNumber(controller["render_low_fps_sample_count"])
 	renderLongestLowFpsStreakMs, renderLongestLowFpsStreakMsOK := asNumber(controller["render_longest_low_fps_streak_ms"])
+	renderRecentLowFpsStreakMs, renderRecentLowFpsStreakMsOK := asNumber(controller["render_recent_low_fps_streak_ms"])
 	framesDroppedLast, framesDroppedLastOK := asNumber(controller["frames_dropped_last"])
 	framesDroppedSpikeMax, framesDroppedSpikeMaxOK := asNumber(controller["frames_dropped_spike_max"])
+	framesDroppedDeltaRecent, framesDroppedDeltaRecentOK := asNumber(controller["frames_dropped_delta_recent"])
+	framesDroppedSpikeRecent, framesDroppedSpikeRecentOK := asNumber(controller["frames_dropped_spike_recent"])
 	controllerQualityHint, controllerQualityHintOK := asTrimmedString(controller["controller_quality_hint"])
+	controllerQualityHintRecent, controllerQualityHintRecentOK := asTrimmedString(controller["controller_quality_hint_recent"])
+	localIceCandidateCallbackCount, localIceCandidateCallbackCountOK := asNumber(controller["local_ice_candidate_callback_count"])
+	localIceCandidateFallbackCount, localIceCandidateFallbackCountOK := asNumber(controller["local_ice_candidate_fallback_count"])
+	localIceCandidateSentCount, localIceCandidateSentCountOK := asNumber(controller["local_ice_candidate_sent_count"])
+	localIceCandidateSdpCount, localIceCandidateSdpCountOK := asNumber(controller["local_ice_candidate_sdp_count"])
 	remoteInputResultCount, remoteInputResultCountOK := asNumber(controller["remote_input_result_count"])
 	remoteInputResultAppliedCount, remoteInputResultAppliedCountOK := asNumber(controller["remote_input_result_applied_count"])
 	remoteInputResultFailedCount, remoteInputResultFailedCountOK := asNumber(controller["remote_input_result_failed_count"])
@@ -1327,6 +1339,15 @@ func extractSessionCombinedSummary(controllerReport, agentReport map[string]any)
 	if renderFpsOk {
 		summary["render_fps_avg"] = renderFpsAvg
 	}
+	if renderFpsRecentOK {
+		summary["render_fps_recent"] = renderFpsRecent
+	}
+	if renderRecentSampleCountOK {
+		summary["render_recent_sample_count"] = renderRecentSampleCount
+	}
+	if renderRecentWindowMsOK {
+		summary["render_recent_window_ms"] = renderRecentWindowMs
+	}
 	if recvKbpsOk {
 		summary["recv_kbps_avg"] = recvKbpsAvg
 	}
@@ -1342,6 +1363,9 @@ func extractSessionCombinedSummary(controllerReport, agentReport map[string]any)
 	if renderLongestFrameGapMsOK {
 		summary["render_longest_frame_gap_ms"] = renderLongestFrameGapMs
 	}
+	if renderRecentMaxFrameGapMsOK {
+		summary["render_recent_max_frame_gap_ms"] = renderRecentMaxFrameGapMs
+	}
 	if renderFrameGapSpikeCountOK {
 		summary["render_frame_gap_spike_count"] = renderFrameGapSpikeCount
 	}
@@ -1351,14 +1375,38 @@ func extractSessionCombinedSummary(controllerReport, agentReport map[string]any)
 	if renderLongestLowFpsStreakMsOK {
 		summary["render_longest_low_fps_streak_ms"] = renderLongestLowFpsStreakMs
 	}
+	if renderRecentLowFpsStreakMsOK {
+		summary["render_recent_low_fps_streak_ms"] = renderRecentLowFpsStreakMs
+	}
 	if framesDroppedLastOK {
 		summary["frames_dropped_last"] = framesDroppedLast
 	}
 	if framesDroppedSpikeMaxOK {
 		summary["frames_dropped_spike_max"] = framesDroppedSpikeMax
 	}
+	if framesDroppedDeltaRecentOK {
+		summary["frames_dropped_delta_recent"] = framesDroppedDeltaRecent
+	}
+	if framesDroppedSpikeRecentOK {
+		summary["frames_dropped_spike_recent"] = framesDroppedSpikeRecent
+	}
 	if controllerQualityHintOK {
 		summary["controller_quality_hint"] = controllerQualityHint
+	}
+	if controllerQualityHintRecentOK {
+		summary["controller_quality_hint_recent"] = controllerQualityHintRecent
+	}
+	if localIceCandidateCallbackCountOK {
+		summary["local_ice_candidate_callback_count"] = localIceCandidateCallbackCount
+	}
+	if localIceCandidateFallbackCountOK {
+		summary["local_ice_candidate_fallback_count"] = localIceCandidateFallbackCount
+	}
+	if localIceCandidateSentCountOK {
+		summary["local_ice_candidate_sent_count"] = localIceCandidateSentCount
+	}
+	if localIceCandidateSdpCountOK {
+		summary["local_ice_candidate_sdp_count"] = localIceCandidateSdpCount
 	}
 	if remoteInputResultCountOK {
 		summary["remote_input_result_count"] = remoteInputResultCount
@@ -1677,20 +1725,41 @@ func extractSessionCombinedSummary(controllerReport, agentReport map[string]any)
 		canvasSharePct, canvasShareOk,
 		bridgeCapabilityTier, bridgeCapabilityTierOk,
 	)
+	recentQualityAvailable := renderFpsRecentOK || renderRecentMaxFrameGapMsOK || renderRecentLowFpsStreakMsOK || framesDroppedSpikeRecentOK
+	if recentQualityAvailable {
+		summary["session_quality_hint_recent"] = inferSessionQualityHint(
+			renderFpsRecent, renderFpsRecentOK,
+			recvKbpsAvg, recvKbpsOk,
+			sendFps, sendFpsOk,
+			rttMsAvg, rttMsAvgOk,
+			renderRecentMaxFrameGapMs, renderRecentMaxFrameGapMsOK,
+			renderRecentLowFpsStreakMs, renderRecentLowFpsStreakMsOK,
+			framesDroppedSpikeRecent, framesDroppedSpikeRecentOK,
+			resolvedTier, resolvedTierOK,
+			canvasSharePct, canvasShareOk,
+			bridgeCapabilityTier, bridgeCapabilityTierOk,
+		)
+	}
 	summary["session_perf_summary"] = fmt.Sprintf(
-		"route=%s first_frame_ms=%s render_fps_avg=%s recv_kbps_avg=%s stutter_gap_ms=%s low_fps_streak_ms=%s drop_spike=%s send_fps=%s send_kbps=%s path=%s tier=%s canvas_share=%s remote_input_applied=%s/%s input_coverage=%s last_executor=%s last_status=%s",
+		"route=%s first_frame_ms=%s render_fps_avg=%s render_fps_recent=%s recv_kbps_avg=%s stutter_gap_ms=%s recent_gap_ms=%s low_fps_streak_ms=%s recent_low_fps_streak_ms=%s drop_spike=%s recent_drop_spike=%s send_fps=%s send_kbps=%s path=%s tier=%s canvas_share=%s local_ice_sent=%s agent_remote_ice=%s remote_input_applied=%s/%s input_coverage=%s last_executor=%s last_status=%s",
 		formatSummaryString(sessionRouteLabel, sessionRouteOK),
 		formatSummaryNumber(firstFrameMs, firstFrameOk, 0),
 		formatSummaryNumber(renderFpsAvg, renderFpsOk, 2),
+		formatSummaryNumber(renderFpsRecent, renderFpsRecentOK, 2),
 		formatSummaryNumber(recvKbpsAvg, recvKbpsOk, 2),
 		formatSummaryNumber(renderLongestFrameGapMs, renderLongestFrameGapMsOK, 0),
+		formatSummaryNumber(renderRecentMaxFrameGapMs, renderRecentMaxFrameGapMsOK, 0),
 		formatSummaryNumber(renderLongestLowFpsStreakMs, renderLongestLowFpsStreakMsOK, 0),
+		formatSummaryNumber(renderRecentLowFpsStreakMs, renderRecentLowFpsStreakMsOK, 0),
 		formatSummaryNumber(framesDroppedSpikeMax, framesDroppedSpikeMaxOK, 0),
+		formatSummaryNumber(framesDroppedSpikeRecent, framesDroppedSpikeRecentOK, 0),
 		formatSummaryNumber(sendFps, sendFpsOk, 2),
 		formatSummaryNumber(sendKbps, sendKbpsOk, 2),
 		formatSummaryString(resolvedPath, resolvedPathOK),
 		formatSummaryString(resolvedTier, resolvedTierOK),
 		formatSummaryPercent(canvasSharePct, canvasShareOk),
+		formatSummaryNumber(localIceCandidateSentCount, localIceCandidateSentCountOK, 0),
+		formatSummaryNumber(nativeSenderRemoteCandidateCount, nativeSenderRemoteCandidateCountOK, 0),
 		formatSummaryNumber(remoteInputResultAppliedCount, remoteInputResultAppliedCountOK, 0),
 		formatSummaryNumber(remoteInputResultCount, remoteInputResultCountOK, 0),
 		formatSummaryString(remoteInputCoverageText, len(remoteInputCoverage) > 0),

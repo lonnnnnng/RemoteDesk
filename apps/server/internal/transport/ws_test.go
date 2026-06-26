@@ -1077,16 +1077,28 @@ func TestUpsertSessionMetricsIncludesBridgeSummary(t *testing.T) {
 			"bridge_pipeline":                    "-",
 			"first_frame_ms":                     1200.0,
 			"render_fps_avg":                     22.5,
+			"render_fps_recent":                  24.2,
+			"render_recent_sample_count":         5.0,
+			"render_recent_window_ms":            10080.0,
 			"recv_kbps_avg":                      130.0,
 			"render_longest_frame_gap_ms":        96.0,
+			"render_recent_max_frame_gap_ms":     112.0,
 			"render_frame_gap_spike_count":       0.0,
 			"render_low_fps_sample_count":        0.0,
 			"render_longest_low_fps_streak_ms":   0.0,
+			"render_recent_low_fps_streak_ms":    0.0,
 			"frames_dropped_last":                2.0,
 			"frames_dropped_spike_max":           1.0,
+			"frames_dropped_delta_recent":        0.0,
+			"frames_dropped_spike_recent":        0.0,
 			"candidate_pair_last":                "srflx/srflx/udp",
 			"candidate_tier_last":                "p2p_udp",
 			"controller_quality_hint":            "stable",
+			"controller_quality_hint_recent":     "stable",
+			"local_ice_candidate_callback_count": 2.0,
+			"local_ice_candidate_fallback_count": 1.0,
+			"local_ice_candidate_sent_count":     3.0,
+			"local_ice_candidate_sdp_count":      3.0,
 			"remote_input_result_count":          4.0,
 			"remote_input_result_applied_count":  4.0,
 			"remote_input_result_failed_count":   1.0,
@@ -1211,11 +1223,26 @@ func TestUpsertSessionMetricsIncludesBridgeSummary(t *testing.T) {
 	if renderFps, ok := combined["render_fps_avg"].(float64); !ok || renderFps != 22.5 {
 		t.Fatalf("expected render_fps_avg=22.5, got %#v", combined["render_fps_avg"])
 	}
+	if renderFpsRecent, ok := combined["render_fps_recent"].(float64); !ok || renderFpsRecent != 24.2 {
+		t.Fatalf("expected render_fps_recent=24.2, got %#v", combined["render_fps_recent"])
+	}
 	if longestGap, ok := combined["render_longest_frame_gap_ms"].(float64); !ok || longestGap != 96 {
 		t.Fatalf("expected render_longest_frame_gap_ms=96, got %#v", combined["render_longest_frame_gap_ms"])
 	}
+	if recentGap, ok := combined["render_recent_max_frame_gap_ms"].(float64); !ok || recentGap != 112 {
+		t.Fatalf("expected render_recent_max_frame_gap_ms=112, got %#v", combined["render_recent_max_frame_gap_ms"])
+	}
 	if dropSpike, ok := combined["frames_dropped_spike_max"].(float64); !ok || dropSpike != 1 {
 		t.Fatalf("expected frames_dropped_spike_max=1, got %#v", combined["frames_dropped_spike_max"])
+	}
+	if recentQualityHint, _ := combined["session_quality_hint_recent"].(string); recentQualityHint != "stable" {
+		t.Fatalf("expected session_quality_hint_recent=stable, got %#v", combined["session_quality_hint_recent"])
+	}
+	if localIceSent, ok := combined["local_ice_candidate_sent_count"].(float64); !ok || localIceSent != 3 {
+		t.Fatalf("expected local_ice_candidate_sent_count=3, got %#v", combined["local_ice_candidate_sent_count"])
+	}
+	if localIceFallback, ok := combined["local_ice_candidate_fallback_count"].(float64); !ok || localIceFallback != 1 {
+		t.Fatalf("expected local_ice_candidate_fallback_count=1, got %#v", combined["local_ice_candidate_fallback_count"])
 	}
 	if sendFps, ok := combined["send_fps"].(float64); !ok || sendFps != 23.5 {
 		t.Fatalf("expected send_fps=23.5, got %#v", combined["send_fps"])
@@ -1270,6 +1297,9 @@ func TestUpsertSessionMetricsIncludesBridgeSummary(t *testing.T) {
 	}
 	if perfSummary, _ := combined["session_perf_summary"].(string); !strings.Contains(perfSummary, "remote_input_applied=4/4") {
 		t.Fatalf("expected session_perf_summary with remote_input_applied=4/4, got %#v", combined["session_perf_summary"])
+	}
+	if perfSummary, _ := combined["session_perf_summary"].(string); !strings.Contains(perfSummary, "local_ice_sent=3") || !strings.Contains(perfSummary, "agent_remote_ice=3") {
+		t.Fatalf("expected session_perf_summary with ICE candidate counts, got %#v", combined["session_perf_summary"])
 	}
 	if perfSummary, _ := combined["session_perf_summary"].(string); !strings.Contains(perfSummary, "input_coverage=click,drag,keyboard,wheel") {
 		t.Fatalf("expected session_perf_summary with complete input coverage, got %#v", combined["session_perf_summary"])

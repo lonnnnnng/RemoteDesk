@@ -13,7 +13,12 @@ from typing import Any
 
 
 SUMMARY_RE = re.compile(r"session_summary session=(?P<session>\S+)")
-RENDER_SAMPLE_RE = re.compile(r"render_frame_sample session=(?P<session>\S+) .*?fps=(?P<fps>[-\d.]+)")
+RENDER_SAMPLE_RE = re.compile(
+    r"render_frame_sample session=(?P<session>\S+) .*?fps=(?P<fps>[-\d.]+).*?"
+    r"low_fps_streak_ms=(?P<low_fps_streak>\d+).*?longest_gap_ms=(?P<longest_gap>\d+)"
+)
+GAP_SPIKE_RE = re.compile(r"render_frame_gap_spike session=(?P<session>\S+) gap_ms=(?P<gap>\d+)")
+SOAK_PHASE_RE = re.compile(r"RemoteDeskSoak.*soak_phase session=(?P<session>\S+) phase=(?P<phase>\S+)")
 NET_STATS_RE = re.compile(
     r"net_stats session=(?P<session>\S+) .*?frames_dropped=(?P<dropped>\d+) .*?"
     r"rtt_ms=(?P<rtt>[-\d.]+) .*?candidate_tier=(?P<tier>\S+)"
@@ -21,6 +26,7 @@ NET_STATS_RE = re.compile(
 SESSION_ENTER_RE = re.compile(r"进入会话 (?P<session>\S+)")
 TS_RE = re.compile(r"^(?P<md>\d{2}-\d{2}) (?P<hms>\d{2}:\d{2}:\d{2}\.\d{3})")
 REQUIRED_INPUT_CATEGORIES = ("click", "drag", "keyboard", "wheel")
+VISIBLE_PHASES = {"foreground", "dynamic", "recovery", "ending", "unknown"}
 
 
 @dataclass
@@ -114,6 +120,7 @@ def main() -> int:
     parser.add_argument("--stall-window-sec", type=float, default=30.0)
     parser.add_argument("--rtt-high-ms", type=float, default=220.0)
     parser.add_argument("--frames-drop-spike", type=int, default=30)
+    parser.add_argument("--max-visible-frame-gap-ms", type=int, default=1000)
     parser.add_argument("--require-input-proof", choices=["true", "false"], default="true")
     parser.add_argument("--out-md", required=True)
     parser.add_argument("--out-json", required=True)
@@ -131,6 +138,12 @@ def main() -> int:
     year = now.year
 
     summary_render_fps = None
+    summary_render_fps_recent = None
+    summary_recent_sample_count = None
+    summary_recent_window_ms = None
+    summary_recent_frame_gap_ms = None
+    summary_recent_low_fps_streak_ms = None
+    summary_controller_quality_hint_recent = "-"
     summary_rtt = None
     summary_candidate_tier = "-"
     summary_frames_dropped = None
@@ -143,11 +156,28 @@ def main() -> int:
     net_tier_last = "-"
     rtt_high_samples = 0
     candidate_tiers: set[str] = set()
+    current_phase = "unknown"
+    phase_gap_max: dict[str, int] = {}
+    phase_fps_samples: dict[str, list[float]] = {}
+    visible_gap_max = 0
+    all_gap_max = 0
+    gap_spikes: list[dict[str, Any]] = []
 
     for line in android_lines:
+        phase = SOAK_PHASE_RE.search(line)
+        if phase and phase.group("session") in {session_id, "unknown"}:
+            current_phase = phase.group("phase")
+            continue
+
         s = SUMMARY_RE.search(line)
         if s and s.group("session") == session_id:
             summary_render_fps = parse_float(extract_kv(line, "render_fps_avg") or "")
+            summary_render_fps_recent = parse_float(extract_kv(line, "render_fps_recent") or "")
+            summary_recent_sample_count = parse_float(extract_kv(line, "render_recent_samples") or "")
+            summary_recent_window_ms = parse_float(extract_kv(line, "render_recent_window_ms") or "")
+            summary_recent_frame_gap_ms = parse_float(extract_kv(line, "recent_frame_gap_ms") or "")
+            summary_recent_low_fps_streak_ms = parse_float(extract_kv(line, "recent_low_fps_streak_ms") or "")
+            summary_controller_quality_hint_recent = extract_kv(line, "controller_quality_hint_recent") or summary_controller_quality_hint_recent
             summary_rtt = parse_float(extract_kv(line, "rtt_ms_avg") or "")
             summary_candidate_tier = extract_kv(line, "candidate_tier_last") or "-"
             dropped_raw = extract_kv(line, "frames_dropped")
@@ -161,6 +191,17 @@ def main() -> int:
             ts = parse_ts(line, year)
             if fps is not None:
                 render_samples.append(fps)
+                phase_fps_samples.setdefault(current_phase, []).append(fps)
+            # 作者: long；阶段化验收关注当下阶段的可见帧间隔，不能只等 1s spike 日志，否则 861ms 这类接近卡顿的样本会从阶段统计里消失。
+            sample_gap = parse_float(extract_kv(line, "sample_gap_ms") or "")
+            if sample_gap is None:
+                sample_gap = parse_float(r.group("longest_gap"))
+            if sample_gap is not None:
+                gap_ms = int(sample_gap)
+                all_gap_max = max(all_gap_max, gap_ms)
+                phase_gap_max[current_phase] = max(phase_gap_max.get(current_phase, 0), gap_ms)
+                if current_phase in VISIBLE_PHASES:
+                    visible_gap_max = max(visible_gap_max, gap_ms)
             if fps is not None and fps < args.stall_fps and ts is not None:
                 if low_streak_start is None:
                     low_streak_start = ts
@@ -170,6 +211,23 @@ def main() -> int:
                     low_streak_max = max(low_streak_max, (low_streak_last - low_streak_start).total_seconds())
                 low_streak_start = None
                 low_streak_last = None
+            continue
+
+        g = GAP_SPIKE_RE.search(line)
+        if g and g.group("session") == session_id:
+            gap_ms = int(g.group("gap"))
+            ts = parse_ts(line, year)
+            all_gap_max = max(all_gap_max, gap_ms)
+            phase_gap_max[current_phase] = max(phase_gap_max.get(current_phase, 0), gap_ms)
+            if current_phase in VISIBLE_PHASES:
+                visible_gap_max = max(visible_gap_max, gap_ms)
+            gap_spikes.append(
+                {
+                    "ts": ts.isoformat() if ts else "-",
+                    "phase": current_phase,
+                    "gap_ms": gap_ms,
+                }
+            )
             continue
 
         n = NET_STATS_RE.search(line)
@@ -196,6 +254,11 @@ def main() -> int:
         summary_rtt = round(sum(net_rtt_samples) / len(net_rtt_samples), 2)
     if summary_candidate_tier == "-" and net_tier_last != "-":
         summary_candidate_tier = net_tier_last
+    phase_fps_avg = {
+        phase: round(sum(values) / len(values), 2)
+        for phase, values in sorted(phase_fps_samples.items())
+        if values
+    }
 
     max_drop_spike = 0
     for idx in range(1, len(net_drops)):
@@ -207,6 +270,14 @@ def main() -> int:
 
     non_user_end_reasons: list[str] = []
     combined_quality_hint = "-"
+    combined_quality_hint_recent = "-"
+    combined_render_fps_recent = None
+    combined_render_recent_sample_count = None
+    combined_render_recent_window_ms = None
+    combined_render_recent_max_frame_gap_ms = None
+    combined_render_recent_low_fps_streak_ms = None
+    combined_frames_dropped_delta_recent = None
+    combined_frames_dropped_spike_recent = None
     combined_remote_input_count = 0.0
     combined_remote_input_applied = 0.0
     combined_remote_input_failed = 0.0
@@ -232,6 +303,28 @@ def main() -> int:
                 non_user_end_reasons.append(reason)
         elif event == "session.metrics.combined":
             combined_quality_hint = str(payload.get("session_quality_hint") or "-")
+            combined_quality_hint_recent = str(payload.get("session_quality_hint_recent") or combined_quality_hint_recent or "-")
+            recent_value = as_float(payload.get("render_fps_recent"))
+            if recent_value is not None:
+                combined_render_fps_recent = recent_value
+            recent_value = as_float(payload.get("render_recent_sample_count"))
+            if recent_value is not None:
+                combined_render_recent_sample_count = recent_value
+            recent_value = as_float(payload.get("render_recent_window_ms"))
+            if recent_value is not None:
+                combined_render_recent_window_ms = recent_value
+            recent_value = as_float(payload.get("render_recent_max_frame_gap_ms"))
+            if recent_value is not None:
+                combined_render_recent_max_frame_gap_ms = recent_value
+            recent_value = as_float(payload.get("render_recent_low_fps_streak_ms"))
+            if recent_value is not None:
+                combined_render_recent_low_fps_streak_ms = recent_value
+            recent_value = as_float(payload.get("frames_dropped_delta_recent"))
+            if recent_value is not None:
+                combined_frames_dropped_delta_recent = recent_value
+            recent_value = as_float(payload.get("frames_dropped_spike_recent"))
+            if recent_value is not None:
+                combined_frames_dropped_spike_recent = recent_value
             combined_proof_status = str(payload.get("session_e2e_proof_status") or combined_proof_status or "-")
             combined_target_route = as_bool(payload.get("session_e2e_target_route")) or combined_target_route
             combined_last_executor = str(payload.get("remote_input_last_executor") or combined_last_executor or "-")
@@ -252,6 +345,18 @@ def main() -> int:
     missing_input_categories = [
         category for category in REQUIRED_INPUT_CATEGORIES if category not in combined_remote_input_coverage
     ]
+    if combined_render_fps_recent is None:
+        combined_render_fps_recent = summary_render_fps_recent
+    if combined_render_recent_sample_count is None:
+        combined_render_recent_sample_count = summary_recent_sample_count
+    if combined_render_recent_window_ms is None:
+        combined_render_recent_window_ms = summary_recent_window_ms
+    if combined_render_recent_max_frame_gap_ms is None:
+        combined_render_recent_max_frame_gap_ms = summary_recent_frame_gap_ms
+    if combined_render_recent_low_fps_streak_ms is None:
+        combined_render_recent_low_fps_streak_ms = summary_recent_low_fps_streak_ms
+    if combined_quality_hint_recent == "-":
+        combined_quality_hint_recent = summary_controller_quality_hint_recent
     input_detail = (
         "skipped"
         if not require_input_proof
@@ -278,6 +383,21 @@ def main() -> int:
             f"2b) 无持续塌陷（fps<{args.stall_fps} 连续>={args.stall_window_sec}s）",
             passed=low_streak_max < args.stall_window_sec,
             detail=f"longest_low_fps_streak_sec={low_streak_max:.1f}",
+        ),
+        Verdict(
+            f"2c) 可见阶段无 1s 级帧间隔尖峰（gap<{args.max_visible_frame_gap_ms}ms）",
+            passed=visible_gap_max < args.max_visible_frame_gap_ms,
+            detail=f"visible_gap_max_ms={visible_gap_max}, phase_gap_max={phase_gap_max or '-'}",
+        ),
+        Verdict(
+            "2d) 最近质量窗口稳定",
+            passed=combined_quality_hint_recent == "stable",
+            detail=(
+                f"recent_hint={combined_quality_hint_recent}, "
+                f"recent_fps={combined_render_fps_recent if combined_render_fps_recent is not None else '-'}, "
+                f"recent_gap_ms={combined_render_recent_max_frame_gap_ms if combined_render_recent_max_frame_gap_ms is not None else '-'}, "
+                f"recent_samples={combined_render_recent_sample_count if combined_render_recent_sample_count is not None else '-'}"
+            ),
         ),
         Verdict(
             f"3) frames_dropped 无异常陡增（delta<{args.frames_drop_spike}）",
@@ -313,11 +433,24 @@ def main() -> int:
         "session_id": session_id,
         "overall_pass": overall_pass,
         "session_quality_hint": combined_quality_hint,
+        "session_quality_hint_recent": combined_quality_hint_recent,
         "render_fps_avg": summary_render_fps,
+        "render_fps_recent": combined_render_fps_recent,
+        "render_recent_sample_count": combined_render_recent_sample_count,
+        "render_recent_window_ms": combined_render_recent_window_ms,
+        "render_recent_max_frame_gap_ms": combined_render_recent_max_frame_gap_ms,
+        "render_recent_low_fps_streak_ms": combined_render_recent_low_fps_streak_ms,
         "rtt_ms_avg": summary_rtt,
         "candidate_tier_last": summary_candidate_tier,
         "frames_dropped_last": summary_frames_dropped,
+        "frames_dropped_delta_recent": combined_frames_dropped_delta_recent,
+        "frames_dropped_spike_recent": combined_frames_dropped_spike_recent,
         "low_fps_streak_sec_max": round(low_streak_max, 2),
+        "visible_frame_gap_ms_max": visible_gap_max,
+        "all_frame_gap_ms_max": all_gap_max,
+        "phase_frame_gap_ms_max": phase_gap_max,
+        "phase_render_fps_avg": phase_fps_avg,
+        "frame_gap_spikes": gap_spikes,
         "max_frames_dropped_spike": max_drop_spike,
         "rtt_high_samples": rtt_high_samples,
         "candidate_tiers": sorted(candidate_tiers),
@@ -340,10 +473,18 @@ def main() -> int:
         f"- generated_at: `{summary['generated_at']}`",
         f"- overall: `{'PASS' if overall_pass else 'FAIL'}`",
         f"- relay.session_quality_hint: `{combined_quality_hint}`",
+        f"- relay.session_quality_hint_recent: `{combined_quality_hint_recent}`",
         f"- render_fps_avg: `{summary_render_fps}`",
+        f"- render_fps_recent: `{combined_render_fps_recent}`",
+        f"- render_recent_max_frame_gap_ms: `{combined_render_recent_max_frame_gap_ms}`",
+        f"- visible_frame_gap_ms_max: `{visible_gap_max}`",
+        f"- phase_frame_gap_ms_max: `{phase_gap_max or '-'}`",
+        f"- phase_render_fps_avg: `{phase_fps_avg or '-'}`",
         f"- rtt_ms_avg: `{summary_rtt}`",
         f"- candidate_tier_last: `{summary_candidate_tier}`",
         f"- frames_dropped_last: `{summary_frames_dropped}`",
+        f"- frames_dropped_delta_recent: `{combined_frames_dropped_delta_recent}`",
+        f"- frames_dropped_spike_recent: `{combined_frames_dropped_spike_recent}`",
         f"- longest_low_fps_streak_sec: `{low_streak_max:.1f}`",
         f"- max_frames_dropped_spike: `{max_drop_spike}`",
         f"- remote_input_applied: `{combined_remote_input_applied:g}/{combined_remote_input_count:g}`",
