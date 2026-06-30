@@ -1,6 +1,6 @@
 # Android 真机远控 Mac 任务与验证清单
 
-Last updated: `2026-06-26 11:50:51 +0800`
+Last updated: `2026-07-01 00:55:51 +0800`
 
 本文档记录当前“Android 真机控制 Mac”路线的已完成事项、已验证证据、未完成事项和下次继续执行的任务/验证清单。结论只按仓库代码、脚本、本地日志和报告证据记录；`.rd_runtime/` 下的日志与报告是运行产物，继续保持 ignored，不提交到仓库。
 
@@ -9,28 +9,15 @@ Last updated: `2026-06-26 11:50:51 +0800`
 - 当前分支：`main`
 - 当前远端：`origin=https://github.com/lonnnnnng/RemoteDesk.git`
 - 上一已验证基线：`8836c5d 记录远控进度与验证清单`
-- 今日阶段保存提交：`a2e6d4d 保存安卓真机远控阶段进度` 已推送到 `origin/main`
-- 当前已阶段保存但仍待真机复测的源码/脚本/文档改动：
-  - `apps/android/app/src/main/AndroidManifest.xml`
-  - `apps/android/app/src/main/java/com/remotedesk/app/controller/StubSessionController.kt`
-  - `apps/android/app/src/main/java/com/remotedesk/app/ui/MainActivity.kt`
-  - `apps/desktop/src-tauri/src/lib.rs`
-  - `apps/desktop/src-tauri/src/native_sender/mod.rs`
-  - `apps/server/internal/session/stub.go`
-  - `apps/server/internal/session/stub_test.go`
-  - `apps/server/internal/transport/ws.go`
-  - `apps/server/internal/transport/ws_test.go`
-  - `docs/remote_control_progress_checklist.md`
-  - `scripts/short_reconnect_check.sh`
-  - `scripts/soak_6_5.sh`
-  - `scripts/soak_report.py`
-  - `scripts/triad_ctl.sh`
+- 历史阶段保存提交：`a2e6d4d 保存安卓真机远控阶段进度` 已推送到 `origin/main`
+- 最新已拉取远端提交：`e95ff47 重构双端界面并修复安卓远程会话`
+- `e95ff47` 之后已用 Android 模拟器回归 Android -> Mac 路线，报告为 `.rd_runtime/reports/short_reconnect_20260701_004122.md`
 - 当前 ignored 产物仍未纳入 Git：`.rd_runtime/`、`apps/android/.gradle/`、`apps/android/app/build/`、`apps/android/build/`、`apps/desktop/dist/`、`apps/desktop/node_modules/`、`apps/desktop/src-tauri/gen/`、`apps/desktop/src-tauri/target/`、`apps/server/.rd_runtime/`、`scripts/__pycache__/`
 - 最新真机短断验证已通过：`.rd_runtime/reports/short_reconnect_20260626_105952.md`
+- 最新 Android 模拟器 -> Mac 短断/UI 回归验证已通过：`.rd_runtime/reports/short_reconnect_20260701_004122.md`
 - 最新新版真机 soak 仍未通过：`.rd_runtime/reports/soak_6_5_20260626_110819.md`，失败点是 `render_fps_avg=23.52 < 24.0` 和 `visible_frame_gap_ms_max=3692`
 - 上一轮 soak `103151` 仍保留为历史对照：原报告 `visible_frame_gap_ms_max=0`、`phase_frame_gap_ms_max=-` 有统计不足，临时重算 `/tmp/rd_soak_report_103151_recalc.md` 得到可见最大帧间隔 `861ms`
-- 当前已保存一批针对 `110819` soak 失败点的修复/诊断改动，但这些改动还没有安装到真机，也没有重新跑短断和 soak；下次必须先安装新 APK 再验证，不能把 `105952` 和 `110819` 当作这些新改动的验收结果
-- 当前不能宣称最终目标完成：短断、首帧、输入和短窗口质量已经通过最新真机验证，但新版 soak 的平均 FPS 和可见帧间隔仍未达标，且人工肉眼流畅验收还没有记录
+- 当前不能宣称最终目标完成：真机短断、模拟器 UI 回归、首帧、输入和短窗口质量已经有证据支撑，但新版真机 soak 的平均 FPS 和可见帧间隔仍未达标，且真机人工肉眼流畅验收还没有记录
 
 ## 当前目标
 
@@ -44,7 +31,7 @@ Last updated: `2026-06-26 11:50:51 +0800`
 
 | ID | 工作项 | 状态 | 当前证据 | 备注 |
 | --- | --- | --- | --- | --- |
-| D1 | 仓库远端与忽略规则 | 已完成 | `origin=https://github.com/lonnnnnng/RemoteDesk.git`；`HEAD=origin/main=8836c5d`；`git ls-files` 检查未发现 tracked 的 `.rd_runtime/`、`node_modules/`、`dist/`、`build/`、`target/`、`.gradle/`、`__pycache__` 或常见包产物 | 运行日志、报告和构建产物保持 ignored，不提交 |
+| D1 | 仓库远端与忽略规则 | 已完成 | `origin=https://github.com/lonnnnnng/RemoteDesk.git`；当前拉取基线 `e95ff47`；`git ls-files` 检查未发现 tracked 的 `.rd_runtime/`、`node_modules/`、`dist/`、`build/`、`target/`、`.gradle/`、`__pycache__` 或常见包产物 | 运行日志、报告和构建产物保持 ignored，不提交 |
 | D2 | 工程静态检查和构建 | 已验证 | 已通过 `bash -n scripts/short_reconnect_check.sh`、`bash -n scripts/soak_6_5.sh`、`bash -n scripts/triad_ctl.sh`、`python3 -m py_compile scripts/soak_report.py`、`git diff --check`、`cd apps/server && go test ./...`、`cd apps/android && JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew assembleDebug --console=plain`、`cd apps/desktop && npm run build`、`cd apps/desktop/src-tauri && cargo test` | 只证明脚本语法、Go 单测和三端构建/测试通过，不等同于最终远控验收完成 |
 | D3 | Android 真机 profile 的 TURN host 过滤 | 已验证 | `apps/server/internal/session/stub_test.go` 新增并通过 `TestFilterTurnHostsForAndroidPhone` 和 `TestFilterTurnHostsKeepsEmulatorGatewayForEmulator`；真机 profile 不下发 emulator 专用 `10.0.2.2` | 真机不再拿 emulator 网关；emulator 路径仍保留 `10.0.2.2` |
 | D4 | Android 本地 ICE candidate 生成、发送和 Mac 接收 | 已验证 | 短断联调日志已经出现 `local_ice_candidate_callback`、`local_ice_candidate_send`、relay 转发 Android -> agent 的 `webrtc.ice_candidate`，Mac metrics 出现 `native_sender_remote_candidate_count=1`；最新短断 `105952` 已完成 `relay_udp` 链路和视频/输入 proof | 旧问题 `local_ice_candidate_sent=0` 已被真机运行证据打破 |
@@ -55,6 +42,7 @@ Last updated: `2026-06-26 11:50:51 +0800`
 | D9 | 历史较长真机 soak 基线 | 部分通过 | `.rd_runtime/reports/soak_6_5_20260626_082105.md` 曾有 `overall=PASS`，`render_fps_avg=24.13`，`rtt_ms_avg=11.05`，`candidate_tier_last=p2p_udp`，`remote_input_applied=11/11` | 不能视为最终流畅验收完成，因为后续分析和新版报告仍暴露平均 FPS 与帧间隔边界问题 |
 | D10 | 阶段化 soak 报告能力 | 工具能力已验证 | `scripts/soak_report.py` 已能从 `render_frame_sample` 的 `sample_gap_ms` 重算阶段 gap 和阶段 FPS；最新 `110819` 报告直接给出 `visible_frame_gap_ms_max=3692` 和分阶段 gap/FPS | 原始 `103151` 报告里的 `visible_frame_gap_ms_max=0` 属于统计不足，后续报告已补上阶段化证据 |
 | D11 | Mac native sender 首轮性能调优 | 已验证但未闭环 | `apps/desktop/src-tauri/src/native_sender/mod.rs` 已把 encoder 线程从 `2` 调到 `4`，周期关键帧从约 `fps` 帧拉长为 `fps*4`；最新 Mac 日志出现 `encoder.ready ... capture_fps=26 encoder_threads=4 intra_period_sec=4 force_intra_frames=156`；短断 `105952` 仍 PASS | 这只证明改动生效且短断未退化；soak `110819` 仍 FAIL，所以不能视为流畅性完成 |
+| D12 | UI 重构后的 Android 模拟器 -> Mac 回归 | 已验证 | `.rd_runtime/reports/short_reconnect_20260701_004122.md`：`overall=PASS`，旧会话 `sess-1782837652857-2`，新会话 `sess-1782837667499-1`，relay 断开 `4s`，恢复 `14870ms`，新首帧 `742x480`，`remote_input_applied=11/11`，覆盖 `click,drag,keyboard,wheel`，`quality_fps_avg_recent=24.2`，`quality_drop_delta_recent=0`，`quality_candidate_tiers=p2p_udp` | 用 `Pixel_9` 模拟器验证 UI 调整没有让 Android -> Mac 首帧、短断恢复、输入 proof 和短窗口质量回归；不能替代真机 soak 和人工肉眼验收 |
 
 ## 最新未通过和未闭环
 
@@ -68,6 +56,7 @@ Last updated: `2026-06-26 11:50:51 +0800`
 | F6 | 人工肉眼流畅验收 | 未完成 | 目前只有脚本、日志和报告证据，没有本轮修复后的人工动态场景观察记录 | “肉眼无明显卡顿”必须等 soak 达标后再人工确认 |
 | F7 | 长时间后台/弱网稳定性 | 未完成 | 当前主要是短断和约数分钟 soak，未覆盖 30-50 分钟后台、弱网、网络抖动 | 这是最终产品化前的后续验证，不阻塞当前 P0/P1 修复，但不能忘 |
 | F8 | Android -> Windows 路线 | 未复测 | README/旧记录保留过 Windows 路线历史问题；本清单只记录 Android 真机 -> Mac 最新证据 | Mac 路线稳定后再用同一套脚本复测 Windows agent |
+| F9 | UI 回归验证的覆盖边界 | 未闭环 | `20260701_004122` 是 Android 模拟器 -> Mac 短断回归 PASS，不是真机，也不是新版长时间 soak | 可作为 UI 调整未破坏核心链路的证据，但不能关闭真机稳定/流畅性目标 |
 
 ## 已改但未重新真机验证
 
@@ -80,6 +69,39 @@ Last updated: `2026-06-26 11:50:51 +0800`
 | U3 | `scripts/soak_6_5.sh` 新增阶段标记 `soak_phase`，让报告区分 foreground/background/dynamic/recovery | 把后台切换污染、动态输入压力和恢复阶段卡顿分开定位 | 新 soak 报告应继续输出 `phase_frame_gap_ms_max` 和 `phase_render_fps_avg`，并能对应 Android logcat 阶段标记 |
 
 未验证边界：U1-U3 目前只能算“待验修复候选”，不能写入“已完成并通过验证”。如果新 soak 仍 FAIL，要优先用这些新增日志判断是真实视频停帧、Android UI/ADB 压测造成的控制端卡顿，还是统计口径问题。
+
+## 2026-07-01 UI 回归验证记录
+
+验证目的：检查 `e95ff47 重构双端界面并修复安卓远程会话` 之后，Android 控制 Mac 的核心链路是否因为 UI 调整回归。
+
+验证环境：
+
+- Mac agent：`agent-19de3117874`
+- Android 控制端：`Pixel_9` 模拟器，serial `emulator-5554`
+- Relay：`127.0.0.1:18081`
+- TURN：`3478`
+- 报告：`.rd_runtime/reports/short_reconnect_20260701_004122.md`
+- 截图：`.rd_runtime/screenshots/android_mac_regression_20260701_004122.png`
+
+验证结果：
+
+- [x] 三端启动：relay、TURN、Mac Tauri dev、Android 模拟器均启动，Mac agent 和 Android controller 均进入 `/devices`
+- [x] 初始首帧：`sess-1782837652857-2` 渲染 `742x480`
+- [x] 短断自动恢复：relay 断开 `4s` 后恢复到新会话 `sess-1782837667499-1`
+- [x] 恢复首帧：新会话首帧 `742x480`，`since_track_ms=4072`
+- [x] Android -> Mac 输入 proof：`remote_input_applied=11/11`，覆盖 `click,drag,keyboard,wheel`
+- [x] Mac 端输入落地：最后输入执行器为 `macos.cg_event`
+- [x] 恢复后短窗口质量：`quality_fps_avg_recent=24.2`，`quality_fps_min_recent=24.01`，`quality_drop_delta_recent=0`，`quality_candidate_tiers=p2p_udp`
+- [x] 可视 UI：截图显示新“远程会话”页能显示 Mac 画面和输入回执 `input.wheel.scroll [applied/macos.cg_event]`
+
+环境问题与处理：
+
+- 默认 AVD `Pixel_6_API_29` 不存在，本机实际可用 AVD 为 `Pixel_9` 和 `CASKA_1024x600_API27`；本轮改用 `RD_AVD_NAME=Pixel_9`
+- 真机和模拟器同时在线时，短断脚本需要显式 `--serial emulator-5554`，否则 `adb` 会报 `more than one device/emulator`
+- Mac Tauri debug 构建缓存中 build script 缺执行位，清理 ignored 的 `apps/desktop/src-tauri/target/` 下对应 debug 缓存后恢复；这不是源码改动
+- `uiautomator dump` 返回 `ERROR: could not get idle state.`，本轮使用截图和脚本日志作为 UI/链路证据
+
+结论边界：本轮可以说明 UI 重构后 Android 模拟器 -> Mac 的核心短断链路没有回归；仍不能说明 Android 真机 -> Mac 的长时间流畅性已经达标。
 
 ## 任务清单
 
@@ -94,6 +116,7 @@ Last updated: `2026-06-26 11:50:51 +0800`
 - [x] 完成短断恢复脚本质量 proof 修正，并用 `short_reconnect_20260626_105952` 验证通过。
 - [x] 完成 soak 报告阶段 gap/FPS 统计能力，并在 `soak_6_5_20260626_110819` 中直接输出可见 gap 与分阶段指标。
 - [x] 完成 Mac native sender 首轮调优，并用日志确认 `encoder_threads=4`、`intra_period_sec=4`、`force_intra_frames=156` 已生效。
+- [x] 完成 `e95ff47` UI 重构后的 Android 模拟器 -> Mac 短断回归验证，报告 `short_reconnect_20260701_004122` 为 PASS。
 
 ### 待完成
 
@@ -107,6 +130,8 @@ Last updated: `2026-06-26 11:50:51 +0800`
 - [ ] P7：soak 达标后做人工肉眼观察，记录静止清晰度、动态滚动/窗口移动、连续输入响应、短断恢复后继续操作。
 - [ ] P8：把最新报告结果回写到本文档，不把 `.rd_runtime/` 报告文件提交。
 - [ ] P9：只有短断和 soak 都通过、人工观察也记录后，再进行阶段性提交和推送；提交说明使用中文，并明确本次验证范围。
+- [ ] P10：把脚本默认 AVD 从不存在的 `Pixel_6_API_29` 调整为本机可用配置，或在文档/环境变量中固定 `RD_AVD_NAME=Pixel_9`，避免下一次三端模拟器验证卡在启动阶段。
+- [ ] P11：如果真机和模拟器同时在线，脚本或文档必须显式要求 `--serial`，避免 `adb: more than one device/emulator` 误中断验证。
 
 ## 今日暂停记录
 
@@ -141,6 +166,32 @@ git status --short --branch --ignored
 git rev-parse --short HEAD
 git rev-parse --short origin/main
 git ls-files | rg '(^|/)(node_modules|dist|build|target|\.gradle|\.rd_runtime|__pycache__)(/|$)|\.(apk|aab|dmg|msi|exe|app\.tar\.gz|tar\.gz|log|pyc)$'
+```
+
+模拟器回归验证如需复现本轮结果，先显式指定可用 AVD 和 serial：
+
+```zsh
+JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
+RD_ANDROID_MODE=emulator \
+RD_AVD_NAME=Pixel_9 \
+RD_AGENT_DEVICE_ID=auto \
+./scripts/short_reconnect_check.sh \
+  --target-device-id auto \
+  --end-session
+```
+
+如果真机也在线，复用已启动三端时需要指定模拟器 serial：
+
+```zsh
+JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
+RD_ANDROID_SERIAL=emulator-5554 \
+RD_ANDROID_MODE=emulator \
+RD_AGENT_DEVICE_ID=agent-19de3117874 \
+./scripts/short_reconnect_check.sh \
+  --no-restart \
+  --serial emulator-5554 \
+  --target-device-id agent-19de3117874 \
+  --end-session
 ```
 
 2. 先看最新 PASS/FAIL 报告，不要凭印象改：
@@ -269,6 +320,7 @@ rg -n 'RemoteDeskSoak.*soak_dynamic_bounds|RemoteDeskSoak.*soak_phase|render_fra
 - [x] 恢复会话出现 `first_rendered_frame`
 - [x] Relay 合并指标 `session_e2e_proof_status=video_and_input_observed`
 - [ ] 下一轮短断复跑仍满足以上全部项目，且没有退回 `local_ice_candidate_sent=0` 或 `input_only`
+- [x] UI 重构后 Android 模拟器 -> Mac 回归短断已满足以上项目：`.rd_runtime/reports/short_reconnect_20260701_004122.md`
 
 ### 短断恢复验收
 
@@ -286,6 +338,7 @@ rg -n 'RemoteDeskSoak.*soak_dynamic_bounds|RemoteDeskSoak.*soak_phase|render_fra
 - [x] 最近质量窗口 dropped-frame 增量 `<30`
 - [x] `quality_candidate_tiers=relay_udp`
 - [ ] 下一轮修复 sender 后复跑短断仍为 PASS
+- [x] UI 重构后 Android 模拟器 -> Mac 短断回归仍为 PASS：`short_reconnect_20260701_004122`
 
 ### Soak 验收
 
@@ -320,6 +373,7 @@ rg -n 'RemoteDeskSoak.*soak_dynamic_bounds|RemoteDeskSoak.*soak_phase|render_fra
 
 - [x] 短断 PASS 报告路径写入本文档：`.rd_runtime/reports/short_reconnect_20260626_105952.md`
 - [x] 最新 Soak FAIL 报告路径写入本文档：`.rd_runtime/reports/soak_6_5_20260626_110819.md`
+- [x] UI 回归 PASS 报告路径写入本文档：`.rd_runtime/reports/short_reconnect_20260701_004122.md`
 - [ ] Soak PASS 报告路径写入本文档
 - [ ] 人工观察记录写入本文档或单独报告
 - [x] `git diff --check` 通过
@@ -343,6 +397,6 @@ rg -n 'RemoteDeskSoak.*soak_dynamic_bounds|RemoteDeskSoak.*soak_phase|render_fra
 
 ## 结论边界
 
-截至本记录时间，可以实事求是地说：Android 真机 -> Mac 的 ICE candidate 链路、初始首帧、短断恢复首帧、输入控制覆盖、短断恢复短窗口质量、Mac native sender 首轮调优生效和工程检查都有本地证据支撑。最新短断报告 `short_reconnect_20260626_105952` 已经是 `PASS`。
+截至本记录时间，可以实事求是地说：Android 真机 -> Mac 的 ICE candidate 链路、初始首帧、短断恢复首帧、输入控制覆盖、短断恢复短窗口质量、Mac native sender 首轮调优生效和工程检查都有本地证据支撑。最新真机短断报告 `short_reconnect_20260626_105952` 已经是 `PASS`。在 `e95ff47` UI 重构后，Android 模拟器 -> Mac 回归报告 `short_reconnect_20260701_004122` 也是 `PASS`，说明 UI 调整没有破坏模拟器到 Mac 的核心短断链路。
 
-还不能说：整条链路已经满足“手机端稳定看到并流畅控制 Mac”的最终目标。最新新版 soak `soak_6_5_20260626_110819` 仍是 `FAIL`，核心失败点是 `render_fps_avg=23.52 < 24.0` 和 `visible_frame_gap_ms_max=3692`；dynamic 与 recovery 阶段都出现了 1s 级可见 gap。下次应优先定位 Android 渲染/采样与动态压力阶段的 spike，再复跑短断和 soak，最后补人工肉眼观察记录。
+还不能说：整条链路已经满足“手机端稳定看到并流畅控制 Mac”的最终目标。最新新版真机 soak `soak_6_5_20260626_110819` 仍是 `FAIL`，核心失败点是 `render_fps_avg=23.52 < 24.0` 和 `visible_frame_gap_ms_max=3692`；dynamic 与 recovery 阶段都出现了 1s 级可见 gap。下次应优先定位 Android 渲染/采样与动态压力阶段的 spike，再复跑真机短断和真机 soak，最后补人工肉眼观察记录。
