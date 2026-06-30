@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Base64
 import android.util.Log
 import android.view.Gravity
@@ -60,6 +61,7 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.min
@@ -72,6 +74,7 @@ class MainActivity : AppCompatActivity() {
     private const val MAX_FRAME_B64_LENGTH = 12 * 1024 * 1024
     private const val MAX_FRAME_DIMENSION = 4096
     private const val PREFS_NAME = "remote_desk_demo"
+    private const val PREF_DEVICE_ID = "device_id"
     private const val PREF_WS_URL = "ws_url"
     private const val PREF_TARGET_DEVICE_ID = "target_device_id"
     private const val EXTRA_WS_URL = "rd_ws_url"
@@ -130,8 +133,9 @@ class MainActivity : AppCompatActivity() {
   }
 
   private lateinit var binding: ActivityMainBinding
-  private val deviceId = "android-${System.currentTimeMillis().toString(16)}"
-  private val controller = StubSessionController(deviceId)
+  private val preferences by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
+  private val deviceId: String by lazy { resolveStableDeviceId() }
+  private val controller: StubSessionController by lazy { StubSessionController(deviceId) }
   private var token: String = "stub-token"
   private var sessionId: String? = null
   private val logs = ArrayDeque<String>()
@@ -140,7 +144,6 @@ class MainActivity : AppCompatActivity() {
   private val frameDecodeExecutor = Executors.newSingleThreadExecutor()
   private val deviceSyncExecutor = Executors.newSingleThreadExecutor()
   private val devicesHttpClient = OkHttpClient()
-  private val preferences by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
   private var renderedFrameWidth = 0
   private var renderedFrameHeight = 0
   private var pendingSessionRequest = false
@@ -161,6 +164,7 @@ class MainActivity : AppCompatActivity() {
   private var devicesStatusMessage = "连接中继服务后会自动同步设备列表。"
   private var rtcEglBase: EglBase? = null
   private var rtcFactory: PeerConnectionFactory? = null
+  private var rtcRendererInitialized = false
   private var rtcPeerConnection: PeerConnection? = null
   private var rtcRemoteVideoTrack: VideoTrack? = null
   private var rtcCurrentSessionId: String? = null
@@ -447,7 +451,6 @@ class MainActivity : AppCompatActivity() {
     super.onCreate(savedInstanceState)
     binding = ActivityMainBinding.inflate(layoutInflater)
     setContentView(binding.root)
-    initializeWebRtc()
 
     binding.deviceIdText.text = "本机设备 ID：$deviceId"
     setStatus("未连接")
@@ -539,6 +542,22 @@ class MainActivity : AppCompatActivity() {
     binding.navProfileButton.setOnClickListener {
       switchPage(MainPage.SETTINGS)
     }
+    binding.devicesRefreshButton.setOnClickListener {
+      refreshDevicesList(force = true, userInitiated = true)
+    }
+    binding.sessionBackButton.setOnClickListener {
+      switchPage(MainPage.MY_DEVICES)
+    }
+    binding.sessionEndButton.setOnClickListener {
+      if (hasActiveSession() || pendingSessionRequest || isRecoveringSession) {
+        handleEndSessionAction()
+      } else {
+        switchPage(MainPage.MY_DEVICES)
+      }
+    }
+    binding.debugModeSwitch.setOnCheckedChangeListener { _, _ ->
+      updateDebugPanelVisibility()
+    }
     binding.remoteVideoView.setOnTouchListener { view, event ->
       handleRemoteFrameTouchV2(view, event)
     }
@@ -601,6 +620,28 @@ class MainActivity : AppCompatActivity() {
     binding.debugProofResetButton.setOnClickListener {
       refreshE2EProofSnapshot(reset = true, userInitiated = true)
     }
+  }
+
+  private fun resolveStableDeviceId(): String {
+    val savedDeviceId = preferences.getString(PREF_DEVICE_ID, null).orEmpty().trim()
+    if (savedDeviceId.isNotBlank()) {
+      return savedDeviceId
+    }
+
+    val androidId = Settings.Secure
+      .getString(contentResolver, Settings.Secure.ANDROID_ID)
+      .orEmpty()
+      .trim()
+      .lowercase(Locale.ROOT)
+    val stableSuffix = if (androidId.isNotBlank() && androidId != "9774d56d682e549c") {
+      androidId
+    } else {
+      UUID.randomUUID().toString()
+    }
+    val nextDeviceId = "android-$stableSuffix"
+    // 作者: long；中继按 device_id 合并在线状态，安卓端跨重启复用同一 ID，避免一次真机反复连接后被展示成多台设备。
+    preferences.edit { putString(PREF_DEVICE_ID, nextDeviceId) }
+    return nextDeviceId
   }
 
   override fun onDestroy() {
@@ -688,6 +729,7 @@ class MainActivity : AppCompatActivity() {
     if (rtcFactory != null) {
       return
     }
+    // 作者: long；WebRTC native 库加载会明显拖慢首屏，等用户真正进入远程会话时再初始化，设备列表启动保持轻量。
     val initOptions = PeerConnectionFactory.InitializationOptions
       .builder(applicationContext)
       .createInitializationOptions()
@@ -696,6 +738,7 @@ class MainActivity : AppCompatActivity() {
     binding.remoteVideoView.init(rtcEglBase?.eglBaseContext, null)
     binding.remoteVideoView.setEnableHardwareScaler(true)
     binding.remoteVideoView.setMirror(false)
+    rtcRendererInitialized = true
     val encoderFactory = DefaultVideoEncoderFactory(rtcEglBase?.eglBaseContext, true, true)
     val decoderFactory = DefaultVideoDecoderFactory(rtcEglBase?.eglBaseContext)
     rtcFactory = PeerConnectionFactory.builder()
@@ -705,7 +748,10 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun releaseWebRtc() {
-    binding.remoteVideoView.release()
+    if (rtcRendererInitialized) {
+      binding.remoteVideoView.release()
+      rtcRendererInitialized = false
+    }
     rtcPeerConnection?.dispose()
     rtcPeerConnection = null
     rtcRemoteVideoTrack?.dispose()
@@ -714,6 +760,12 @@ class MainActivity : AppCompatActivity() {
     rtcFactory = null
     rtcEglBase?.release()
     rtcEglBase = null
+  }
+
+  private fun clearRemoteVideoRendererImage() {
+    if (rtcRendererInitialized) {
+      binding.remoteVideoView.clearImage()
+    }
   }
 
   private fun closeWebRtcSession(reason: String = "reset", clearRendererImage: Boolean = true) {
@@ -741,7 +793,7 @@ class MainActivity : AppCompatActivity() {
     resetLegacyFrameStats()
     resetLegacyFailureThrottleState()
     if (clearRendererImage) {
-      binding.remoteVideoView.clearImage()
+      clearRemoteVideoRendererImage()
     }
     updateLiveMetricsPanel()
   }
@@ -1722,6 +1774,7 @@ class MainActivity : AppCompatActivity() {
     .all { remoteInputAppliedCategories.contains(it) }
 
   private fun createPeerConnection(sessionId: String): PeerConnection? {
+    initializeWebRtc()
     val factory = rtcFactory ?: return null
     closeWebRtcSession(reason = "recreate_pc")
     rtcCurrentSessionId = sessionId
@@ -2406,6 +2459,9 @@ class MainActivity : AppCompatActivity() {
           binding.remoteFrameView.setImageDrawable(null)
           binding.remoteFrameView.isVisible = false
           binding.remoteVideoView.isVisible = true
+          if (currentPage != MainPage.SESSION) {
+            switchPage(MainPage.SESSION, autoRefreshDevices = false)
+          }
           setStatus("会话中")
           appendLog("进入会话 ${sessionId ?: "unknown"}")
           maybeScheduleAutoProofInput(sessionId)
@@ -2530,6 +2586,9 @@ class MainActivity : AppCompatActivity() {
           resetSessionUi(clearFrame = true)
           setStatus(readyStatusText("会话已结束"))
           updateSessionButtonState()
+          if (currentPage == MainPage.SESSION) {
+            switchPage(MainPage.MY_DEVICES)
+          }
           appendLog("会话结束：$reason")
         }
         "error.rsp" -> {
@@ -2576,6 +2635,9 @@ class MainActivity : AppCompatActivity() {
               clearSessionRecoveryIntent("error_$name")
               resetSessionUi(clearFrame = true)
               setStatus(readyStatusText("会话不可用"))
+              if (currentPage == MainPage.SESSION) {
+                switchPage(MainPage.MY_DEVICES)
+              }
             }
           }
           updateSessionButtonState()
@@ -3459,7 +3521,7 @@ class MainActivity : AppCompatActivity() {
     binding.remoteFrameView.isVisible = false
     if (clearFrame) {
       binding.remoteFrameView.setImageDrawable(null)
-      binding.remoteVideoView.clearImage()
+      clearRemoteVideoRendererImage()
     }
   }
 
@@ -3482,9 +3544,10 @@ class MainActivity : AppCompatActivity() {
     binding.remoteKeyboardSendButton.isEnabled = hasSession
     binding.remoteKeyboardBackspaceButton.isEnabled = hasSession
     binding.remoteKeyboardEnterButton.isEnabled = hasSession
+    binding.sessionEndButton.isEnabled = hasSession || pendingSessionRequest || isRecoveringSession
 
     binding.targetDeviceInput.isEnabled = !hasSession && !pendingSessionRequest && !isRecoveringSession
-    binding.remoteFrameCard.isVisible = pendingSessionRequest || hasSession || isRecoveringSession
+    binding.remoteFrameCard.isVisible = currentPage == MainPage.SESSION
     if (binding.myDevicesPage.isVisible) {
       renderDeviceList()
     }
@@ -3493,8 +3556,7 @@ class MainActivity : AppCompatActivity() {
   private fun setStatus(statusLine: String) {
     binding.statusText.text = "当前状态：$statusLine"
     binding.topConnectionStatusText.text = "连接状态：${mapTopConnectionStatus(statusLine)}"
-    val hasSession = hasActiveSession()
-    binding.remoteFrameCard.isVisible = pendingSessionRequest || hasSession || isRecoveringSession
+    binding.remoteFrameCard.isVisible = currentPage == MainPage.SESSION
   }
 
   private fun mapTopConnectionStatus(statusLine: String): String {
@@ -3513,10 +3575,12 @@ class MainActivity : AppCompatActivity() {
   private fun switchPage(page: MainPage, autoRefreshDevices: Boolean = true) {
     currentPage = page
     binding.myDevicesPage.isVisible = page == MainPage.MY_DEVICES
-    binding.remoteAssistPage.isVisible = page == MainPage.MY_DEVICES
+    binding.remoteAssistPage.isVisible = page == MainPage.SESSION
     binding.profilePage.isVisible = page == MainPage.SETTINGS
     binding.cloudPage.isVisible = false
-    binding.debugPanel.isVisible = false
+    binding.bottomNavigationBar.isVisible = page != MainPage.SESSION
+    binding.remoteFrameCard.isVisible = page == MainPage.SESSION
+    updateDebugPanelVisibility()
 
     styleNavButton(binding.navMyDevicesButton, page == MainPage.MY_DEVICES)
     styleNavButton(binding.navProfileButton, page == MainPage.SETTINGS)
@@ -3526,6 +3590,11 @@ class MainActivity : AppCompatActivity() {
     if (page == MainPage.MY_DEVICES && autoRefreshDevices) {
       refreshDevicesList()
     }
+  }
+
+  private fun updateDebugPanelVisibility() {
+    // 作者: long；调试内容只在设置页且用户显式开启时出现，设备列表保持纯净的产品视图。
+    binding.debugPanel.isVisible = currentPage == MainPage.SETTINGS && binding.debugModeSwitch.isChecked
   }
 
   private fun styleNavButton(button: MaterialButton, selected: Boolean) {
@@ -4103,7 +4172,7 @@ class MainActivity : AppCompatActivity() {
         showDisconnect -> "断开"
         showConnecting -> "连接中"
         isOnline && !device.canReceiveRemoteControl() -> "不可控"
-        isOnline -> "连接"
+        isOnline -> "远程"
         else -> "离线"
       }
       isAllCaps = false
@@ -4345,6 +4414,8 @@ class MainActivity : AppCompatActivity() {
       return
     }
     selectDeviceForAssist(device)
+    // 作者: long；设备列表只负责选目标，真正的画面和输入进入独立会话页，避免主列表被调试状态挤占。
+    switchPage(MainPage.SESSION, autoRefreshDevices = false)
     handlePrimaryAction()
   }
 
@@ -4354,6 +4425,12 @@ class MainActivity : AppCompatActivity() {
     clearSessionRecoveryIntent("manual_end_session")
     if (currentSessionId.isNullOrBlank()) {
       appendLog("当前没有 session，不能结束")
+      pendingSessionRequest = false
+      pendingSessionRequestId = null
+      pendingSessionRequestIsRecovery = false
+      isRecoveringSession = false
+      updateSessionButtonState()
+      switchPage(MainPage.MY_DEVICES)
     } else {
       releaseRemoteInputState()
       sendSocketMessage(controller.endSessionMessage(currentSessionId), "发送 session.end.req")
@@ -4369,7 +4446,6 @@ class MainActivity : AppCompatActivity() {
     )
     appendLog("已选择伙伴设备：${device.deviceName} (${device.deviceId})")
     renderDeviceList()
-    switchPage(MainPage.MY_DEVICES, autoRefreshDevices = false)
   }
 
   private fun handlePrimaryAction() {
@@ -4526,6 +4602,7 @@ class MainActivity : AppCompatActivity() {
       pendingSessionRequest = true
       pendingSessionRequestId = request.requestId
       pendingSessionRequestIsRecovery = isRecovery
+      switchPage(MainPage.SESSION, autoRefreshDevices = false)
       setStatus(if (isRecovery) "短断线恢复中" else "会话请求中")
       updateSessionButtonState()
     }
@@ -5024,6 +5101,7 @@ class MainActivity : AppCompatActivity() {
   private enum class MainPage {
     MY_DEVICES,
     SETTINGS,
+    SESSION,
   }
 
   private data class NormalizedPoint(

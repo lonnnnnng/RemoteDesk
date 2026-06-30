@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RemoteDesk UI Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="icon-monitor" viewBox="0 0 24 24">
+        <path d="M4 5.75A1.75 1.75 0 0 1 5.75 4h12.5A1.75 1.75 0 0 1 20 5.75v8.5A1.75 1.75 0 0 1 18.25 16H5.75A1.75 1.75 0 0 1 4 14.25z" />
+        <path d="M9 20h6M12 16v4" />
+      </symbol>
+      <symbol id="icon-phone" viewBox="0 0 24 24">
+        <path d="M8.25 3.5h7.5A1.75 1.75 0 0 1 17.5 5.25v13.5a1.75 1.75 0 0 1-1.75 1.75h-7.5a1.75 1.75 0 0 1-1.75-1.75V5.25A1.75 1.75 0 0 1 8.25 3.5Z" />
+        <path d="M10.5 17.75h3" />
+      </symbol>
+      <symbol id="icon-settings" viewBox="0 0 24 24">
+        <path d="M12 8.25a3.75 3.75 0 1 0 0 7.5 3.75 3.75 0 0 0 0-7.5Z" />
+        <path d="M19.5 13.4v-2.8l-2.12-.52a6.7 6.7 0 0 0-.54-1.3l1.13-1.86-1.98-1.98-1.86 1.13a6.7 6.7 0 0 0-1.3-.54L12.3 3.4H9.5l-.52 2.13a6.7 6.7 0 0 0-1.3.54L5.82 4.94 3.84 6.92l1.13 1.86c-.23.41-.42.84-.54 1.3L2.3 10.6v2.8l2.13.52c.12.46.31.9.54 1.3l-1.13 1.86 1.98 1.98 1.86-1.13c.41.23.84.42 1.3.54l.52 2.13h2.8l.52-2.13c.46-.12.9-.31 1.3-.54l1.86 1.13 1.98-1.98-1.13-1.86c.23-.41.42-.84.54-1.3z" />
+      </symbol>
+      <symbol id="icon-refresh" viewBox="0 0 24 24">
+        <path d="M20 11a8 8 0 0 0-14.2-4.98L4 8.25" />
+        <path d="M4 4.25v4h4" />
+        <path d="M4 13a8 8 0 0 0 14.2 4.98L20 15.75" />
+        <path d="M20 19.75v-4h-4" />
+      </symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="6.25" />
+        <path d="m16 16 4 4" />
+      </symbol>
+      <symbol id="icon-more" viewBox="0 0 24 24">
+        <circle cx="12" cy="5" r="1" />
+        <circle cx="12" cy="12" r="1" />
+        <circle cx="12" cy="19" r="1" />
+      </symbol>
+      <symbol id="icon-shield" viewBox="0 0 24 24">
+        <path d="M12 3.5 19 6v5.5c0 4.2-2.77 7.1-7 9-4.23-1.9-7-4.8-7-9V6z" />
+        <path d="m9 12 2 2 4-4" />
+      </symbol>
+      <symbol id="icon-bug" viewBox="0 0 24 24">
+        <path d="M8 7.5h8v7a4 4 0 0 1-8 0z" />
+        <path d="M9.5 7.5 8 5.5M14.5 7.5 16 5.5M4.5 12H8M16 12h3.5M5.5 17 8.4 15.5M15.6 15.5l2.9 1.5" />
+      </symbol>
+      <symbol id="icon-x" viewBox="0 0 24 24">
+        <path d="m6 6 12 12M18 6 6 18" />
+      </symbol>
+    </svg>
+
+    <div class="prototype-shell">
+      <header class="prototype-header">
+        <div>
+          <p class="eyebrow">RemoteDesk</p>
+          <h1>产品级 UI 原型</h1>
+        </div>
+        <div class="header-actions">
+          <a class="text-link" href="./assets/concept-remotedesk-ui.png" target="_blank" rel="noreferrer">概念图</a>
+          <a class="text-link" href="./remote-window.html?device=Office-PC&surface=desktop" target="_blank" rel="noreferrer">远程窗口</a>
+        </div>
+      </header>
+
+      <main class="prototype-grid">
+        <section class="preview-column preview-column-wide" aria-label="桌面端原型">
+          <div class="preview-label">
+            <span>Desktop</span>
+            <strong>Windows / Tauri</strong>
+          </div>
+
+          <div class="desktop-window" data-surface="desktop">
+            <div class="window-titlebar">
+              <div class="title-left">
+                <span class="brand-mark"><svg><use href="#icon-monitor"></use></svg></span>
+                <strong>RemoteDesk</strong>
+              </div>
+              <div class="window-controls" aria-hidden="true"><span></span><span></span><span></span></div>
+            </div>
+
+            <div class="desktop-layout">
+              <aside class="desktop-sidebar">
+                <nav class="side-nav" aria-label="桌面端导航">
+                  <button class="nav-button is-active" type="button" data-tab-target="desktop-devices">
+                    <svg><use href="#icon-monitor"></use></svg>
+                    <span>设备</span>
+                  </button>
+                  <button class="nav-button" type="button" data-tab-target="desktop-settings">
+                    <svg><use href="#icon-settings"></use></svg>
+                    <span>设置</span>
+                  </button>
+                </nav>
+                <div class="sidebar-status">
+                  <span class="status-dot online"></span>
+                  <span>中继在线</span>
+                </div>
+              </aside>
+
+              <section class="app-main">
+                <div class="page-view is-active" id="desktop-devices">
+                  <div class="page-header">
+                    <div>
+                      <h2>设备</h2>
+                      <p>4 台设备 · 自动同步于 12:10</p>
+                    </div>
+                    <div class="page-actions">
+                      <button class="icon-button" type="button" title="刷新设备">
+                        <svg><use href="#icon-refresh"></use></svg>
+                      </button>
+                      <button class="primary-button" type="button">
+                        <svg><use href="#icon-phone"></use></svg>
+                        配对设备
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="filter-row">
+                    <label class="search-field">
+                      <svg><use href="#icon-search"></use></svg>
+                      <input type="search" placeholder="搜索设备、平台或设备 ID" />
+                    </label>
+                    <select aria-label="设备状态">
+                      <option>全部状态</option>
+                      <option>在线</option>
+                      <option>忙碌</option>
+                      <option>离线</option>
+                    </select>
+                  </div>
+
+                  <div class="device-table" role="table" aria-label="桌面端设备列表">
+                    <div class="table-row table-head" role="row">
+                      <span>设备</span>
+                      <span>平台</span>
+                      <span>状态</span>
+                      <span>延迟</span>
+                      <span>最近活跃</span>
+                      <span>操作</span>
+                    </div>
+                    <article class="table-row" role="row">
+                      <div class="device-cell">
+                        <span class="platform-icon windows">W</span>
+                        <span><strong>Office-PC</strong><small>WIN-7G3K2L9</small></span>
+                      </div>
+                      <span>Windows</span>
+                      <span class="status-text"><i class="status-dot online"></i>在线</span>
+                      <span class="metric-good">12 ms</span>
+                      <span>1 分钟前</span>
+                      <span class="row-actions">
+                        <a class="secondary-button" href="./remote-window.html?device=Office-PC&surface=desktop" target="_blank" rel="noreferrer" data-remote data-device="Office-PC" data-surface="desktop">远程</a>
+                        <button class="plain-icon" type="button" title="更多"><svg><use href="#icon-more"></use></svg></button>
+                      </span>
+                    </article>
+                    <article class="table-row" role="row">
+                      <div class="device-cell">
+                        <span class="platform-icon android">A</span>
+                        <span><strong>Pixel 8 Pro</strong><small>ANDROID-4F2K</small></span>
+                      </div>
+                      <span>Android</span>
+                      <span class="status-text"><i class="status-dot online"></i>在线</span>
+                      <span class="metric-good">35 ms</span>
+                      <span>2 分钟前</span>
+                      <span class="row-actions">
+                        <a class="secondary-button" href="./remote-window.html?device=Pixel%208%20Pro&surface=desktop" target="_blank" rel="noreferrer" data-remote data-device="Pixel 8 Pro" data-surface="desktop">远程</a>
+                        <button class="plain-icon" type="button" title="更多"><svg><use href="#icon-more"></use></svg></button>
+                      </span>
+                    </article>
+                    <article class="table-row" role="row">
+                      <div class="device-cell">
+                        <span class="platform-icon windows">W</span>
+                        <span><strong>Dev-Workstation</strong><small>WIN-2X9M1D8</small></span>
+                      </div>
+                      <span>Windows</span>
+                      <span class="status-text"><i class="status-dot busy"></i>忙碌</span>
+                      <span>28 ms</span>
+                      <span>5 分钟前</span>
+                      <span class="row-actions">
+                        <a class="secondary-button" href="./remote-window.html?device=Dev-Workstation&surface=desktop" target="_blank" rel="noreferrer" data-remote data-device="Dev-Workstation" data-surface="desktop">远程</a>
+                        <button class="plain-icon" type="button" title="更多"><svg><use href="#icon-more"></use></svg></button>
+                      </span>
+                    </article>
+                    <article class="table-row is-muted" role="row">
+                      <div class="device-cell">
+                        <span class="platform-icon android">A</span>
+                        <span><strong>Galaxy Tab S9</strong><small>ANDROID-7H8J</small></span>
+                      </div>
+                      <span>Android</span>
+                      <span class="status-text"><i class="status-dot offline"></i>离线</span>
+                      <span>-</span>
+                      <span>2 小时前</span>
+                      <span class="row-actions">
+                        <button class="secondary-button" type="button" disabled>远程</button>
+                        <button class="plain-icon" type="button" title="更多"><svg><use href="#icon-more"></use></svg></button>
+                      </span>
+                    </article>
+                  </div>
+                </div>
+
+                <div class="page-view" id="desktop-settings">
+                  <div class="page-header">
+                    <div>
+                      <h2>设置</h2>
+                      <p>连接、安全、画质与调试入口</p>
+                    </div>
+                    <button class="primary-button" type="button">保存设置</button>
+                  </div>
+
+                  <div class="settings-grid">
+                    <section class="settings-panel">
+                      <h3>中继服务</h3>
+                      <label class="form-field">
+                        <span>信令地址</span>
+                        <input value="ws://127.0.0.1:18081/ws" />
+                      </label>
+                      <label class="toggle-row">
+                        <span><strong>启动后自动连接</strong><small>保持设备列表即时可用</small></span>
+                        <input type="checkbox" checked />
+                      </label>
+                    </section>
+
+                    <section class="settings-panel">
+                      <h3>远控偏好</h3>
+                      <label class="form-field">
+                        <span>默认画质</span>
+                        <select><option>流畅优先 · 720p / 24fps</option><option>均衡</option><option>清晰优先</option></select>
+                      </label>
+                      <label class="toggle-row">
+                        <span><strong>请求前确认</strong><small>被控端需要手动接受</small></span>
+                        <input type="checkbox" checked />
+                      </label>
+                    </section>
+
+                    <section class="settings-panel">
+                      <h3>访问安全</h3>
+                      <div class="security-row">
+                        <svg><use href="#icon-shield"></use></svg>
+                        <div>
+                          <strong>一次性访问码</strong>
+                          <small>24 分钟后过期 · 仅局域网可见</small>
+                        </div>
+                        <button class="secondary-button" type="button">刷新</button>
+                      </div>
+                      <label class="toggle-row">
+                        <span><strong>允许剪贴板同步</strong><small>仅在会话期间生效</small></span>
+                        <input type="checkbox" checked />
+                      </label>
+                    </section>
+
+                    <section class="settings-panel">
+                      <h3>开发者</h3>
+                      <label class="toggle-row">
+                        <span><strong>调试模式</strong><small>显示独立调试入口与链路诊断</small></span>
+                        <input type="checkbox" data-debug-toggle />
+                      </label>
+                      <div class="debug-entry" data-debug-panel>
+                        <button class="secondary-button" type="button"><svg><use href="#icon-bug"></use></svg>打开调试面板</button>
+                        <div class="debug-drawer">
+                          <span>Proof: android_to_windows</span>
+                          <span>ICE: p2p_udp</span>
+                          <span>FPS: 24 target</span>
+                        </div>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section class="preview-column preview-column-phone" aria-label="移动端原型">
+          <div class="preview-label">
+            <span>Mobile</span>
+            <strong>Android</strong>
+          </div>
+
+          <div class="phone-frame" data-surface="mobile">
+            <div class="phone-hardware">
+              <span>9:41</span>
+              <span class="phone-camera"></span>
+              <span>5G 88%</span>
+            </div>
+
+            <div class="mobile-app">
+              <header class="mobile-header">
+                <div>
+                  <strong>RemoteDesk</strong>
+                  <span>中继在线 · 4 台</span>
+                </div>
+                <button class="icon-button" type="button" title="刷新设备"><svg><use href="#icon-refresh"></use></svg></button>
+              </header>
+
+              <section class="mobile-page is-active" id="mobile-devices">
+                <label class="search-field mobile-search">
+                  <svg><use href="#icon-search"></use></svg>
+                  <input type="search" placeholder="搜索设备" />
+                </label>
+
+                <article class="mobile-device-card">
+                  <div class="mobile-device-top">
+                    <span class="platform-icon windows">W</span>
+                    <div><strong>Office-PC</strong><small>WIN-7G3K2L9</small></div>
+                    <span class="mobile-state"><i class="status-dot online"></i>在线</span>
+                  </div>
+                  <div class="mobile-device-bottom">
+                    <span class="metric-good">12 ms</span>
+                    <span>1 分钟前</span>
+                    <a class="primary-button" href="./remote-window.html?device=Office-PC&surface=mobile" target="_blank" rel="noreferrer" data-remote data-device="Office-PC" data-surface="mobile">远程</a>
+                  </div>
+                </article>
+
+                <article class="mobile-device-card">
+                  <div class="mobile-device-top">
+                    <span class="platform-icon android">A</span>
+                    <div><strong>Pixel 8 Pro</strong><small>ANDROID-4F2K</small></div>
+                    <span class="mobile-state"><i class="status-dot online"></i>在线</span>
+                  </div>
+                  <div class="mobile-device-bottom">
+                    <span class="metric-good">35 ms</span>
+                    <span>2 分钟前</span>
+                    <a class="primary-button" href="./remote-window.html?device=Pixel%208%20Pro&surface=mobile" target="_blank" rel="noreferrer" data-remote data-device="Pixel 8 Pro" data-surface="mobile">远程</a>
+                  </div>
+                </article>
+
+                <article class="mobile-device-card">
+                  <div class="mobile-device-top">
+                    <span class="platform-icon windows">W</span>
+                    <div><strong>Dev-Workstation</strong><small>WIN-2X9M1D8</small></div>
+                    <span class="mobile-state"><i class="status-dot busy"></i>忙碌</span>
+                  </div>
+                  <div class="mobile-device-bottom">
+                    <span>28 ms</span>
+                    <span>5 分钟前</span>
+                    <a class="primary-button" href="./remote-window.html?device=Dev-Workstation&surface=mobile" target="_blank" rel="noreferrer" data-remote data-device="Dev-Workstation" data-surface="mobile">远程</a>
+                  </div>
+                </article>
+              </section>
+
+              <section class="mobile-page" id="mobile-settings">
+                <div class="mobile-settings-list">
+                  <label class="form-field">
+                    <span>信令地址</span>
+                    <input value="ws://10.0.2.2:18081/ws" />
+                  </label>
+                  <label class="form-field">
+                    <span>默认画质</span>
+                    <select><option>流畅优先</option><option>均衡</option><option>清晰优先</option></select>
+                  </label>
+                  <label class="toggle-row">
+                    <span><strong>启动后自动连接</strong><small>后台保持在线</small></span>
+                    <input type="checkbox" checked />
+                  </label>
+                  <label class="toggle-row">
+                    <span><strong>请求前确认</strong><small>防止误接入</small></span>
+                    <input type="checkbox" checked />
+                  </label>
+                  <label class="toggle-row">
+                    <span><strong>调试模式</strong><small>显示诊断入口</small></span>
+                    <input type="checkbox" data-debug-toggle />
+                  </label>
+                  <div class="debug-entry" data-debug-panel>
+                    <button class="secondary-button" type="button"><svg><use href="#icon-bug"></use></svg>调试面板</button>
+                    <div class="debug-drawer">
+                      <span>WebRTC · p2p_udp</span>
+                      <span>输入回执 · 11/11</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <nav class="mobile-nav" aria-label="移动端导航">
+                <button class="nav-button is-active" type="button" data-tab-target="mobile-devices">
+                  <svg><use href="#icon-monitor"></use></svg>
+                  <span>设备</span>
+                </button>
+                <button class="nav-button" type="button" data-tab-target="mobile-settings">
+                  <svg><use href="#icon-settings"></use></svg>
+                  <span>设置</span>
+                </button>
+              </nav>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <div class="toast" role="status" aria-live="polite" data-toast></div>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

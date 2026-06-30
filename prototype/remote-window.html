@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RemoteDesk Remote Session</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-page="session">
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="icon-monitor" viewBox="0 0 24 24">
+        <path d="M4 5.75A1.75 1.75 0 0 1 5.75 4h12.5A1.75 1.75 0 0 1 20 5.75v8.5A1.75 1.75 0 0 1 18.25 16H5.75A1.75 1.75 0 0 1 4 14.25z" />
+        <path d="M9 20h6M12 16v4" />
+      </symbol>
+      <symbol id="icon-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></symbol>
+      <symbol id="icon-shield" viewBox="0 0 24 24">
+        <path d="M12 3.5 19 6v5.5c0 4.2-2.77 7.1-7 9-4.23-1.9-7-4.8-7-9V6z" />
+        <path d="m9 12 2 2 4-4" />
+      </symbol>
+      <symbol id="icon-more" viewBox="0 0 24 24">
+        <circle cx="12" cy="5" r="1" />
+        <circle cx="12" cy="12" r="1" />
+        <circle cx="12" cy="19" r="1" />
+      </symbol>
+    </svg>
+
+    <main class="session-shell">
+      <header class="session-titlebar">
+        <div class="title-left">
+          <span class="brand-mark dark"><svg><use href="#icon-monitor"></use></svg></span>
+          <strong data-session-title>Office-PC - 远程会话</strong>
+        </div>
+        <div class="window-controls light" aria-hidden="true"><span></span><span></span><span></span></div>
+      </header>
+
+      <section class="session-toolbar" aria-label="远程会话工具栏">
+        <div class="session-tool-group">
+          <button class="session-tool danger" type="button" data-close-window><svg><use href="#icon-x"></use></svg>断开</button>
+          <button class="session-tool" type="button">Ctrl+Alt+Del</button>
+          <button class="session-tool" type="button">剪贴板</button>
+          <button class="session-tool" type="button">文件</button>
+          <button class="session-tool" type="button">截图</button>
+          <button class="session-tool" type="button">视图</button>
+        </div>
+        <div class="session-metrics">
+          <span class="signal-bars"><i></i><i></i><i></i></span>
+          <span>12 ms</span>
+          <span>24 fps</span>
+          <svg><use href="#icon-shield"></use></svg>
+        </div>
+      </section>
+
+      <section class="remote-canvas-wrap">
+        <img class="remote-canvas-image" src="./assets/remote-canvas.svg" alt="远程桌面画面" />
+        <div class="floating-control-panel" aria-label="移动端远程控制浮层">
+          <button type="button">1x</button>
+          <button type="button">键盘</button>
+          <button type="button"><svg><use href="#icon-more"></use></svg></button>
+        </div>
+      </section>
+
+      <footer class="session-footer">
+        <span>传输 WebRTC · p2p_udp</span>
+        <span>输入 windows.send_input</span>
+        <span>会话 00:05:08</span>
+      </footer>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

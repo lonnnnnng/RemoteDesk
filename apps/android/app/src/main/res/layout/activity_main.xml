@@ -3,25 +3,55 @@
   xmlns:app="http://schemas.android.com/apk/res-auto"
   android:layout_width="match_parent"
   android:layout_height="match_parent"
-  android:background="#F2F4F7"
+  android:background="#F6F8FB"
+  android:fitsSystemWindows="true"
   android:orientation="vertical">
 
-  <View
-    android:layout_width="match_parent"
-    android:layout_height="10dp" />
-
-  <TextView
-    android:id="@+id/topConnectionStatusText"
+  <LinearLayout
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:background="#FFFFFF"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
     android:paddingStart="18dp"
-    android:paddingTop="8dp"
+    android:paddingTop="32dp"
     android:paddingEnd="18dp"
-    android:paddingBottom="8dp"
-    android:text="连接状态：未连接"
-    android:textColor="#374151"
-    android:textSize="18sp"
-    android:textStyle="bold" />
+    android:paddingBottom="12dp">
+
+    <LinearLayout
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_weight="1"
+      android:orientation="vertical">
+
+      <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="RemoteDesk"
+        android:textColor="#0D1726"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+      <TextView
+        android:id="@+id/topConnectionStatusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:text="连接状态：未连接"
+        android:textColor="#5F6F85"
+        android:textSize="12sp" />
+    </LinearLayout>
+
+    <TextView
+      android:layout_width="36dp"
+      android:layout_height="36dp"
+      android:background="#EAF2FF"
+      android:gravity="center"
+      android:text="RD"
+      android:textColor="#1263FF"
+      android:textSize="12sp"
+      android:textStyle="bold" />
+  </LinearLayout>
 
   <View
     android:layout_width="match_parent"
@@ -47,7 +77,7 @@
         android:paddingStart="18dp"
         android:paddingTop="18dp"
         android:paddingEnd="18dp"
-        android:paddingBottom="88dp">
+        android:paddingBottom="96dp">
 
 
         <LinearLayout
@@ -58,14 +88,53 @@
           android:orientation="vertical"
           android:visibility="gone">
 
-          <TextView
-            android:id="@+id/onlineDevicesTitle"
+          <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="在线设备 0 ▾"
-            android:textColor="#111111"
-            android:textSize="15sp"
-            android:textStyle="bold" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+              android:layout_width="0dp"
+              android:layout_height="wrap_content"
+              android:layout_weight="1"
+              android:orientation="vertical">
+
+              <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="设备列表"
+                android:textColor="#0D1726"
+                android:textSize="24sp"
+                android:textStyle="bold" />
+
+              <TextView
+                android:id="@+id/onlineDevicesTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="在线设备 0"
+                android:textColor="#5F6F85"
+                android:textSize="13sp" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+              android:id="@+id/devicesRefreshButton"
+              style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+              android:layout_width="wrap_content"
+              android:layout_height="38dp"
+              android:insetTop="0dp"
+              android:insetBottom="0dp"
+              android:minWidth="0dp"
+              android:paddingStart="14dp"
+              android:paddingEnd="14dp"
+              android:text="刷新"
+              android:textAllCaps="false"
+              android:textColor="#1263FF"
+              android:textSize="13sp"
+              app:cornerRadius="8dp"
+              app:strokeColor="#CBD6E3" />
+          </LinearLayout>
 
           <LinearLayout
             android:id="@+id/onlineDevicesContainer"
@@ -120,20 +189,67 @@
           android:id="@+id/remoteAssistPage"
           android:layout_width="match_parent"
           android:layout_height="wrap_content"
-          android:layout_marginTop="14dp"
+          android:layout_marginTop="4dp"
           android:orientation="vertical"
           android:visibility="gone">
+
+          <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+              android:layout_width="0dp"
+              android:layout_height="wrap_content"
+              android:layout_weight="1"
+              android:orientation="vertical">
+
+              <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="远程会话"
+                android:textColor="#0D1726"
+                android:textSize="24sp"
+                android:textStyle="bold" />
+
+              <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="画面与输入在独立会话页中运行"
+                android:textColor="#5F6F85"
+                android:textSize="13sp" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+              android:id="@+id/sessionBackButton"
+              style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+              android:layout_width="wrap_content"
+              android:layout_height="38dp"
+              android:insetTop="0dp"
+              android:insetBottom="0dp"
+              android:minWidth="0dp"
+              android:paddingStart="12dp"
+              android:paddingEnd="12dp"
+              android:text="返回"
+              android:textAllCaps="false"
+              android:textColor="#40516B"
+              android:textSize="13sp"
+              app:cornerRadius="8dp"
+              app:strokeColor="#CBD6E3" />
+          </LinearLayout>
 
           <com.google.android.material.card.MaterialCardView
             android:id="@+id/remoteFrameCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="14dp"
             android:visibility="gone"
             app:cardBackgroundColor="#FFFFFF"
-            app:cardCornerRadius="16dp"
+            app:cardCornerRadius="12dp"
             app:cardElevation="0dp"
-            app:strokeColor="#D4E2F8"
+            app:strokeColor="#D9E4F2"
             app:strokeWidth="1dp">
 
             <LinearLayout
@@ -150,7 +266,7 @@
                 android:maxLines="1"
                 android:singleLine="true"
                 android:text="当前状态：准备连接"
-                android:textColor="#5E769B"
+                android:textColor="#11325E"
                 android:textSize="13sp" />
 
               <TextView
@@ -159,7 +275,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text="当前会话：-"
-                android:textColor="#5E769B"
+                android:textColor="#5F6F85"
                 android:textSize="13sp" />
 
               <TextView
@@ -168,7 +284,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="会话开始：-"
-                android:textColor="#5E769B"
+                android:textColor="#5F6F85"
                 android:textSize="13sp" />
 
               <TextView
@@ -177,7 +293,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="会话时长：-"
-                android:textColor="#5E769B"
+                android:textColor="#5F6F85"
                 android:textSize="13sp" />
 
               <TextView
@@ -186,7 +302,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text="当前画面：-"
-                android:textColor="#5E769B"
+                android:textColor="#5F6F85"
                 android:textSize="12sp" />
 
               <TextView
@@ -195,7 +311,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:text="输入回执：-"
-                android:textColor="#5E769B"
+                android:textColor="#5F6F85"
                 android:textSize="12sp" />
 
               <FrameLayout
@@ -203,7 +319,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="262dp"
                 android:layout_marginTop="10dp"
-                android:background="#EAF2FF">
+                android:background="#F3F7FF">
 
                 <org.webrtc.SurfaceViewRenderer
                   android:id="@+id/remoteVideoView"
@@ -352,7 +468,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text="传输方式：-"
-                android:textColor="#5E769B"
+                android:textColor="#5F6F85"
                 android:textSize="13sp" />
 
               <TextView
@@ -361,7 +477,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="会话链路：-"
-                android:textColor="#5E769B"
+                android:textColor="#5F6F85"
                 android:textSize="13sp" />
 
               <TextView
@@ -372,8 +488,23 @@
                 android:background="#F3F7FF"
                 android:padding="10dp"
                 android:text="实时指标：\n首帧：-\n渲染FPS：-\n接收码率：-\n发送FPS/码率：-\n候选路径/分级：-\n质量判定：-"
-                android:textColor="#4F6D97"
+                android:textColor="#5F6F85"
                 android:textSize="12sp" />
+
+              <com.google.android.material.button.MaterialButton
+                android:id="@+id/sessionEndButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:layout_marginTop="10dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="结束会话"
+                android:textAllCaps="false"
+                android:textColor="#B3261E"
+                android:textSize="13sp"
+                app:cornerRadius="10dp"
+                app:strokeColor="#F1B8B4" />
             </LinearLayout>
           </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
@@ -538,6 +669,54 @@
                 android:textColor="#35598C"
                 app:cornerRadius="12dp"
                 app:strokeColor="#D4E2F8" />
+            </LinearLayout>
+          </com.google.android.material.card.MaterialCardView>
+
+          <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            app:cardBackgroundColor="#FFFFFF"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeColor="#D4E2F8"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:gravity="center_vertical"
+              android:orientation="horizontal"
+              android:padding="14dp">
+
+              <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="开发者调试"
+                  android:textColor="#11325E"
+                  android:textSize="18sp"
+                  android:textStyle="bold" />
+
+                <TextView
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="4dp"
+                  android:text="开启后显示 E2E proof、测试输入和运行日志。"
+                  android:textColor="#5E769B"
+                  android:textSize="12sp" />
+              </LinearLayout>
+
+              <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/debugModeSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="false" />
             </LinearLayout>
           </com.google.android.material.card.MaterialCardView>
 
@@ -719,6 +898,7 @@
     </ScrollView>
 
     <com.google.android.material.card.MaterialCardView
+      android:id="@+id/bottomNavigationBar"
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:layout_gravity="bottom"
@@ -767,6 +947,7 @@
           android:layout_width="0dp"
           android:layout_height="wrap_content"
           android:layout_weight="1"
+          android:visibility="gone"
           android:insetTop="0dp"
           android:insetBottom="0dp"
           android:minHeight="42dp"
@@ -787,6 +968,7 @@
           android:layout_width="0dp"
           android:layout_height="wrap_content"
           android:layout_weight="1"
+          android:visibility="gone"
           android:insetTop="0dp"
           android:insetBottom="0dp"
           android:minHeight="42dp"

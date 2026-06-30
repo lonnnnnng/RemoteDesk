@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core"
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow"
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { createRoot } from "react-dom/client"
 
@@ -77,6 +78,8 @@ const queryWsUrl = params.get("ws_url")?.trim() || ""
 const queryDeviceId = params.get("device_id")?.trim() || ""
 const queryRole = params.get("role")?.trim() || ""
 const queryTargetDeviceId = params.get("target_device_id")?.trim() || ""
+const sessionWindowMode = parseBooleanFlag(params.get("session_window"), false)
+const querySessionDeviceName = params.get("session_device_name")?.trim() || ""
 
 function resolveStorage(type) {
   try {
@@ -784,6 +787,82 @@ function formatProofTimestamp(value) {
   }
 }
 
+const LEGACY_ANDROID_RUNTIME_DEVICE_ID_PATTERN = /^android-[0-9a-f]{10,13}$/i
+
+function isLegacyAndroidRuntimeDevice(device) {
+  const deviceId = `${device?.device_id || ""}`.trim()
+  const platform = `${device?.platform || ""}`.trim().toLowerCase()
+  const role = `${device?.role || ""}`.trim().toLowerCase()
+  return platform.includes("android") && role === "controller" && LEGACY_ANDROID_RUNTIME_DEVICE_ID_PATTERN.test(deviceId)
+}
+
+function androidControllerGhostGroupKey(device) {
+  const platform = `${device?.platform || ""}`.trim().toLowerCase()
+  const role = `${device?.role || ""}`.trim().toLowerCase()
+  if (!platform.includes("android") || role !== "controller") {
+    return ""
+  }
+  const userId = `${device?.user_id || ""}`.trim().toLowerCase()
+  const displayName = `${device?.display_name || device?.device_name || ""}`.trim().toLowerCase()
+  return `${platform}|${role}|${userId}|${displayName}`
+}
+
+function lastSeenTimestamp(device) {
+  const timestamp = new Date(device?.last_seen_at || "").getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function chooseAndroidControllerRepresentative(items) {
+  return items.reduce((best, item) => {
+    if (!best) {
+      return item
+    }
+    const bestIsStable = !isLegacyAndroidRuntimeDevice(best.device)
+    const itemIsStable = !isLegacyAndroidRuntimeDevice(item.device)
+    if (bestIsStable !== itemIsStable) {
+      return itemIsStable ? item : best
+    }
+    const bestLastSeen = lastSeenTimestamp(best.device)
+    const itemLastSeen = lastSeenTimestamp(item.device)
+    if (bestLastSeen !== itemLastSeen) {
+      return itemLastSeen > bestLastSeen ? item : best
+    }
+    return `${item.device.device_id || ""}`.localeCompare(`${best.device.device_id || ""}`) > 0 ? item : best
+  }, null)
+}
+
+function collapseLegacyAndroidControllerGhosts(devices) {
+  const groups = new Map()
+  const passthrough = []
+  devices.forEach((device, index) => {
+    const key = androidControllerGhostGroupKey(device)
+    if (!key) {
+      passthrough.push({ device, index })
+      return
+    }
+    const group = groups.get(key) || { items: [], hasLegacyRuntimeId: false }
+    group.items.push({ device, index })
+    group.hasLegacyRuntimeId = group.hasLegacyRuntimeId || isLegacyAndroidRuntimeDevice(device)
+    groups.set(key, group)
+  })
+
+  const selected = [...passthrough]
+  for (const group of groups.values()) {
+    if (group.items.length > 1 && group.hasLegacyRuntimeId) {
+      // 作者: long；旧安卓端把启动时间戳写进 device_id，同一真机反复重连会留下多条在线残影，列表只展示稳定 ID 或最新旧 ID。
+      const representative = chooseAndroidControllerRepresentative(group.items)
+      if (representative) {
+        selected.push(representative)
+      }
+      continue
+    }
+    selected.push(...group.items)
+  }
+  return selected
+    .sort((left, right) => left.index - right.index)
+    .map((item) => item.device)
+}
+
 function normalizeRelayDevice(device) {
   if (!device || typeof device !== "object") {
     return null
@@ -859,7 +938,7 @@ function normalizeRelayDevicesPayload(payload) {
 
 function buildOnlineRelayDevices() {
   const devices = Array.isArray(state.relayDevices) ? state.relayDevices : []
-  return devices.filter((device) => device.status !== "offline")
+  return collapseLegacyAndroidControllerGhosts(devices.filter((device) => device.status !== "offline"))
 }
 
 function relayDevicesFingerprint(devices = []) {
@@ -9737,6 +9816,73 @@ function requestSession() {
   })
 }
 
+function buildSessionWindowUrl(device) {
+  const targetDeviceId = `${device?.device_id || state.targetDeviceId || ""}`.trim()
+  const deviceName = `${device?.display_name || querySessionDeviceName || targetDeviceId || "远程设备"}`.trim()
+  const sessionUrl = new URL(window.location.href)
+  sessionUrl.searchParams.set("session_window", "1")
+  sessionUrl.searchParams.set("target_device_id", targetDeviceId)
+  sessionUrl.searchParams.set("session_device_name", deviceName)
+  sessionUrl.searchParams.set("ws_url", state.wsUrl || "")
+  sessionUrl.searchParams.set("role", state.role || "controller")
+  sessionUrl.searchParams.set("device_id", state.deviceId || "")
+  return sessionUrl
+}
+
+async function openRemoteSessionWindow(device) {
+  const targetDeviceId = `${device?.device_id || ""}`.trim()
+  if (!targetDeviceId) {
+    appendLog("缺少目标设备，无法打开远程窗口")
+    render()
+    return
+  }
+  if (device?.is_self) {
+    appendLog("本机设备不可远程控制")
+    render()
+    return
+  }
+  if (!device?.is_target_candidate) {
+    appendLog(`目标设备 ${device?.display_name || targetDeviceId} 当前不可远程`)
+    render()
+    return
+  }
+
+  state.targetDeviceId = targetDeviceId
+  persistLocalSettings()
+  const sessionUrl = buildSessionWindowUrl(device)
+  const label = `session_${targetDeviceId.replace(/[^a-zA-Z0-9_/-]/g, "_")}`.slice(0, 64)
+
+  try {
+    if (tauriRuntime) {
+      const existing = await WebviewWindow.getByLabel(label)
+      if (existing) {
+        await existing.setFocus()
+        return
+      }
+      // 作者: long；远控会话独立成窗口，主窗口只承担设备发现和设置，避免调试/画面状态污染设备列表。
+      const sessionWindow = new WebviewWindow(label, {
+        url: `${sessionUrl.pathname}${sessionUrl.search}${sessionUrl.hash}`,
+        title: `${device.display_name || targetDeviceId} - RemoteDesk`,
+        width: 1180,
+        height: 760,
+        minWidth: 920,
+        minHeight: 620,
+        resizable: true,
+        center: true,
+      })
+      sessionWindow.once("tauri://error", (event) => {
+        appendLog(`打开远程窗口失败：${event?.payload || "unknown"}`)
+        render()
+      })
+      return
+    }
+    window.open(sessionUrl.toString(), label, "width=1180,height=760,noopener,noreferrer")
+  } catch (error) {
+    appendLog(`打开远程窗口失败：${error?.message || "unknown error"}`)
+    render()
+  }
+}
+
 function endSession() {
   syncControlsFromInputs()
   if (!state.sessionId) {
@@ -10612,6 +10758,48 @@ function useUiRuntimeRevision() {
   )
 }
 
+function platformBadgeLabel(platform) {
+  switch (`${platform || ""}`.toLowerCase()) {
+    case "windows":
+      return "W"
+    case "android":
+      return "A"
+    case "macos":
+      return "M"
+    case "linux":
+      return "L"
+    default:
+      return "D"
+  }
+}
+
+function statusDotClass(status) {
+  switch (`${status || ""}`.toLowerCase()) {
+    case "online":
+      return "online"
+    case "busy":
+      return "busy"
+    default:
+      return "offline"
+  }
+}
+
+function runSessionPrimaryAction() {
+  if (!connectionReady()) {
+    connect()
+    return
+  }
+  if (!state.token) {
+    sendRegister()
+    return
+  }
+  if (!state.presenceReady) {
+    sendHeartbeat()
+    return
+  }
+  requestSession()
+}
+
 function DesktopReactApp() {
   useUiRuntimeRevision()
   const [, setSessionClockTick] = useState(0)
@@ -10771,12 +10959,110 @@ function DesktopReactApp() {
         ? "error"
         : "not checked"
 
+  const visibleDevices = state.relayDevices.length ? state.relayDevices : onlineDevices
+  const onlineCount = visibleDevices.filter((device) => device.status !== "offline").length
+  const sessionDeviceName = querySessionDeviceName || selectedTargetName || "远程设备"
+  const sessionPrimaryLabel = sessionActive
+    ? "结束会话"
+    : !connectionReady()
+      ? "连接中继"
+      : !state.token
+        ? "注册本机"
+        : !state.presenceReady
+          ? "发送心跳"
+          : "开始远控"
+  const sessionPrimaryDisabled = !sessionActive && state.targetDeviceId.trim() === "" && connectionReady() && state.token && state.presenceReady
+
+  if (sessionWindowMode) {
+    return (
+      <div className="session-window-shell">
+        <header className="session-titlebar">
+          <div className="session-title">
+            <span className="brand-mark-mini">RD</span>
+            <strong>{sessionDeviceName} - 远程会话</strong>
+          </div>
+          <div className="session-status-strip">
+            <span className={`status-pill ${connectionReady() ? "status-pill-good" : ""}`}>{readyStateLabel()}</span>
+            <span className="status-pill">{state.sessionId || "未开始"}</span>
+          </div>
+        </header>
+
+        <section className="session-toolbar">
+          <button
+            className={sessionActive ? "danger-btn" : "session-primary-btn"}
+            disabled={sessionPrimaryDisabled}
+            onClick={() => {
+              if (sessionActive) {
+                endSession()
+              } else {
+                runSessionPrimaryAction()
+              }
+            }}
+          >
+            {sessionPrimaryLabel}
+          </button>
+          <button className="session-tool-btn" disabled={!sessionActive}>Ctrl+Alt+Del</button>
+          <button className="session-tool-btn" disabled={!sessionActive}>剪贴板</button>
+          <button className="session-tool-btn" disabled={!sessionActive}>文件</button>
+          <button className="session-tool-btn" disabled={!sessionActive}>截图</button>
+          <button className="session-tool-btn" disabled={!sessionActive}>视图</button>
+          <div className="session-toolbar-spacer" />
+          <span className="metric-inline">{transportModeLabel}</span>
+          {showCandidateMetric ? <span className="metric-inline">{`${liveCandidatePath || "-"} / ${liveCandidateTier || "-"}`}</span> : null}
+          <span className="metric-inline">{firstFrameMs >= 0 ? `${firstFrameMs} ms 首帧` : "等待首帧"}</span>
+        </section>
+
+        <section className="session-canvas">
+          <div
+            id="remoteViewport"
+            className={`session-viewport ${canSendInput() ? "clickable" : ""}`}
+            tabIndex={canSendInput() ? 0 : -1}
+            onPointerDown={(event) => handleViewportPointerDown(event)}
+            onPointerMove={(event) => handleViewportPointerMove(event)}
+            onPointerUp={(event) => finishViewportPointer(event)}
+            onPointerCancel={(event) => finishViewportPointer(event, true)}
+            onWheel={(event) => handleViewportWheel(event)}
+            onKeyDown={(event) => handleViewportKey(event, "down")}
+            onKeyUp={(event) => handleViewportKey(event, "up")}
+            onBlur={() => {
+              releaseRemoteViewportPointer()
+              releaseRemoteViewportKeys()
+            }}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            {hasViewportStream ? <video id="remoteMediaVideo" className={`viewport-image ${state.webrtcState === "connected" ? "is-active" : ""}`} autoPlay playsInline muted /> : null}
+            {activeFrameUrl
+              ? <img src={activeFrameUrl} alt="远端画面" className="viewport-image" />
+              : (!hasViewportStream ? <div className="session-placeholder">{viewportHint}</div> : null)}
+          </div>
+          <aside className="floating-session-panel">
+            <button type="button" disabled={!sessionActive}>1x</button>
+            <button type="button" disabled={!sessionActive}>键盘</button>
+            <button type="button" disabled={!sessionActive}>更多</button>
+          </aside>
+        </section>
+
+        <footer className="session-footer">
+          <span>画面：{formatFrameMeta(activeFrameMeta)}</span>
+          <span>输入：{formatBackendLabel(hostBridgeExecution.executor)}</span>
+          <span>质量：{qualityHintLabel(liveQualityHint)}</span>
+          <span>会话：{sessionDurationText}</span>
+        </footer>
+      </div>
+    )
+  }
+
   return (
-    <div className="desktop-shell">
+    <div className="desktop-shell product-desktop-shell">
       <aside className="sidebar-shell">
         <div className="sidebar-brand">
-          <div className="brand-title">远控桌面端</div>
-          <div className="brand-subtitle">稳定版</div>
+          <div className="brand-row">
+            <span className="brand-mark-mini">RD</span>
+            <div>
+              <div className="brand-title">RemoteDesk</div>
+              <div className="brand-subtitle">桌面端</div>
+            </div>
+          </div>
         </div>
         <div className="sidebar-group">
           <button
@@ -10790,6 +11076,7 @@ function DesktopReactApp() {
               }
             }}
           >
+            <span className="nav-dot-icon">▣</span>
             <span>设备</span>
           </button>
           <button
@@ -10800,8 +11087,13 @@ function DesktopReactApp() {
               render()
             }}
           >
+            <span className="nav-dot-icon">⚙</span>
             <span>设置</span>
           </button>
+        </div>
+        <div className="sidebar-status">
+          <span className={`status-dot ${connectionReady() ? "online" : "offline"}`} />
+          <span>{connectionReady() ? "中继在线" : "中继未连接"}</span>
         </div>
       </aside>
 
@@ -10813,24 +11105,24 @@ function DesktopReactApp() {
               <p>{pageSubtitle}</p>
             </div>
           </div>
+          <div className="topbar-actions">
+            <button className="secondary-btn" onClick={() => void refreshRelayDevices({ force: true })}>刷新</button>
+            <button className="primary-btn" onClick={() => { state.currentPage = "settings"; render() }}>设置连接</button>
+          </div>
         </header>
 
         <div className="page-shell">
           {state.currentPage === "settings" ? (
-            <section className="stack-lg">
-              <section className="card hero-card">
-                <div className="hero-header">
+            <section className="settings-page-grid">
+              <section className="settings-panel">
+                <div className="section-head compact-head">
                   <div>
-                    <div className="eyebrow">桌面控制台</div>
-                    <h2 className="hero-title">中继设置</h2>
-                    <p className="hero-text">仅配置中继连接参数。</p>
+                    <h3>中继服务</h3>
+                    <p>设备发现与会话信令走这里，远控画面仍使用 WebRTC。</p>
                   </div>
+                  <span className={`chip ${connectionReady() ? "chip-success" : "chip-muted"}`}>{readyStateLabel()}</span>
                 </div>
-                <div className="device-status-strip">
-                  <span className="chip chip-soft">{readyStateLabel()}</span>
-                  <span className={`chip ${connectionReady() ? "chip-success" : "chip-muted"}`}>{roleLabel}</span>
-                </div>
-                <div className="form-grid">
+                <div className="form-grid settings-form-grid">
                   <label className="field">
                     <span>中继地址</span>
                     <input
@@ -10851,9 +11143,21 @@ function DesktopReactApp() {
                       }}
                     />
                   </label>
+                  <label className="field">
+                    <span>本机角色</span>
+                    <select
+                      value={state.role}
+                      onChange={(event) => {
+                        void updateRole(event.target.value)
+                      }}
+                    >
+                      <option value="controller">控制端</option>
+                      <option value="agent">受控端</option>
+                    </select>
+                  </label>
                 </div>
                 <div className="action-row">
-                  <button id="connectBtn" disabled={state.ws?.readyState === WebSocket.CONNECTING} onClick={() => connect()}>
+                  <button className="primary-btn" id="connectBtn" disabled={state.ws?.readyState === WebSocket.CONNECTING} onClick={() => connect()}>
                     {state.ws?.readyState === WebSocket.CONNECTING ? "连接中..." : "连接"}
                   </button>
                   <button id="registerBtn" className="secondary-btn" disabled={!connectionReady()} onClick={() => sendRegister()}>
@@ -10868,270 +11172,242 @@ function DesktopReactApp() {
                 </div>
               </section>
 
-              <section className="card grouped-card">
+              <section className="settings-panel">
                 <div className="section-head compact-head">
                   <div>
-                    <h3>桌面自检</h3>
-                    <p>{windowsSelfTestSummary}</p>
+                    <h3>远控偏好</h3>
+                    <p>这些设置先落 UI 结构，后续可接入真实画质策略。</p>
                   </div>
-                  <span className={`chip ${windowsSelfTestTone}`}>{windowsSelfTestLabel}</span>
                 </div>
-                <div className="action-row">
-                  <button
-                    className="secondary-btn"
-                    disabled={windowsSelfTestDisabled}
-                    onClick={() => {
-                      void runWindowsSelfTest()
-                    }}
-                  >
-                    {state.windowsSelfTestRunning ? "检测中..." : "运行自检"}
-                  </button>
-                  {sessionActive ? <span className="chip chip-muted">请先结束会话</span> : null}
-                  {!windowsSelfTestAvailable ? <span className="chip chip-muted">{state.shellPlatform || "unknown"}</span> : null}
+                <div className="form-grid settings-form-grid">
+                  <label className="field">
+                    <span>默认画质</span>
+                    <select defaultValue="smooth">
+                      <option value="smooth">流畅优先 · 720p / 24fps</option>
+                      <option value="balanced">均衡</option>
+                      <option value="clear">清晰优先</option>
+                    </select>
+                  </label>
+                  <label className="toggle-row">
+                    <span><strong>请求前确认</strong><small>被控端需要显式接受远控请求</small></span>
+                    <input type="checkbox" defaultChecked />
+                  </label>
                 </div>
-                {windowsSelfTestReport ? (
-                  <div className="kv-two-col">
-                    <div className="kv-item"><span>平台</span><strong>{windowsSelfTestReport.platform || "-"}</strong></div>
-                    <div className="kv-item"><span>耗时</span><strong>{windowsSelfTestReport.duration_ms || 0} ms</strong></div>
-                    <div className="kv-item"><span>采集后端</span><strong>{windowsSelfTestReport.capture_backend || "-"}</strong></div>
-                    <div className="kv-item"><span>输入后端</span><strong>{windowsSelfTestReport.host_input_backend || "-"}</strong></div>
-                    <div className="kv-item"><span>采集源</span><strong>{windowsSelfTestReport.source_title || windowsSelfTestReport.source_id || "-"}</strong></div>
-                    <div className="kv-item"><span>首帧</span><strong>{windowsSelfTestReport.frame_width > 0 ? `${windowsSelfTestReport.frame_width}x${windowsSelfTestReport.frame_height}` : "-"}</strong></div>
-                    <div className="kv-item"><span>帧格式</span><strong>{windowsSelfTestReport.frame_mime_type || "-"}</strong></div>
-                    <div className="kv-item"><span>帧大小</span><strong>{windowsSelfTestReport.frame_bytes || 0} bytes</strong></div>
-                    <div className="kv-item"><span>Sender</span><strong>{windowsSelfTestReport.native_sender_lifecycle || "-"}</strong></div>
-                    <div className="kv-item"><span>Offer</span><strong>{windowsSelfTestReport.native_sender_offer_count || 0}</strong></div>
-                    <div className="kv-item"><span>Sender 帧</span><strong>{windowsSelfTestReport.native_sender_probe_frame_count || 0}</strong></div>
-                    <div className="kv-item"><span>Sender 数据</span><strong>{windowsSelfTestReport.native_sender_probe_total_bytes || 0} bytes</strong></div>
-                  </div>
-                ) : null}
-                {windowsSelfTestChecks.length ? (
-                  <div className="self-test-checks">
-                    {windowsSelfTestChecks.map((check) => (
-                      <div key={check.name} className={`self-test-check ${windowsSelfTestCheckTone(check)}`}>
-                        <div className="self-test-check-head">
-                          <strong>{check.name}</strong>
-                          <span>{windowsSelfTestCheckLabel(check)}</span>
-                        </div>
-                        <p>{check.detail || check.status || "-"}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
               </section>
+
+              <section className="settings-panel">
+                <div className="section-head compact-head">
+                  <div>
+                    <h3>访问安全</h3>
+                    <p>把授权、剪贴板和输入权限从主设备页中拆出来。</p>
+                  </div>
+                </div>
+                <div className="security-row">
+                  <span className="security-mark">✓</span>
+                  <div>
+                    <strong>一次性访问码</strong>
+                    <small>{state.token ? "已注册，可用于本轮会话" : "注册后生成"}</small>
+                  </div>
+                  <button className="secondary-btn" disabled={!connectionReady()} onClick={() => sendRegister()}>刷新</button>
+                </div>
+                <label className="toggle-row">
+                  <span><strong>允许剪贴板同步</strong><small>仅在远程会话窗口中生效</small></span>
+                  <input type="checkbox" defaultChecked />
+                </label>
+              </section>
+
+              <section className="settings-panel">
+                <div className="section-head compact-head">
+                  <div>
+                    <h3>开发者</h3>
+                    <p>调试信息默认不展示，开启后才显示自检、Proof 和日志。</p>
+                  </div>
+                </div>
+                <label className="toggle-row">
+                  <span><strong>调试模式</strong><small>显示诊断入口与最近日志</small></span>
+                  <input
+                    type="checkbox"
+                    checked={state.uiDebugView}
+                    onChange={(event) => {
+                      state.uiDebugView = event.target.checked
+                      persistLocalSettings()
+                      render()
+                    }}
+                  />
+                </label>
+              </section>
+
+              {state.uiDebugView ? (
+                <section className="settings-panel debug-panel-wide">
+                  <div className="section-head compact-head">
+                    <div>
+                      <h3>调试面板</h3>
+                      <p>这些内容只在设置页调试模式里出现，不再污染设备列表。</p>
+                    </div>
+                    <span className={`chip ${e2eProofTone}`}>{e2eProofLabel}</span>
+                  </div>
+
+                  <div className="debug-grid">
+                    <section className="debug-card">
+                      <div className="section-head compact-head">
+                        <div>
+                          <h4>桌面自检</h4>
+                          <p>{windowsSelfTestSummary}</p>
+                        </div>
+                        <span className={`chip ${windowsSelfTestTone}`}>{windowsSelfTestLabel}</span>
+                      </div>
+                      <div className="action-row">
+                        <button
+                          className="secondary-btn"
+                          disabled={windowsSelfTestDisabled}
+                          onClick={() => {
+                            void runWindowsSelfTest()
+                          }}
+                        >
+                          {state.windowsSelfTestRunning ? "检测中..." : "运行自检"}
+                        </button>
+                      </div>
+                    </section>
+
+                    <section className="debug-card">
+                      <div className="section-head compact-head">
+                        <div>
+                          <h4>E2E Proof</h4>
+                          <p>{state.e2eProofError || `目标路由 ${e2eProofCompleteText}，最近刷新 ${formatProofTimestamp(state.lastE2EProofSyncAt)}`}</p>
+                        </div>
+                      </div>
+                      <div className="action-row">
+                        <button
+                          className="secondary-btn"
+                          disabled={state.e2eProofLoading || state.e2eProofResetting || !deriveE2EProofUrl(state.wsUrl)}
+                          onClick={() => {
+                            void refreshE2EProofSnapshot({ force: true })
+                          }}
+                        >
+                          {state.e2eProofLoading ? "刷新中..." : "刷新 Proof"}
+                        </button>
+                        <button
+                          className="secondary-btn"
+                          disabled={state.e2eProofLoading || state.e2eProofResetting || !deriveE2EProofUrl(state.wsUrl)}
+                          onClick={() => {
+                            void resetE2EProofSnapshot()
+                          }}
+                        >
+                          {state.e2eProofResetting ? "重置中..." : "重置 Proof"}
+                        </button>
+                        {isControllerSession() ? (
+                          <button className="secondary-btn" disabled={!canSendInput()} onClick={() => sendE2EProofInputSequence()}>
+                            Proof 输入序列
+                          </button>
+                        ) : null}
+                      </div>
+                    </section>
+                  </div>
+
+                  {windowsSelfTestReport ? (
+                    <div className="kv-two-col debug-kv-grid">
+                      <div className="kv-item"><span>平台</span><strong>{windowsSelfTestReport.platform || "-"}</strong></div>
+                      <div className="kv-item"><span>耗时</span><strong>{windowsSelfTestReport.duration_ms || 0} ms</strong></div>
+                      <div className="kv-item"><span>采集后端</span><strong>{windowsSelfTestReport.capture_backend || "-"}</strong></div>
+                      <div className="kv-item"><span>输入后端</span><strong>{windowsSelfTestReport.host_input_backend || "-"}</strong></div>
+                      <div className="kv-item"><span>首帧</span><strong>{windowsSelfTestReport.frame_width > 0 ? `${windowsSelfTestReport.frame_width}x${windowsSelfTestReport.frame_height}` : "-"}</strong></div>
+                      <div className="kv-item"><span>Sender 帧</span><strong>{windowsSelfTestReport.native_sender_probe_frame_count || 0}</strong></div>
+                    </div>
+                  ) : null}
+
+                  {e2eProofRoutes.length ? (
+                    <div className="proof-route-grid">
+                      {e2eProofRoutes.map((route) => {
+                        const latest = route.latest || null
+                        const missing = Array.isArray(route.missing) && route.missing.length ? route.missing.join(", ") : "-"
+                        const coverage = Array.isArray(latest?.remote_input_coverage) && latest.remote_input_coverage.length
+                          ? latest.remote_input_coverage.join(",")
+                          : "-"
+                        const routeTone = route.complete ? "chip-success" : latest ? "tone-warn" : "chip-muted"
+                        return (
+                          <div key={route.route_key || route.route} className="proof-route-card">
+                            <div className="proof-route-head">
+                              <strong>{route.route || route.route_key}</strong>
+                              <span className={`chip chip-compact ${routeTone}`}>{route.status || "not_observed"}</span>
+                            </div>
+                            <div className="proof-route-meta">missing: {missing}<br />coverage: {coverage}<br />latest: {latest?.proof_status || "-"}</div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : null}
+
+                  <pre className="log-panel">{state.logs.length ? state.logs.slice(0, 80).join("\n") : "暂无日志"}</pre>
+                </section>
+              ) : null}
             </section>
           ) : (
-            <section className="stack-lg">
-              <section className="card grouped-card">
-                <div className="section-head compact-list-head">
-                  <div><h3>在线设备列表</h3></div>
-                  <span className="chip chip-soft">{onlineDevices.length} 台</span>
+            <section className="devices-page">
+              <section className="device-list-panel">
+                <div className="section-head compact-head">
+                  <div>
+                    <h3>设备</h3>
+                    <p>{visibleDevices.length} 台设备 · 在线 {onlineCount} 台</p>
+                  </div>
+                  <div className="device-list-actions">
+                    <label className="search-field">
+                      <span>⌕</span>
+                      <input placeholder="搜索设备、平台或设备 ID" readOnly />
+                    </label>
+                    <button className="secondary-btn" onClick={() => void refreshRelayDevices({ force: true })}>刷新</button>
+                  </div>
                 </div>
-                <div className="device-list-grid">
-                  {onlineDevices.length ? onlineDevices.map((device) => {
+
+                <div className="device-table" role="table" aria-label="设备列表">
+                  <div className="device-table-row device-table-head" role="row">
+                    <span>设备</span>
+                    <span>平台</span>
+                    <span>状态</span>
+                    <span>延迟</span>
+                    <span>最近活跃</span>
+                    <span>操作</span>
+                  </div>
+                  {visibleDevices.length ? visibleDevices.map((device) => {
                     const selected = device.device_id === state.targetDeviceId
                     const isSelf = device.is_self
-                    const showDisconnect = isSelf && isAgentSession() && state.sessionId
+                    const canRemote = device.is_target_candidate
                     return (
-                      <article key={device.device_id} className={`device-row-card ${selected ? "device-row-active" : ""}`}>
-                        <div className="device-row-main">
-                          <div className="device-icon-badge">{device.kind === "mobile" ? "手" : "电"}</div>
-                          <div className="stack-xs">
-                            <div className="device-row-title">
-                              <strong>{device.display_name}</strong>
-                              {isSelf ? <span className="inline-tag">本机</span> : null}
-                            </div>
-                            <div className="device-row-meta">{`${device.kind === "mobile" ? "手机" : device.kind === "desktop" ? "电脑" : "其他"} · ${device.platform_label} · ${device.device_id}`}</div>
-                          </div>
+                      <article key={device.device_id} className={`device-table-row ${selected ? "device-row-active" : ""}`} role="row">
+                        <div className="device-name-cell">
+                          <span className={`platform-badge ${device.platform || "unknown"}`}>{platformBadgeLabel(device.platform)}</span>
+                          <span><strong>{device.display_name}</strong><small>{device.device_id}</small></span>
                         </div>
-                        <div className="device-row-side">
-                          <span className={`chip chip-compact ${isSelf && isAgentSession() && state.sessionId ? "tone-warn" : (device.status_tone === "success" ? "tone-success" : device.status_tone === "warn" ? "tone-warn" : "tone-muted")}`}>
-                            {isSelf && isAgentSession() && state.sessionId ? "被控" : device.status_label}
-                          </span>
-                          {isSelf ? (
-                            showDisconnect
-                              ? <button className="danger-btn device-row-action" onClick={() => endSession()}>断开控制</button>
-                              : <button className="secondary-btn device-row-action" disabled>本机</button>
-                          ) : (
-                            <button
-                              className="secondary-btn device-row-action"
-                              disabled={!device.is_target_candidate}
-                              onClick={() => {
-                                void selectRelayDevice(device.device_id)
-                              }}
-                            >
-                              {device.is_target_candidate ? "设为目标" : "不可用"}
-                            </button>
-                          )}
-                        </div>
+                        <span>{device.platform_label}</span>
+                        <span className="status-text"><i className={`status-dot ${statusDotClass(device.status)}`} />{device.status_label}</span>
+                        <span>{device.status === "offline" ? "-" : "-"}</span>
+                        <span>{device.last_seen_label || "-"}</span>
+                        <span className="row-actions">
+                          <button
+                            className="secondary-btn compact-action"
+                            disabled={!canRemote}
+                            onClick={() => {
+                              void openRemoteSessionWindow(device)
+                            }}
+                          >
+                            {isSelf ? "本机" : "远程"}
+                          </button>
+                        </span>
                       </article>
                     )
                   }) : <div className="empty-state">暂无在线设备，请保持中继连接并等待设备心跳。</div>}
                 </div>
               </section>
 
-              <section className="card grouped-card">
-                <div className="section-head compact-head"><div><h3>会话与链路</h3></div></div>
-                <div className="kv-two-col">
+              <section className="device-side-panel">
+                <h3>当前状态</h3>
+                <div className="kv-two-col single-col">
                   <div className="kv-item"><span>角色</span><strong>{roleLabel}</strong></div>
-                  <div className="kv-item"><span>会话 ID</span><strong>{state.sessionId || "未开始"}</strong></div>
-                  <div className="kv-item"><span>会话开始</span><strong>{sessionStartText}</strong></div>
-                  <div className="kv-item"><span>会话时长</span><strong>{sessionDurationText}</strong></div>
-                  <div className="kv-item"><span>{peerDeviceLabel}</span><strong>{peerDeviceValue}</strong></div>
+                  <div className="kv-item"><span>会话</span><strong>{state.sessionId || "未开始"}</strong></div>
+                  <div className="kv-item"><span>目标</span><strong>{selectedTargetName}</strong></div>
                   <div className="kv-item"><span>传输</span><strong>{transportModeLabel}</strong></div>
-                  <div className="kv-item"><span>编码</span><strong>{sessionCodecLabel}</strong></div>
-                  <div className="kv-item"><span>目标执行结果</span><strong>{formatRemoteInputResult()}</strong></div>
-                  <div className="kv-item"><span>输入次数</span><strong>{hostBridgeExecution.inputCount}</strong></div>
-                  <div className="kv-item"><span>桥接执行器</span><strong>{formatBackendLabel(hostBridgeExecution.executor)}</strong></div>
-                  <div className="kv-item"><span>桥接状态码</span><strong>{hostBridgeExecution.statusCode}</strong></div>
-                  <div className="kv-item"><span>首帧耗时</span><strong>{firstFrameMs >= 0 ? `${firstFrameMs} ms` : "-"}</strong></div>
-                  {receiverStatsActive ? <div className="kv-item"><span>渲染 FPS</span><strong>{liveRenderFps >= 0 ? `${formatMetricValue(liveRenderFps)} fps` : "-"}</strong></div> : null}
-                  {receiverStatsActive ? <div className="kv-item"><span>接收码率</span><strong>{liveRecvKbps >= 0 ? `${formatMetricValue(liveRecvKbps)} kbps` : "-"}</strong></div> : null}
-                  {senderStatsActive ? <div className="kv-item"><span>发送 FPS/码率</span><strong>{liveSendFps >= 0 || liveSendKbps >= 0 ? `${formatMetricValue(liveSendFps)} fps / ${formatMetricValue(liveSendKbps)} kbps` : "-"}</strong></div> : null}
-                  {senderStatsActive && showLocalPreviewMetric ? <div className="kv-item"><span>本地共享 FPS</span><strong>{localPreviewFpsText}</strong></div> : null}
-                  {showCandidateMetric ? <div className="kv-item"><span>候选路径/分级</span><strong>{`${liveCandidatePath || "-"} / ${liveCandidateTier || "-"}`}</strong></div> : null}
-                  <div className="kv-item"><span>质量判定</span><strong>{qualityHintLabel(liveQualityHint)}</strong></div>
                 </div>
-                <div className="action-row">
-                  <button
-                    id="assistConnectBtn"
-                    className={sessionActive ? "danger-btn" : "secondary-btn"}
-                    disabled={assistConnectDisabled}
-                    onClick={() => {
-                      if (sessionActive) {
-                        endSession()
-                      } else {
-                        requestSession()
-                      }
-                    }}
-                  >
-                    {assistConnectLabel}
-                  </button>
-                  {selectedTarget ? <span className="chip chip-soft">{selectedTargetName}</span> : null}
-                  {!state.presenceReady && !sessionActive ? <span className="chip chip-muted">等待心跳</span> : null}
-                </div>
+                <p className="muted-copy">远程画面和输入工具会在独立会话窗口中打开，主页面只保留设备浏览和选择。</p>
               </section>
-
-              {isControllerSession() ? (
-                <section className="card grouped-card">
-                  <div className="section-head compact-head">
-                    <div>
-                      <h3>E2E proof input</h3>
-                      <p>Send click, drag, keyboard, and wheel in one sequence.</p>
-                    </div>
-                    <span className="chip chip-muted">controller</span>
-                  </div>
-                  <div className="action-row">
-                    <button
-                      className="secondary-btn"
-                      disabled={!canSendInput()}
-                      onClick={() => {
-                        sendE2EProofInputSequence()
-                      }}
-                    >
-                      Send proof sequence
-                    </button>
-                    <span className="chip chip-soft">{remoteInputCoverageSummary() || "waiting"}</span>
-                  </div>
-                </section>
-              ) : null}
-
-              <section className="card grouped-card">
-                <div className="section-head compact-head">
-                  <div>
-                    <h3>E2E proof status</h3>
-                    <p>{state.e2eProofError || `Target routes ${e2eProofCompleteText}; last refresh ${formatProofTimestamp(state.lastE2EProofSyncAt)}`}</p>
-                  </div>
-                  <span className={`chip ${e2eProofTone}`}>{e2eProofLabel}</span>
-                </div>
-                <div className="action-row">
-                  <button
-                    className="secondary-btn"
-                    disabled={state.e2eProofLoading || state.e2eProofResetting || !deriveE2EProofUrl(state.wsUrl)}
-                    onClick={() => {
-                      void refreshE2EProofSnapshot({ force: true })
-                    }}
-                  >
-                    {state.e2eProofLoading ? "Refreshing..." : "Refresh proof"}
-                  </button>
-                  <button
-                    className="secondary-btn"
-                    disabled={state.e2eProofLoading || state.e2eProofResetting || !deriveE2EProofUrl(state.wsUrl)}
-                    onClick={() => {
-                      void resetE2EProofSnapshot()
-                    }}
-                  >
-                    {state.e2eProofResetting ? "Resetting..." : "Reset proof"}
-                  </button>
-                  <span className="chip chip-soft">{deriveE2EProofUrl(state.wsUrl) ? "/e2e-proof" : "relay URL required"}</span>
-                </div>
-                {e2eProofRoutes.length ? (
-                  <div className="proof-route-grid">
-                    {e2eProofRoutes.map((route) => {
-                      const latest = route.latest || null
-                      const success = route.last_success || null
-                      const missing = Array.isArray(route.missing) && route.missing.length ? route.missing.join(", ") : "-"
-                      const coverage = Array.isArray(latest?.remote_input_coverage) && latest.remote_input_coverage.length
-                        ? latest.remote_input_coverage.join(",")
-                        : "-"
-                      const routeTone = route.complete
-                        ? "chip-success"
-                        : latest
-                          ? "tone-warn"
-                          : "chip-muted"
-                      return (
-                        <div key={route.route_key || route.route} className="proof-route-card">
-                          <div className="proof-route-head">
-                            <strong>{route.route || route.route_key}</strong>
-                            <span className={`chip chip-compact ${routeTone}`}>{route.status || "not_observed"}</span>
-                          </div>
-                          <div className="proof-route-meta">
-                            missing: {missing}
-                            <br />
-                            coverage: {coverage}
-                            <br />
-                            latest: {latest?.proof_status || "-"} / success: {success?.proof_status || "-"}
-                          </div>
-                          {route.next_action ? <div className="proof-route-meta">next: {route.next_action}</div> : null}
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : null}
-              </section>
-
-              {showViewportCard ? <section className="card viewport-card">
-                <div className="section-head compact-head">
-                  <div>
-                    <h3>{viewportTitle}</h3>
-                    <p>{viewportHint} {`画面：${formatFrameMeta(activeFrameMeta)}`}</p>
-                  </div>
-                  <span className="chip chip-soft">{sessionSide === "controller" ? "控制端" : sessionSide === "agent" ? "受控端" : "空闲"}</span>
-                </div>
-                <div
-                  id="remoteViewport"
-                  className={`product-viewport ${canSendInput() ? "clickable" : ""}`}
-                  tabIndex={canSendInput() ? 0 : -1}
-                  onPointerDown={(event) => handleViewportPointerDown(event)}
-                  onPointerMove={(event) => handleViewportPointerMove(event)}
-                  onPointerUp={(event) => finishViewportPointer(event)}
-                  onPointerCancel={(event) => finishViewportPointer(event, true)}
-                  onWheel={(event) => handleViewportWheel(event)}
-                  onKeyDown={(event) => handleViewportKey(event, "down")}
-                  onKeyUp={(event) => handleViewportKey(event, "up")}
-                  onBlur={() => {
-                    releaseRemoteViewportPointer()
-                    releaseRemoteViewportKeys()
-                  }}
-                  onContextMenu={(event) => event.preventDefault()}
-                >
-                  {hasViewportStream ? <video id="remoteMediaVideo" className={`viewport-image ${state.webrtcState === "connected" ? "is-active" : ""}`} autoPlay playsInline muted /> : null}
-                  {activeFrameUrl
-                    ? <img src={activeFrameUrl} alt={sessionSide === "agent" ? "本地共享画面" : "远端画面"} className="viewport-image" />
-                    : (!hasViewportStream ? <div className="viewport-placeholder">{`${viewportHint} · WebRTC 状态：${state.webrtcState || "idle"}`}</div> : null)}
-                </div>
-
-              </section> : null}
             </section>
           )}
         </div>
