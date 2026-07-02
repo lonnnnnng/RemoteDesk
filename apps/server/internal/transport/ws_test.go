@@ -2277,7 +2277,7 @@ func registerDeviceWithPlatformAndCapabilities(t *testing.T, conn *websocket.Con
 			"device_id":      deviceID,
 			"user_id":        "user-" + deviceID,
 			"platform":       platform,
-			"client_version": "0.1.0",
+			"client_version": "0.1.1",
 			"device_name":    strings.ToUpper(deviceID),
 			"capabilities": map[string]any{
 				"can_control":       canControl,

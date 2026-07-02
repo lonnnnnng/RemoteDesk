@@ -9756,7 +9756,7 @@ function sendRegister(options = {}) {
     device_id: state.deviceId,
     user_id: `desktop-user-${state.deviceId}`,
     platform: state.shellPlatform,
-    client_version: "0.1.0",
+    client_version: "0.1.1",
     device_name: isAgent ? "Desktop Agent" : "Desktop Controller",
     capabilities,
   })

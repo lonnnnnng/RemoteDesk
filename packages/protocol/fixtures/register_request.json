@@ -12,7 +12,7 @@
     "device_id": "desktop-dev-1",
     "user_id": "user-001",
     "platform": "macos",
-    "client_version": "0.1.0",
+    "client_version": "0.1.1",
     "device_name": "LONG-MBP",
     "capabilities": {
       "can_control": true,

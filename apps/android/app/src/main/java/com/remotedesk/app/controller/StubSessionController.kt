@@ -19,7 +19,7 @@ class StubSessionController(
       "device_id" to deviceId,
       "user_id" to "android-user-001",
       "platform" to "android",
-      "client_version" to "0.1.0",
+      "client_version" to "0.1.1",
       "device_name" to "Android Controller",
       "capabilities" to mapOf(
         "can_control" to true,
