@@ -19,6 +19,7 @@ import android.provider.Settings
 import android.util.Base64
 import android.util.Log
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
@@ -137,6 +138,7 @@ class MainActivity : AppCompatActivity() {
     private const val REMOTE_WHEEL_DELTA_PER_PIXEL = 3f
     private const val REMOTE_WHEEL_MIN_ABS_DELTA = 24
     private const val REMOTE_WHEEL_MAX_ABS_DELTA = 720
+    private const val REMOTE_PINCH_SCALE_EPSILON = 0.005f
     private const val REMOTE_KEYBOARD_MAX_BATCH_CHARS = 64
   }
 
@@ -184,6 +186,7 @@ class MainActivity : AppCompatActivity() {
   private val rtcWatchdogHandler = Handler(Looper.getMainLooper())
   private val sessionClockHandler = Handler(Looper.getMainLooper())
   private val autoProofHandler = Handler(Looper.getMainLooper())
+  private val remoteGestureHandler = Handler(Looper.getMainLooper())
   private var launchAutoRequestSession = false
   private var launchAutoProofInput = false
   private var autoRequestSentForTargetDeviceId = ""
@@ -276,6 +279,9 @@ class MainActivity : AppCompatActivity() {
   private var remoteScrollLastFocusX = 0f
   private var remoteScrollLastFocusY = 0f
   private var remoteLastWheelAtMs = 0L
+  private var remoteLongPressDragArmed = false
+  private var remoteLongPressRunnable: Runnable? = null
+  private var remotePinchZoomActive = false
   private var remoteInputResultCount = 0L
   private var remoteInputResultAppliedCount = 0L
   private var remoteInputResultFailedCount = 0L
@@ -2858,6 +2864,7 @@ class MainActivity : AppCompatActivity() {
     remoteScaleGestureDetector.onTouchEvent(event)
     when (event.actionMasked) {
       MotionEvent.ACTION_DOWN -> {
+        cancelRemoteLongPressDrag()
         remoteTouchDownX = event.x
         remoteTouchDownY = event.y
         remoteLastTouchX = event.x
@@ -2865,16 +2872,20 @@ class MainActivity : AppCompatActivity() {
         remotePanMoved = false
         remoteSuppressTap = false
         remoteMouseButtonDown = false
+        remoteLongPressDragArmed = false
         remoteScrollGestureActive = false
+        remotePinchZoomActive = false
         remoteTouchDownPoint = mapTouchToFrame(imageView, event.x, event.y)
         remoteLastInputPoint = remoteTouchDownPoint
         remoteLastSentMovePoint = null
         remoteLastSentMoveAtMs = 0L
         remoteLastWheelAtMs = 0L
+        scheduleRemoteLongPressDrag(imageView)
         return renderedFrameWidth > 0 && renderedFrameHeight > 0
       }
 
       MotionEvent.ACTION_POINTER_DOWN -> {
+        cancelRemoteLongPressDrag()
         remoteSuppressTap = true
         endRemoteMouseDrag()
         if (event.pointerCount >= 2) {
@@ -2886,6 +2897,7 @@ class MainActivity : AppCompatActivity() {
       }
 
       MotionEvent.ACTION_POINTER_UP -> {
+        cancelRemoteLongPressDrag()
         remoteSuppressTap = true
         endRemoteMouseDrag()
         remoteScrollGestureActive = event.pointerCount > 2
@@ -2898,7 +2910,14 @@ class MainActivity : AppCompatActivity() {
 
       MotionEvent.ACTION_MOVE -> {
         if (event.pointerCount >= 2) {
-          handleRemoteWheelGesture(event)
+          cancelRemoteLongPressDrag()
+          endRemoteMouseDrag()
+          remoteSuppressTap = true
+          if (remotePinchZoomActive) {
+            remoteScrollGestureActive = false
+          } else {
+            handleRemoteWheelGesture(event)
+          }
           remoteSuppressTap = true
           remoteLastTouchX = event.x
           remoteLastTouchY = event.y
@@ -2907,10 +2926,25 @@ class MainActivity : AppCompatActivity() {
 
         val movedFromDown = abs(event.x - remoteTouchDownX) > remoteTouchSlopPx ||
           abs(event.y - remoteTouchDownY) > remoteTouchSlopPx
+        if (remoteLongPressDragArmed) {
+          if (movedFromDown) {
+            remoteSuppressTap = true
+          }
+          val currentSessionId = sessionId
+          val point = mapTouchToFrame(imageView, event.x, event.y)
+          if (!currentSessionId.isNullOrBlank() && point != null && remoteMouseButtonDown) {
+            maybeSendRemoteMouseMove(currentSessionId, point)
+          }
+          remoteLastInputPoint = point ?: remoteLastInputPoint
+          remoteLastTouchX = event.x
+          remoteLastTouchY = event.y
+          return true
+        }
         if (event.pointerCount == 1 && remoteViewportScale > REMOTE_VIEWPORT_MIN_SCALE) {
           val dx = event.x - remoteLastTouchX
           val dy = event.y - remoteLastTouchY
           if (movedFromDown) {
+            cancelRemoteLongPressDrag()
             remotePanMoved = true
             remoteSuppressTap = true
             endRemoteMouseDrag()
@@ -2925,28 +2959,13 @@ class MainActivity : AppCompatActivity() {
           return true
         }
 
-        val currentSessionId = sessionId
-        val point = mapTouchToFrame(imageView, event.x, event.y)
         if (movedFromDown) {
+          cancelRemoteLongPressDrag()
           remoteSuppressTap = true
+          // 作者: long；远程画面里的单指滑动优先表示“移动鼠标指针”，拖拽动作改由长按后滑动触发，避免普通移动误按左键。
+          sendRemotePointerMoveFromTouch(imageView, event.x, event.y, force = false)
         }
-        if (!currentSessionId.isNullOrBlank() && movedFromDown && point != null) {
-          if (!remoteMouseButtonDown) {
-            val startPoint = remoteTouchDownPoint ?: point
-            sendRemoteMouseMove(currentSessionId, startPoint, logSuccess = false, force = true, inputCategory = "drag")
-            remoteMouseButtonDown = sendRemoteMouseButton(
-              currentSessionId,
-              startPoint,
-              "left",
-              "down",
-              logSuccess = false,
-              inputCategory = "drag",
-            )
-          }
-          if (remoteMouseButtonDown) {
-            maybeSendRemoteMouseMove(currentSessionId, point)
-          }
-        }
+        val point = mapTouchToFrame(imageView, event.x, event.y)
         remoteLastInputPoint = point ?: remoteLastInputPoint
         remoteLastTouchX = event.x
         remoteLastTouchY = event.y
@@ -2954,6 +2973,7 @@ class MainActivity : AppCompatActivity() {
       }
 
       MotionEvent.ACTION_UP -> {
+        cancelRemoteLongPressDrag()
         imageView.performClick()
         val currentSessionId = sessionId
         val upPoint = mapTouchToFrame(imageView, event.x, event.y) ?: remoteLastInputPoint
@@ -2965,7 +2985,7 @@ class MainActivity : AppCompatActivity() {
           resetRemoteInputGestureState()
           return true
         }
-        if (remotePanMoved || remoteSuppressTap || remoteScaleGestureDetector.isInProgress) {
+        if (remotePanMoved || remoteSuppressTap || remoteScaleGestureDetector.isInProgress || remotePinchZoomActive) {
           resetRemoteInputGestureState()
           return true
         }
@@ -2986,6 +3006,7 @@ class MainActivity : AppCompatActivity() {
       }
 
       MotionEvent.ACTION_CANCEL -> {
+        cancelRemoteLongPressDrag()
         endRemoteMouseDrag()
         resetRemoteInputGestureState()
         return true
@@ -2994,88 +3015,77 @@ class MainActivity : AppCompatActivity() {
     return false
   }
 
-  private fun handleRemoteFrameTouch(imageView: View, event: MotionEvent): Boolean {
-    remoteScaleGestureDetector.onTouchEvent(event)
-    when (event.actionMasked) {
-      MotionEvent.ACTION_DOWN -> {
-        remoteTouchDownX = event.x
-        remoteTouchDownY = event.y
-        remoteLastTouchX = event.x
-        remoteLastTouchY = event.y
-        remotePanMoved = false
-        remoteSuppressTap = false
-        return renderedFrameWidth > 0 && renderedFrameHeight > 0
-      }
-
-      MotionEvent.ACTION_POINTER_DOWN -> {
-        remoteSuppressTap = true
-        return true
-      }
-
-      MotionEvent.ACTION_MOVE -> {
-        if (event.pointerCount == 1 && remoteViewportScale > REMOTE_VIEWPORT_MIN_SCALE) {
-          val dx = event.x - remoteLastTouchX
-          val dy = event.y - remoteLastTouchY
-          val movedFromDown = abs(event.x - remoteTouchDownX) > remoteTouchSlopPx ||
-            abs(event.y - remoteTouchDownY) > remoteTouchSlopPx
-          if (movedFromDown) {
-            remotePanMoved = true
-            remoteSuppressTap = true
-          }
-          if (remotePanMoved) {
-            remoteViewportOffsetX = clampRemoteViewportOffsetX(remoteViewportOffsetX + dx, remoteViewportScale)
-            remoteViewportOffsetY = clampRemoteViewportOffsetY(remoteViewportOffsetY + dy, remoteViewportScale)
-            applyRemoteViewportTransform()
-          }
-          remoteLastTouchX = event.x
-          remoteLastTouchY = event.y
-          return true
-        }
-      }
-
-      MotionEvent.ACTION_UP -> {
-        imageView.performClick()
-        if (remotePanMoved || remoteSuppressTap || remoteScaleGestureDetector.isInProgress) {
-          remotePanMoved = false
-          remoteSuppressTap = false
-          return true
-        }
-        val currentSessionId = sessionId
-        if (currentSessionId.isNullOrBlank()) {
-          appendLog("当前没有 session，点击画面不会发送输入")
-          return true
-        }
-        val point = mapTouchToFrame(imageView, event.x, event.y)
-        if (point == null) {
-          appendLog("请点击远端画面区域")
-          return true
-        }
-        sendPreviewTap(currentSessionId, point)
-        return true
-      }
-
-      MotionEvent.ACTION_CANCEL -> {
-        remotePanMoved = false
-        remoteSuppressTap = false
-        return true
-      }
+  private fun sendRemotePointerMoveFromTouch(imageView: View, touchX: Float, touchY: Float, force: Boolean): Boolean {
+    val currentSessionId = sessionId
+    if (currentSessionId.isNullOrBlank()) {
+      return false
     }
-    return false
+    val point = mapTouchToFrame(imageView, touchX, touchY) ?: return false
+    remoteLastInputPoint = point
+    return if (force) {
+      // 作者: long；单指移动只同步光标位置，不按下鼠标键，避免用户想悬停时被误识别成拖拽。
+      sendRemoteMouseMove(currentSessionId, point, logSuccess = false, force = true, inputCategory = "pointer")
+    } else {
+      maybeSendRemoteMouseMove(currentSessionId, point, inputCategory = "pointer")
+    }
+  }
+
+  private fun scheduleRemoteLongPressDrag(imageView: View) {
+    val startPoint = remoteTouchDownPoint ?: return
+    if (sessionId.isNullOrBlank()) {
+      return
+    }
+    cancelRemoteLongPressDrag()
+    remoteLongPressRunnable = Runnable {
+      val currentSessionId = sessionId
+      if (currentSessionId.isNullOrBlank() || remoteSuppressTap || remotePanMoved) {
+        return@Runnable
+      }
+      imageView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+      // 作者: long；长按代表“准备拖拽”，只有确认长按后才按下远端左键，普通滑动则始终只是移动鼠标指针。
+      remoteLongPressDragArmed = beginRemoteMouseDrag(currentSessionId, startPoint)
+      if (remoteLongPressDragArmed) {
+        remoteSuppressTap = true
+      }
+    }.also { runnable ->
+      remoteGestureHandler.postDelayed(runnable, ViewConfiguration.getLongPressTimeout().toLong())
+    }
+  }
+
+  private fun cancelRemoteLongPressDrag() {
+    remoteLongPressRunnable?.let { remoteGestureHandler.removeCallbacks(it) }
+    remoteLongPressRunnable = null
+  }
+
+  private fun beginRemoteMouseDrag(sessionId: String, point: NormalizedPoint): Boolean {
+    sendRemoteMouseMove(sessionId, point, logSuccess = false, force = true, inputCategory = "drag")
+    remoteMouseButtonDown = sendRemoteMouseButton(
+      sessionId,
+      point,
+      "left",
+      "down",
+      logSuccess = false,
+      inputCategory = "drag",
+    )
+    return remoteMouseButtonDown
   }
 
   private fun resetRemoteInputGestureState() {
     remotePanMoved = false
     remoteSuppressTap = false
     remoteMouseButtonDown = false
+    remoteLongPressDragArmed = false
     remoteTouchDownPoint = null
     remoteLastInputPoint = null
     remoteLastSentMovePoint = null
     remoteLastSentMoveAtMs = 0L
     remoteScrollGestureActive = false
+    remotePinchZoomActive = false
     remoteLastWheelAtMs = 0L
   }
 
   private fun releaseRemoteInputState(sendMouseUp: Boolean = true) {
+    cancelRemoteLongPressDrag()
     if (sendMouseUp && remoteMouseButtonDown) {
       val currentSessionId = sessionId
       val point = remoteLastInputPoint
@@ -3090,15 +3100,21 @@ class MainActivity : AppCompatActivity() {
     if (!remoteMouseButtonDown) {
       return
     }
+    cancelRemoteLongPressDrag()
     val currentSessionId = sessionId
     val point = remoteLastInputPoint
     if (!currentSessionId.isNullOrBlank() && point != null) {
       sendRemoteMouseButton(currentSessionId, point, "left", "up", logSuccess = false, inputCategory = "drag")
     }
     remoteMouseButtonDown = false
+    remoteLongPressDragArmed = false
   }
 
-  private fun maybeSendRemoteMouseMove(sessionId: String, point: NormalizedPoint): Boolean {
+  private fun maybeSendRemoteMouseMove(
+    sessionId: String,
+    point: NormalizedPoint,
+    inputCategory: String = "drag",
+  ): Boolean {
     val now = SystemClock.elapsedRealtime()
     val lastPoint = remoteLastSentMovePoint
     if (lastPoint != null) {
@@ -3108,7 +3124,7 @@ class MainActivity : AppCompatActivity() {
         return false
       }
     }
-    return sendRemoteMouseMove(sessionId, point, logSuccess = false, force = true, inputCategory = "drag")
+    return sendRemoteMouseMove(sessionId, point, logSuccess = false, force = true, inputCategory = inputCategory)
   }
 
   private fun sendRemoteMouseMove(
@@ -3129,7 +3145,7 @@ class MainActivity : AppCompatActivity() {
     }
     val sent = sendSocketMessage(
       controller.inputMessage(sessionId, point.x, point.y, inputCategory),
-      "remote drag -> input.mouse.move x=${formatCoordinate(point.x)} y=${formatCoordinate(point.y)}",
+      "remote $inputCategory -> input.mouse.move x=${formatCoordinate(point.x)} y=${formatCoordinate(point.y)}",
       logSuccess = logSuccess,
     )
     if (sent) {
@@ -3350,6 +3366,36 @@ class MainActivity : AppCompatActivity() {
     binding.remoteKeyboardBackspaceButton.setOnClickListener {
       sendRemoteKeyPress("Backspace", emptyList(), "退格")
     }
+    binding.remoteShortcutSelectAllButton.setOnClickListener {
+      sendRemoteShortcut("KeyA", listOf("MetaLeft"), "⌘A")
+    }
+    binding.remoteShortcutCopyButton.setOnClickListener {
+      sendRemoteShortcut("KeyC", listOf("MetaLeft"), "⌘C")
+    }
+    binding.remoteShortcutPasteButton.setOnClickListener {
+      sendRemoteShortcut("KeyV", listOf("MetaLeft"), "⌘V")
+    }
+    binding.remoteShortcutUndoButton.setOnClickListener {
+      sendRemoteShortcut("KeyZ", listOf("MetaLeft"), "⌘Z")
+    }
+    binding.remoteShortcutEscapeButton.setOnClickListener {
+      sendRemoteKeyPress("Escape", emptyList(), "Esc")
+    }
+    binding.remoteShortcutTabButton.setOnClickListener {
+      sendRemoteKeyPress("Tab", emptyList(), "Tab")
+    }
+    binding.remoteShortcutArrowLeftButton.setOnClickListener {
+      sendRemoteKeyPress("ArrowLeft", emptyList(), "←")
+    }
+    binding.remoteShortcutArrowDownButton.setOnClickListener {
+      sendRemoteKeyPress("ArrowDown", emptyList(), "↓")
+    }
+    binding.remoteShortcutArrowUpButton.setOnClickListener {
+      sendRemoteKeyPress("ArrowUp", emptyList(), "↑")
+    }
+    binding.remoteShortcutArrowRightButton.setOnClickListener {
+      sendRemoteKeyPress("ArrowRight", emptyList(), "→")
+    }
     binding.remoteKeyboardInput.setOnEditorActionListener { _, actionId, _ ->
       if (actionId == EditorInfo.IME_ACTION_SEND) {
         val text = binding.remoteKeyboardInput.text?.toString().orEmpty()
@@ -3361,6 +3407,11 @@ class MainActivity : AppCompatActivity() {
         false
       }
     }
+  }
+
+  private fun sendRemoteShortcut(keyCode: String, modifiers: List<String>, label: String): Boolean {
+    // 作者: long；Mac 常用组合键用 MetaLeft 表示 Command，远端执行器会按 modifier down -> 主键 -> modifier up 的顺序落地。
+    return sendRemoteKeyPress(keyCode, modifiers, label)
   }
 
   private fun sendRemoteKeyboardText(text: String): Boolean {
@@ -4896,12 +4947,16 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onScale(detector: ScaleGestureDetector): Boolean {
+          if (abs(detector.scaleFactor - 1f) < REMOTE_PINCH_SCALE_EPSILON) {
+            return false
+          }
           val oldScale = remoteViewportScale
           val nextScale = (oldScale * detector.scaleFactor)
             .coerceIn(REMOTE_VIEWPORT_MIN_SCALE, REMOTE_VIEWPORT_MAX_SCALE)
           if (abs(nextScale - oldScale) < 0.0005f) {
             return false
           }
+          remotePinchZoomActive = true
           val ratio = nextScale / oldScale
           val focusX = detector.focusX
           val focusY = detector.focusY
@@ -4911,6 +4966,7 @@ class MainActivity : AppCompatActivity() {
           remoteViewportOffsetX = clampRemoteViewportOffsetX(newOffsetX, nextScale)
           remoteViewportOffsetY = clampRemoteViewportOffsetY(newOffsetY, nextScale)
           applyRemoteViewportTransform()
+          Log.i(RTC_TAG, "remote_viewport_pinch_scale scale=${String.format(Locale.US, "%.3f", nextScale)}")
           return true
         }
       },
@@ -4936,6 +4992,12 @@ class MainActivity : AppCompatActivity() {
       target.scaleY = scale
       target.translationX = tx
       target.translationY = ty
+    }
+    // 作者: long；这个按钮同时承担“重置缩放”和“当前倍率提示”，否则用户做完捏合后看不出局部放大是否已经生效。
+    binding.remoteZoomResetButton.text = if (scale <= REMOTE_VIEWPORT_MIN_SCALE + 0.005f) {
+      "1x"
+    } else {
+      String.format(Locale.US, "%.1fx", scale)
     }
   }
 
