@@ -1,6 +1,7 @@
 package com.remotedesk.app.ui
 
 import android.app.Dialog
+import android.media.MediaCodecInfo
 import android.content.pm.ActivityInfo
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
@@ -41,20 +42,27 @@ import com.remotedesk.app.network.StubSocketClient
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
-import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
+import org.webrtc.HardwareVideoDecoderFactory
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.PlatformSoftwareVideoDecoderFactory
+import org.webrtc.Predicate
 import org.webrtc.RTCStats
 import org.webrtc.RTCStatsReport
 import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
+import org.webrtc.SoftwareVideoDecoderFactory
 import org.webrtc.SurfaceViewRenderer
+import org.webrtc.VideoCodecInfo
+import org.webrtc.VideoDecoder
+import org.webrtc.VideoDecoderFactory
+import org.webrtc.VideoDecoderFallback
 import org.webrtc.VideoSink
 import org.webrtc.VideoTrack
 import java.io.IOException
@@ -740,11 +748,50 @@ class MainActivity : AppCompatActivity() {
     binding.remoteVideoView.setMirror(false)
     rtcRendererInitialized = true
     val encoderFactory = DefaultVideoEncoderFactory(rtcEglBase?.eglBaseContext, true, true)
-    val decoderFactory = DefaultVideoDecoderFactory(rtcEglBase?.eglBaseContext)
+    val decoderFactory = createRemoteDeskVideoDecoderFactory()
     rtcFactory = PeerConnectionFactory.builder()
       .setVideoEncoderFactory(encoderFactory)
       .setVideoDecoderFactory(decoderFactory)
       .createPeerConnectionFactory()
+  }
+
+  private fun createRemoteDeskVideoDecoderFactory(): VideoDecoderFactory {
+    val eglContext = rtcEglBase?.eglBaseContext
+    val shouldAvoidMtkAvc = shouldAvoidMtkAvcHardwareDecoder()
+    val hardwarePredicate = Predicate<MediaCodecInfo> { codecInfo ->
+      // 作者: long；Redmi Note 8 Pro 的 MTK AVC 硬解会成功建链但不吐帧，只对白名单机型屏蔽，避免影响其他设备的正常硬解。
+      val blocked = shouldAvoidMtkAvc && isMtkAvcHardwareDecoder(codecInfo)
+      if (blocked) {
+        Log.w(
+          RTC_TAG,
+          "decoder_hardware_blocked name=${codecInfo.name} reason=mtk_avc_zero_frame_workaround model=${Build.MODEL} device=${Build.DEVICE} sdk=${Build.VERSION.SDK_INT}",
+        )
+      }
+      !blocked
+    }
+    return RemoteDeskVideoDecoderFactory(eglContext, hardwarePredicate)
+  }
+
+  private fun shouldAvoidMtkAvcHardwareDecoder(): Boolean {
+    val deviceProfile = listOf(
+      Build.MANUFACTURER,
+      Build.MODEL,
+      Build.DEVICE,
+      Build.HARDWARE,
+      Build.PRODUCT,
+    ).joinToString(" ").lowercase(Locale.US)
+    return Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+      (deviceProfile.contains("redmi note 8 pro") ||
+        deviceProfile.contains("begonia") ||
+        deviceProfile.contains("mt6785"))
+  }
+
+  private fun isMtkAvcHardwareDecoder(codecInfo: MediaCodecInfo): Boolean {
+    val codecName = codecInfo.name.lowercase(Locale.US)
+    val isAvcDecoder = codecInfo.supportedTypes.any { type ->
+      type.equals("video/avc", ignoreCase = true)
+    }
+    return isAvcDecoder && codecName.startsWith("omx.mtk.")
   }
 
   private fun releaseWebRtc() {
@@ -5203,5 +5250,35 @@ class MainActivity : AppCompatActivity() {
         else -> platform.ifBlank { "未知平台" }
       }
     }
+  }
+}
+
+private class RemoteDeskVideoDecoderFactory(
+  eglContext: EglBase.Context?,
+  hardwareAllowedPredicate: Predicate<MediaCodecInfo>,
+) : VideoDecoderFactory {
+  private val softwareFactory = SoftwareVideoDecoderFactory()
+  private val platformSoftwareFactory = PlatformSoftwareVideoDecoderFactory(eglContext)
+  private val hardwareFactory = HardwareVideoDecoderFactory(eglContext, hardwareAllowedPredicate)
+
+  override fun createDecoder(codecInfo: VideoCodecInfo): VideoDecoder? {
+    val softwareDecoder = softwareFactory.createDecoder(codecInfo)
+      ?: platformSoftwareFactory.createDecoder(codecInfo)
+    val hardwareDecoder = hardwareFactory.createDecoder(codecInfo)
+    return when {
+      // 作者: long；VideoDecoderFallback 第二个参数是 primary，硬解可用时仍优先硬解，被屏蔽或初始化失败时再走软件后备。
+      softwareDecoder != null && hardwareDecoder != null -> VideoDecoderFallback(softwareDecoder, hardwareDecoder)
+      hardwareDecoder != null -> hardwareDecoder
+      else -> softwareDecoder
+    }
+  }
+
+  override fun getSupportedCodecs(): Array<VideoCodecInfo> {
+    val codecs = linkedSetOf<VideoCodecInfo>()
+    // 作者: long；真机远控优先保留平台软件 H.264 后备，部分 MTK 硬解会建链成功但不吐帧，不能让首帧验收卡死在硬解路径。
+    codecs.addAll(softwareFactory.supportedCodecs)
+    codecs.addAll(platformSoftwareFactory.supportedCodecs)
+    codecs.addAll(hardwareFactory.supportedCodecs)
+    return codecs.toTypedArray()
   }
 }

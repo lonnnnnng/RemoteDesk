@@ -54,3 +54,7 @@ APK metadata 已确认：
 - Android release APK 目前未配置正式签名，只能作为 unsigned 产物保存；可直接安装测试的是 debug APK。
 - Android 真机 -> Mac 长时间 soak 仍未达最终流畅性门槛：历史最新失败点包括 `render_fps_avg=23.52 < 24.0` 和 `visible_frame_gap_ms_max=3692`。
 - Android 真机 -> Windows 本轮功能链路通过，但仍建议继续补 3-5 分钟稳定性样本，重点观察 `send_fps_low`。
+
+## 发布后本地验证记录
+
+2026-07-04 本地 debug APK 已改为中文名 `远控` 并新增自定义 adaptive icon；这部分尚未重新发布到 GitHub Release。Redmi Note 8 Pro 真机 -> Mac 短断验证 `short_reconnect_20260704_154256` 通过，MTK H.264 硬解零帧兜底命中后仍能首帧和输入 proof。真机 quick soak `soak_6_5_20260704_154803` 仍未通过，失败点为 `render_fps_avg=23.98 < 24.0`。
