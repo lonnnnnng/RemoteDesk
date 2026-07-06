@@ -161,6 +161,145 @@
       }
     },
     {
+      "type": "clipboard.text",
+      "constraints": [
+        "envelope.session_id is required",
+        "only session participants may exchange clipboard text",
+        "payload.text is UTF-8 text and must be bounded by relay size limits"
+      ],
+      "payload": {
+        "clipboard_id": "string",
+        "text": "string",
+        "source_platform": "windows|macos|android",
+        "created_at": "number"
+      }
+    },
+    {
+      "type": "clipboard.result",
+      "constraints": [
+        "envelope.session_id is required",
+        "only session participants may report clipboard apply results",
+        "payload.applied indicates whether the receiver wrote text to its system clipboard"
+      ],
+      "payload": {
+        "clipboard_id": "string",
+        "applied": "boolean",
+        "chars": "number",
+        "error_detail": "string",
+        "created_at": "number"
+      }
+    },
+    {
+      "type": "file.transfer.start",
+      "constraints": [
+        "envelope.session_id is required",
+        "only session participants may exchange files",
+        "payload.sha256 is optional but must be a 64 character hex digest when present"
+      ],
+      "payload": {
+        "file_id": "string",
+        "name": "string",
+        "mime": "string",
+        "size": "number",
+        "total_chunks": "number",
+        "sha256": "string"
+      }
+    },
+    {
+      "type": "file.transfer.chunk",
+      "constraints": [
+        "envelope.session_id is required",
+        "payload.file_id must match a preceding file.transfer.start",
+        "data_base64 contains one bounded chunk of the file"
+      ],
+      "payload": {
+        "file_id": "string",
+        "chunk_index": "number",
+        "total_chunks": "number",
+        "data_base64": "string"
+      }
+    },
+    {
+      "type": "file.transfer.complete",
+      "constraints": [
+        "envelope.session_id is required",
+        "sent after all file.transfer.chunk messages for the file_id",
+        "payload.sha256 is optional but must match the received file bytes when present"
+      ],
+      "payload": {
+        "file_id": "string",
+        "name": "string",
+        "mime": "string",
+        "size": "number",
+        "total_chunks": "number",
+        "sha256": "string"
+      }
+    },
+    {
+      "type": "file.transfer.result",
+      "constraints": [
+        "envelope.session_id is required",
+        "only session participants may report file receive results",
+        "payload.applied indicates whether the receiver verified and saved the file"
+      ],
+      "payload": {
+        "file_id": "string",
+        "applied": "boolean",
+        "name": "string",
+        "bytes": "number",
+        "sha256": "string",
+        "location": "string",
+        "error_detail": "string",
+        "created_at": "number"
+      }
+    },
+    {
+      "type": "session.viewport.interaction",
+      "constraints": [
+        "envelope.session_id is required",
+        "only session participants may exchange viewport interaction hints",
+        "payload.phase must be start|update|end",
+        "payload.interaction must be pinch|pan|fullscreen",
+        "optional viewport/focus fields are normalized full-desktop coordinates in [0,1]"
+      ],
+      "payload": {
+        "phase": "start|update|end",
+        "interaction": "pinch|pan|fullscreen",
+        "scale": "number",
+        "viewport_x": "number",
+        "viewport_y": "number",
+        "viewport_width": "number",
+        "viewport_height": "number",
+        "focus_x": "number",
+        "focus_y": "number",
+        "created_at": "number"
+      }
+    },
+    {
+      "type": "screen.frame.push",
+      "constraints": [
+        "envelope.session_id is required",
+        "only session participants may exchange legacy screen fallback frames",
+        "payload.content_b64 must be bounded by relay size limits",
+        "payload.mime_type must be image/png, image/jpeg, or image/webp",
+        "optional source_rect fields describe the full-desktop normalized area encoded in this frame"
+      ],
+      "payload": {
+        "frame_id": "string",
+        "mime_type": "image/png|image/jpeg|image/webp",
+        "content_b64": "string",
+        "capture_ts": "number",
+        "frame_width": "number",
+        "frame_height": "number",
+        "source_rect_x": "number",
+        "source_rect_y": "number",
+        "source_rect_width": "number",
+        "source_rect_height": "number",
+        "full_frame_width": "number",
+        "full_frame_height": "number"
+      }
+    },
+    {
       "type": "webrtc.offer",
       "constraints": [
         "envelope.session_id is required",

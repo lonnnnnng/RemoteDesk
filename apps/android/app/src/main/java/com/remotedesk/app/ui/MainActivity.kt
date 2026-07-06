@@ -1,7 +1,15 @@
 package com.remotedesk.app.ui
 
 import android.app.Dialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.ContentValues
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.database.Cursor
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.content.pm.ActivityInfo
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
@@ -12,25 +20,31 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Base64
 import android.util.Log
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
+import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
+import android.view.Window
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
-import android.widget.ImageView
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
 import androidx.core.view.isVisible
@@ -43,7 +57,6 @@ import com.remotedesk.app.network.StubSocketClient
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
-import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
 import org.webrtc.HardwareVideoDecoderFactory
 import org.webrtc.IceCandidate
@@ -55,26 +68,38 @@ import org.webrtc.PlatformSoftwareVideoDecoderFactory
 import org.webrtc.Predicate
 import org.webrtc.RTCStats
 import org.webrtc.RTCStatsReport
+import org.webrtc.RendererCommon
 import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import org.webrtc.SoftwareVideoDecoderFactory
 import org.webrtc.SurfaceViewRenderer
+import org.webrtc.EncodedImage
 import org.webrtc.VideoCodecInfo
+import org.webrtc.VideoCodecStatus
 import org.webrtc.VideoDecoder
 import org.webrtc.VideoDecoderFactory
 import org.webrtc.VideoDecoderFallback
+import org.webrtc.VideoFrame
 import org.webrtc.VideoSink
 import org.webrtc.VideoTrack
+import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
   companion object {
@@ -82,6 +107,7 @@ class MainActivity : AppCompatActivity() {
     private const val MAX_FRAME_BYTES = 8 * 1024 * 1024
     private const val MAX_FRAME_B64_LENGTH = 12 * 1024 * 1024
     private const val MAX_FRAME_DIMENSION = 4096
+    private const val LEGACY_BITMAP_REUSE_POOL_LIMIT = 2
     private const val PREFS_NAME = "remote_desk_demo"
     private const val PREF_DEVICE_ID = "device_id"
     private const val PREF_WS_URL = "ws_url"
@@ -91,6 +117,30 @@ class MainActivity : AppCompatActivity() {
     private const val EXTRA_AUTO_CONNECT = "rd_auto_connect"
     private const val EXTRA_AUTO_REQUEST_SESSION = "rd_auto_request_session"
     private const val EXTRA_AUTO_PROOF_INPUT = "rd_auto_proof_input"
+    private const val EXTRA_DEBUG_SET_CLIPBOARD_TEXT = "rd_debug_set_clipboard_text"
+    private const val EXTRA_DEBUG_SEND_CLIPBOARD_TEXT = "rd_debug_send_clipboard_text"
+    private const val EXTRA_DEBUG_SEND_CLIPBOARD_FROM_SYSTEM = "rd_debug_send_clipboard_from_system"
+    private const val EXTRA_DEBUG_DUMP_CLIPBOARD_TEXT = "rd_debug_dump_clipboard_text"
+    private const val EXTRA_DEBUG_SEND_FILE_PATH = "rd_debug_send_file_path"
+    private const val EXTRA_DEBUG_SEND_VIEWPORT_INTERACTION = "rd_debug_send_viewport_interaction"
+    private const val EXTRA_DEBUG_VIEWPORT_SCALE = "rd_debug_viewport_scale"
+    private const val EXTRA_DEBUG_VIEWPORT_X = "rd_debug_viewport_x"
+    private const val EXTRA_DEBUG_VIEWPORT_Y = "rd_debug_viewport_y"
+    private const val EXTRA_DEBUG_VIEWPORT_WIDTH = "rd_debug_viewport_width"
+    private const val EXTRA_DEBUG_VIEWPORT_HEIGHT = "rd_debug_viewport_height"
+    private const val EXTRA_DEBUG_VIEWPORT_FOCUS_X = "rd_debug_viewport_focus_x"
+    private const val EXTRA_DEBUG_VIEWPORT_FOCUS_Y = "rd_debug_viewport_focus_y"
+    private const val EXTRA_DEBUG_FULLSCREEN = "rd_debug_fullscreen"
+    private const val EXTRA_DEBUG_FULLSCREEN_ENABLED = "rd_debug_fullscreen_enabled"
+    private const val EXTRA_DEBUG_SIMULATE_PINCH = "rd_debug_simulate_pinch"
+    private const val EXTRA_DEBUG_PINCH_CENTER_X = "rd_debug_pinch_center_x"
+    private const val EXTRA_DEBUG_PINCH_CENTER_Y = "rd_debug_pinch_center_y"
+    private const val EXTRA_DEBUG_PINCH_START_SPAN = "rd_debug_pinch_start_span"
+    private const val EXTRA_DEBUG_PINCH_END_SPAN = "rd_debug_pinch_end_span"
+    private const val EXTRA_DEBUG_PINCH_STEPS = "rd_debug_pinch_steps"
+    private const val EXTRA_DEBUG_PINCH_INTERVAL_MS = "rd_debug_pinch_interval_ms"
+    private const val DEBUG_TOOL_RETRY_DELAY_MS = 500L
+    private const val DEBUG_TOOL_MAX_ATTEMPTS = 20
     private const val AUTO_REQUEST_SESSION_DELAY_MS = 1200L
     private const val AUTO_PROOF_INPUT_DELAY_MS = 6500L
     private const val DEFAULT_LOCAL_WS_URL = ""
@@ -130,16 +180,71 @@ class MainActivity : AppCompatActivity() {
     private const val RTC_NEGOTIATION_OWNER_CONTROLLER = "controller"
     private const val RTC_NEGOTIATION_OWNER_REMOTE = "remote"
     private const val REMOTE_VIEWPORT_MIN_SCALE = 1f
-    private const val REMOTE_VIEWPORT_MAX_SCALE = 4f
-    // 作者: long；拖拽映射保持约 30fps 的输入粒度，既保留鼠标跟手感，也避免 ADB/手指连续滑动时用过密 WebSocket 消息拖慢控制端 UI。
-    private const val REMOTE_POINTER_MOVE_MIN_INTERVAL_MS = 33L
-    private const val REMOTE_POINTER_MOVE_MIN_DELTA = 0.004
+    private const val REMOTE_VIEWPORT_MAX_SCALE = 3.5f
+    // 作者: long；远端鼠标按屏幕刷新节奏尾点合并发送，真实落账时间参与节流，避免 JPEG 解码挤压后旧触摸时间戳把 Mac 光标拖慢。
+    private const val REMOTE_POINTER_MOVE_MIN_INTERVAL_MS = 12L
+    private const val REMOTE_POINTER_MOVE_MIN_DELTA = 0.00032
+    private const val REMOTE_POINTER_MOVE_TRAILING_MAX_DELAY_MS = 12L
+    // 作者: long；最大缩放拖动视角时会同时发鼠标移动和 source_rect，单独降低鼠标 move 频率，避免 Mac 输入执行和 Android 全屏合成一起抢主线程。
+    private const val REMOTE_ZOOM_PAN_POINTER_MOVE_MIN_INTERVAL_MS = 48L
+    private const val REMOTE_ZOOM_PAN_POINTER_MOVE_MIN_DELTA = 0.0015
+    private const val REMOTE_ZOOM_PAN_POINTER_MOVE_TRAILING_MAX_DELAY_MS = 48L
+    private const val REMOTE_POINTER_MOVE_MAX_HISTORY_SAMPLES = 4
     private const val REMOTE_WHEEL_MIN_INTERVAL_MS = 40L
     private const val REMOTE_WHEEL_DELTA_PER_PIXEL = 3f
     private const val REMOTE_WHEEL_MIN_ABS_DELTA = 24
     private const val REMOTE_WHEEL_MAX_ABS_DELTA = 720
-    private const val REMOTE_PINCH_SCALE_EPSILON = 0.005f
+    private const val REMOTE_PINCH_SCALE_EPSILON = 0.00045f
+    private const val REMOTE_PINCH_SCALE_FACTOR_SMOOTHING = 0.86f
+    private const val REMOTE_PINCH_FOCUS_SMOOTHING = 0.74f
+    private const val REMOTE_PINCH_END_SNAP_EPSILON = 0.003f
+    private const val REMOTE_VIEWPORT_MIN_RENDER_SCALE = 0.5f
+    private const val REMOTE_VIEWPORT_FULLSCREEN_BASE_RENDER_SCALE = 1.0f
+    private const val REMOTE_VIEWPORT_MAX_RENDER_SCALE = REMOTE_VIEWPORT_MAX_SCALE
+    private const val REMOTE_VIEWPORT_MAX_RENDER_PIXELS = 8_800_000
+    // 作者: long；最大缩放真机压测出现 BLASTSyncEngine 回压后，全屏不再提交大于屏幕的承载面，清晰度交给 Mac source_rect 局部源补足。
+    private const val REMOTE_VIEWPORT_FULLSCREEN_MAX_RENDER_SCALE = 1.0f
+    private const val REMOTE_VIEWPORT_INTERACTION_RENDER_SCALE = 1.0f
+    private const val REMOTE_VIEWPORT_FULLSCREEN_INTERACTION_RENDER_SCALE = 1.0f
+    private const val REMOTE_VIEWPORT_RENDER_COMMIT_DELAY_MS = 140L
+    private const val REMOTE_VIEWPORT_FULLSCREEN_RENDER_COMMIT_DELAY_MS = 240L
+    private const val REMOTE_VIEWPORT_HARDWARE_LAYER_RELEASE_DELAY_MS = 420L
+    private const val REMOTE_VIEWPORT_POST_PINCH_FULL_FRAME_FREEZE_MS = 1500L
+    private const val REMOTE_VIEWPORT_SOURCE_RECT_FULL_FRAME_PROTECT_MS = 5200L
+    private const val REMOTE_VIEWPORT_PINCH_PREVIEW_FRAME_INTERVAL_MS = 2200L
+    private const val REMOTE_VIEWPORT_DETAIL_RENDER_MIN_SCALE = 1.08f
+    private const val REMOTE_VIEWPORT_MIN_SOURCE_RECT_SIZE = 0.286
+    private const val REMOTE_ZOOM_MOUSE_VIEWPORT_PAN_MIN_SCALE = 1.05f
+    private const val REMOTE_ZOOM_MOUSE_VIEWPORT_DRAG_PAN_FACTOR = 0.72f
+    private const val REMOTE_ZOOM_MOUSE_VIEWPORT_EDGE_ZONE_DP = 76
+    private const val REMOTE_ZOOM_MOUSE_VIEWPORT_EDGE_MAX_STEP_DP = 18
+    private const val REMOTE_VIEWPORT_INTERACTION_HINT_INTERVAL_MS = 160L
+    // 作者: long；最大缩放拖动视角时，鼠标和裁剪源会同时推动 Mac/Android 两侧渲染；平移提示降到约 2fps，并在抬手时强制补最终视角，避免连续窗口裁剪重配触发系统合成回压。
+    private const val REMOTE_VIEWPORT_PAN_HINT_INTERVAL_MS = 520L
+    private const val REMOTE_VIEWPORT_PINCH_HINT_INTERVAL_MS = 220L
+    private const val REMOTE_VIEWPORT_PINCH_END_DEDUPE_MS = 450L
+    private const val REMOTE_FULLSCREEN_USE_TEXTURE_RENDERER = true
+    private const val REMOTE_LOCAL_CURSOR_HIDE_DELAY_MS = 900L
+    private const val REMOTE_LOCAL_CURSOR_PREDICTION_MS = 12f
+    private const val REMOTE_LOCAL_CURSOR_MAX_PREDICTION_DP = 14
+    private const val REMOTE_INPUT_MOVE_UI_UPDATE_INTERVAL_MS = 1200L
+    private const val REMOTE_MOVE_SIGNAL_LOG_INTERVAL_MS = 1200L
+    private const val REMOTE_FRAME_SIGNAL_LOG_INTERVAL_MS = 2000L
+    private const val REMOTE_SOURCE_RECT_MATERIALIZED_LOG_INTERVAL_MS = 650L
+    // 作者: long；最大缩放后的局部 JPEG 会连续刷新同一个全屏窗口，接收端再保底限制显示节奏，避免 Mac 端短时连发把系统窗口合成压到闪退/退后台。
+    private const val REMOTE_FULLSCREEN_SOURCE_RECT_FRAME_MIN_INTERVAL_MS = 72L
+    private const val REMOTE_ZOOM_LABEL_UPDATE_INTERVAL_MS = 220L
     private const val REMOTE_KEYBOARD_MAX_BATCH_CHARS = 64
+    private const val REMOTE_VIEWPORT_SMALL_DEFAULT_HEIGHT_DP = 262
+    private const val REMOTE_VIEWPORT_SMALL_MIN_HEIGHT_DP = 204
+    private const val REMOTE_VIEWPORT_SMALL_MAX_HEIGHT_DP = 360
+    private const val REMOTE_KEYBOARD_BUTTON_HEIGHT_DP = 30
+    private const val SESSION_FILE_CHUNK_RAW_BYTES = 192 * 1024
+    private const val ANDROID_INCOMING_FILE_MAX_BYTES = 64L * 1024L * 1024L
+    private const val SESSION_FILE_MAX_CHUNKS = 512
+    // 作者: long；远控会话的画面和输入不能依赖系统 MediaProvider，个别 ROM 上 MediaProvider ANR/死亡会把持有稳定 provider 连接的进程一并结束。
+    private const val ANDROID_INCOMING_FILE_USE_MEDIASTORE = false
+    private const val ANDROID_FILE_MEDIASTORE_TIMEOUT_MS = 8_000L
   }
 
   private lateinit var binding: ActivityMainBinding
@@ -151,8 +256,11 @@ class MainActivity : AppCompatActivity() {
   private val logs = ArrayDeque<String>()
   private val timeFormatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
   private val logLineFormatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
+  private val frameParseExecutor = Executors.newSingleThreadExecutor()
   private val frameDecodeExecutor = Executors.newSingleThreadExecutor()
   private val deviceSyncExecutor = Executors.newSingleThreadExecutor()
+  private val fileTransferExecutor = Executors.newSingleThreadExecutor()
+  private val rtcSignalingExecutor = Executors.newSingleThreadExecutor()
   private val devicesHttpClient = OkHttpClient()
   private var renderedFrameWidth = 0
   private var renderedFrameHeight = 0
@@ -175,8 +283,10 @@ class MainActivity : AppCompatActivity() {
   private var rtcEglBase: EglBase? = null
   private var rtcFactory: PeerConnectionFactory? = null
   private var rtcRendererInitialized = false
+  private var rtcTextureRendererInitialized = false
   private var rtcPeerConnection: PeerConnection? = null
   private var rtcRemoteVideoTrack: VideoTrack? = null
+  private var rtcActiveVideoSink: VideoSink? = null
   private var rtcCurrentSessionId: String? = null
   private var rtcNegotiationOwner = RTC_NEGOTIATION_OWNER_UNKNOWN
   private var rtcControllerProfile = "standard"
@@ -256,8 +366,26 @@ class MainActivity : AppCompatActivity() {
   private var legacyFrameSampleFrameCount = 0L
   private var legacyFrameSampleAtMs = 0L
   private var legacyFirstFrameAtMs = 0L
+  private var legacyRenderFpsSampleSum = 0.0
+  private var legacyRenderFpsSampleCount = 0L
+  private val legacyFrameDecodeSeq = AtomicInteger(0)
+  private var legacyDisplayedBitmap: Bitmap? = null
+  private var legacyPreviousDisplayedBitmap: Bitmap? = null
+  private val legacyReusableBitmaps = mutableListOf<Bitmap>()
+  private var remoteFrameSourceRect = NormalizedRect(0.0, 0.0, 1.0, 1.0)
   private var lastLegacyFrameUiUpdateAtMs = 0L
   private var lastLegacyFrameIgnoredLogAtMs = 0L
+  private var legacyPinchFrameSuppressedCount = 0
+  private var legacyPostPinchFrameSuppressedCount = 0
+  private var legacySourceRectFullFrameSuppressedCount = 0
+  private var legacyPinchPreviewFrameAtMs = 0L
+  @Volatile
+  private var legacyFullFrameFreezeUntilMs = 0L
+  @Volatile
+  private var legacySourceRectFullFrameProtectUntilMs = 0L
+  private val legacyInteractionFrameGateLock = Any()
+  @Volatile
+  private var legacyPinchFrameGateActive = false
   private var lastLegacyDecodeFailureAtMs = 0L
   private var legacyDecodeFailureSuppressedCount = 0
   private var remoteViewportScale = REMOTE_VIEWPORT_MIN_SCALE
@@ -275,13 +403,71 @@ class MainActivity : AppCompatActivity() {
   private var remoteLastInputPoint: NormalizedPoint? = null
   private var remoteLastSentMovePoint: NormalizedPoint? = null
   private var remoteLastSentMoveAtMs = 0L
+  private var remotePendingMoveSessionId: String? = null
+  private var remotePendingMovePoint: NormalizedPoint? = null
+  private var remotePendingMoveCategory = "pointer"
+  private var remotePendingMoveAtMs = 0L
+  private var remotePendingMoveRunnable: Runnable? = null
+  private var remoteFrameMoveSessionId: String? = null
+  private var remoteFrameMovePoint: NormalizedPoint? = null
+  private var remoteFrameMoveCategory = "pointer"
+  private var remoteFrameMoveProfile = "pointer"
+  private var remoteFrameMoveAtMs = 0L
+  private var remoteFrameMoveDispatchScheduled = false
+  private var remoteFrameMoveDispatchToken = 0L
+  private var remoteMouseViewportPanSourceRect: NormalizedRect? = null
   private var remoteScrollGestureActive = false
   private var remoteScrollLastFocusX = 0f
   private var remoteScrollLastFocusY = 0f
   private var remoteLastWheelAtMs = 0L
+  private var remoteMultiTouchStartSpan = 0f
   private var remoteLongPressDragArmed = false
   private var remoteLongPressRunnable: Runnable? = null
   private var remotePinchZoomActive = false
+  private var remoteManualPinchActive = false
+  private var remoteManualPinchLastSpan = 0f
+  private var remoteAccumulatedPinchScaleFactor = 1f
+  private var remotePinchFocusX = 0f
+  private var remotePinchFocusY = 0f
+  private var remotePinchFocusInitialized = false
+  private var remoteViewportTransformApplyScheduled = false
+  private var remoteViewportTransformCommitRequested = false
+  private var remoteViewportRenderScale = REMOTE_VIEWPORT_MIN_SCALE
+  private var remoteViewportRenderBoundsDirty = false
+  private var remoteZoomResetButtonLabel = "1x"
+  private var remoteLastPinchScaleLogAtMs = 0L
+  private var remoteLastRenderScaleCommitAtMs = 0L
+  private var remoteLastViewportInteractionHintAtMs = 0L
+  private var remoteLastPinchEndHintAtMs = 0L
+  private var remoteLastPinchEndHintKey = ""
+  private var remotePinchViewportSourceRect: NormalizedRect? = null
+  private var remotePinchViewportLargestSourceRect: NormalizedRect? = null
+  private var remoteSourceRectPreviewScale = 1f
+  private var remoteSourceRectPreviewOffsetX = 0f
+  private var remoteSourceRectPreviewOffsetY = 0f
+  private var remoteLastSourceRectMaterializedLogAtMs = 0L
+  private var remoteLastFullscreenSourceRectFrameDisplayedAtMs = 0L
+  private var remoteFullscreenSourceRectFrameSuppressedCount = 0
+  private var remoteLastZoomResetLabelUpdateAtMs = 0L
+  private var remoteViewportRenderCommitRunnable: Runnable? = null
+  private var remoteViewportHardwareLayerReleaseRunnable: Runnable? = null
+  private var remoteLocalCursorHideRunnable: Runnable? = null
+  private var remoteLastMoveUiUpdateAtMs = 0L
+  private var remoteLastMoveSignalLogAtMs = 0L
+  private var remoteLastFrameSignalLogAtMs = 0L
+  private var remoteLocalCursorApplyScheduled = false
+  private var remotePendingLocalCursorX = 0f
+  private var remotePendingLocalCursorY = 0f
+  private var remoteLastLocalCursorTouchX = 0f
+  private var remoteLastLocalCursorTouchY = 0f
+  private var remoteLastLocalCursorTouchAtMs = 0L
+  private var remoteOverlayControlTouchActive = false
+  private var remoteDebugPinchToken = 0L
+  private var remoteDebugPinchDispatchActive = false
+  private var remoteSuppressedMoveSignalLogCount = 0
+  private var remoteSuppressedFrameSignalLogCount = 0
+  private var remoteSuppressedMoveAckCount = 0
+  private var remoteSuppressedMoveResultCount = 0
   private var remoteInputResultCount = 0L
   private var remoteInputResultAppliedCount = 0L
   private var remoteInputResultFailedCount = 0L
@@ -290,18 +476,45 @@ class MainActivity : AppCompatActivity() {
   private var lastLiveE2EProofReportAtMs = 0L
   private var lastLiveE2EProofReportKey = ""
   private lateinit var remoteScaleGestureDetector: ScaleGestureDetector
-  private var remoteFullscreenDialog: Dialog? = null
+  private var remoteFullscreenActive = false
   private var remoteFullscreenHost: FrameLayout? = null
   private var remoteViewportOriginParent: ViewGroup? = null
   private var remoteViewportOriginLayoutParams: ViewGroup.LayoutParams? = null
   private var remoteViewportOriginIndex = -1
   private var remoteFullscreenPreviousOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+  private var remoteKeyboardDialog: Dialog? = null
+  private val remoteKeyboardActiveModifiers = linkedSetOf<String>()
+  private val remoteKeyboardModifierButtons = mutableMapOf<String, MaterialButton>()
+  private val incomingFileTransfers = mutableMapOf<String, IncomingFileTransfer>()
+  private val pendingSharedFileUris = ArrayDeque<Uri>()
+  private var pendingSharedClipboardText: String? = null
+  private val remoteFilePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    if (uri == null) {
+      updateRemoteTransferStatus("文件：已取消选择")
+      return@registerForActivityResult
+    }
+    persistDocumentReadPermissionIfPossible(uri)
+    updateRemoteTransferStatus("文件：已选择本机文件，准备发送")
+    sendAndroidFileToRemote(uri)
+  }
   private val rtcProbeSink = VideoSink { frame ->
     if (!isActivityAlive) {
       return@VideoSink
     }
-    renderedFrameWidth = frame.rotatedWidth
-    renderedFrameHeight = frame.rotatedHeight
+    val frameWidth = frame.rotatedWidth
+    val frameHeight = frame.rotatedHeight
+    val frameSizeChanged = frameWidth > 0 && frameHeight > 0 &&
+      (frameWidth != renderedFrameWidth || frameHeight != renderedFrameHeight)
+    renderedFrameWidth = frameWidth
+    renderedFrameHeight = frameHeight
+    if (frameSizeChanged) {
+      runOnUiThread {
+        if (!isActivityAlive) {
+          return@runOnUiThread
+        }
+        updateRemoteViewportAspect(frameWidth, frameHeight)
+      }
+    }
     val now = SystemClock.elapsedRealtime()
     val previousFrameAtMs = rtcLastFrameRenderedAtMs
     if (previousFrameAtMs > 0L) {
@@ -334,6 +547,7 @@ class MainActivity : AppCompatActivity() {
         if (!isActivityAlive) {
           return@runOnUiThread
         }
+        restoreWebRtcRendererAfterFrame("first_frame")
         maybeSendLiveE2EProofReport("live_video_frame")
       }
     }
@@ -397,6 +611,7 @@ class MainActivity : AppCompatActivity() {
       if (!isActivityAlive) {
         return@runOnUiThread
       }
+      restoreWebRtcRendererAfterFrame("stats_tick")
       binding.frameMetaText.text = "当前画面：webrtc ${formatFrameSize(renderedFrameWidth, renderedFrameHeight)} @ ${formatTimestamp(System.currentTimeMillis())}"
       setStatus("接收远端画面")
       updateLiveMetricsPanel()
@@ -436,6 +651,20 @@ class MainActivity : AppCompatActivity() {
       }
     },
     onMessage = { text ->
+      if (isWebRtcSignalMessage(text)) {
+        // 作者: long；真机上创建 PeerConnection 可能阻塞数秒，WebRTC 信令放到独立串行线程，避免主线程卡住后 UI 树和后续 offer/ICE 都停在旧会话。
+        rtcSignalingExecutor.execute {
+          parseMessage(text)
+        }
+        return@StubSocketClient
+      }
+      if (isLegacyFramePushMessage(text)) {
+        // 作者: long；JPEG 兜底帧包含大 Base64，先在解码线程解析 JSON，避免主线程因为连续大消息解析触发输入分发超时。
+        frameParseExecutor.execute {
+          parseLegacyFramePushMessage(text)
+        }
+        return@StubSocketClient
+      }
       runOnUiThread {
         if (!isActivityAlive) {
           return@runOnUiThread
@@ -465,6 +694,8 @@ class MainActivity : AppCompatActivity() {
     super.onCreate(savedInstanceState)
     binding = ActivityMainBinding.inflate(layoutInflater)
     setContentView(binding.root)
+    // 作者: long；远控会话需要持续观察画面和接收手势，Activity 亮屏锁放在窗口层，避免只有视频 View 可见时才生效导致真机测试中途锁屏。
+    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
     binding.deviceIdText.text = "本机设备 ID：$deviceId"
     setStatus("未连接")
@@ -572,14 +803,12 @@ class MainActivity : AppCompatActivity() {
     binding.debugModeSwitch.setOnCheckedChangeListener { _, _ ->
       updateDebugPanelVisibility()
     }
-    binding.remoteVideoView.setOnTouchListener { view, event ->
-      handleRemoteFrameTouchV2(view, event)
-    }
-    binding.remoteFrameView.setOnTouchListener { view, event ->
+    binding.remoteTouchLayer.setOnTouchListener { view, event ->
       handleRemoteFrameTouchV2(view, event)
     }
     initializeRemoteViewportControls()
     initializeRemoteKeyboardControls()
+    initializeSessionToolControls()
     binding.connectButton.setOnClickListener {
       beginConnectFlow()
     }
@@ -634,6 +863,15 @@ class MainActivity : AppCompatActivity() {
     binding.debugProofResetButton.setOnClickListener {
       refreshE2EProofSnapshot(reset = true, userInitiated = true)
     }
+    handleExternalShareIntent(intent)
+    handleDebugToolIntent(intent)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    handleExternalShareIntent(intent)
+    handleDebugToolIntent(intent)
   }
 
   private fun resolveStableDeviceId(): String {
@@ -669,8 +907,11 @@ class MainActivity : AppCompatActivity() {
     stopRtcWatchdog()
     closeWebRtcSession(reason = "activity_destroy")
     releaseWebRtc()
+    frameParseExecutor.shutdownNow()
     frameDecodeExecutor.shutdownNow()
     deviceSyncExecutor.shutdownNow()
+    fileTransferExecutor.shutdownNow()
+    rtcSignalingExecutor.shutdownNow()
     devicesHttpClient.dispatcher.executorService.shutdown()
     devicesHttpClient.connectionPool.evictAll()
     super.onDestroy()
@@ -697,6 +938,20 @@ class MainActivity : AppCompatActivity() {
     appendLog("发送失败：中继信令未连接")
     return false
   }
+
+  private fun isWebRtcSignalMessage(text: String): Boolean {
+    return try {
+      when (JSONObject(text).optString("type")) {
+        "webrtc.offer", "webrtc.answer", "webrtc.ice_candidate", "webrtc.restart_ice" -> true
+        else -> false
+      }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun isLegacyFramePushMessage(text: String): Boolean =
+    text.contains("\"type\":\"screen.frame.push\"") || text.contains("\"type\": \"screen.frame.push\"")
 
   private fun handleDisconnectedState(statusLine: String, logLine: String) {
     val shouldRestoreSession = rememberSessionRecoveryIntent(reason = "signal_disconnected")
@@ -739,31 +994,100 @@ class MainActivity : AppCompatActivity() {
     scheduleAutoReconnect()
   }
 
+  @Synchronized
   private fun initializeWebRtc() {
     if (rtcFactory != null) {
       return
     }
-    // 作者: long；WebRTC native 库加载会明显拖慢首屏，等用户真正进入远程会话时再初始化，设备列表启动保持轻量。
+    val startedAtMs = SystemClock.elapsedRealtime()
+    // 作者: long；真机上 WebRTC factory 创建可能阻塞，日志按步骤打点，避免 answer 卡住时只能看到旧会话 UI 而不知道停在哪个 native 阶段。
+    Log.i(RTC_TAG, "webrtc_init_step start thread=${Thread.currentThread().name}")
+    ensureWebRtcRendererInitializedBlocking()
+    Log.i(RTC_TAG, "webrtc_init_step renderer_ready elapsed_ms=${SystemClock.elapsedRealtime() - startedAtMs}")
     val initOptions = PeerConnectionFactory.InitializationOptions
       .builder(applicationContext)
       .createInitializationOptions()
+    Log.i(RTC_TAG, "webrtc_init_step init_options_created elapsed_ms=${SystemClock.elapsedRealtime() - startedAtMs}")
     PeerConnectionFactory.initialize(initOptions)
-    rtcEglBase = EglBase.create()
-    binding.remoteVideoView.init(rtcEglBase?.eglBaseContext, null)
-    binding.remoteVideoView.setEnableHardwareScaler(true)
-    binding.remoteVideoView.setMirror(false)
-    rtcRendererInitialized = true
-    val encoderFactory = DefaultVideoEncoderFactory(rtcEglBase?.eglBaseContext, true, true)
+    Log.i(RTC_TAG, "webrtc_init_step factory_initialized elapsed_ms=${SystemClock.elapsedRealtime() - startedAtMs}")
     val decoderFactory = createRemoteDeskVideoDecoderFactory()
-    rtcFactory = PeerConnectionFactory.builder()
-      .setVideoEncoderFactory(encoderFactory)
-      .setVideoDecoderFactory(decoderFactory)
-      .createPeerConnectionFactory()
+    Log.i(
+      RTC_TAG,
+      "webrtc_init_step decoder_factory_created class=${decoderFactory.javaClass.simpleName} elapsed_ms=${SystemClock.elapsedRealtime() - startedAtMs}",
+    )
+    val builder = PeerConnectionFactory.builder()
+    Log.i(RTC_TAG, "webrtc_init_step builder_created elapsed_ms=${SystemClock.elapsedRealtime() - startedAtMs}")
+    builder.setVideoDecoderFactory(decoderFactory)
+    Log.i(RTC_TAG, "webrtc_init_step decoder_factory_set elapsed_ms=${SystemClock.elapsedRealtime() - startedAtMs}")
+    // 作者: long；Android 控制端这里只接收 Mac 视频，不发布本地视频；不创建 encoder factory 可以避开部分 MTK 机型枚举硬编时拖住 answer。
+    rtcFactory = builder.createPeerConnectionFactory()
+    Log.i(RTC_TAG, "webrtc_init_step complete elapsed_ms=${SystemClock.elapsedRealtime() - startedAtMs}")
+  }
+
+  private fun ensureWebRtcRendererInitializedBlocking() {
+    if (Looper.myLooper() == Looper.getMainLooper()) {
+      ensureWebRtcRendererInitializedOnMain()
+      return
+    }
+    if (rtcRendererInitialized && rtcEglBase != null) {
+      return
+    }
+    val latch = CountDownLatch(1)
+    var initError: Throwable? = null
+    runOnUiThread {
+      try {
+        ensureWebRtcRendererInitializedOnMain()
+      } catch (error: Throwable) {
+        initError = error
+      } finally {
+        latch.countDown()
+      }
+    }
+    if (!latch.await(3, TimeUnit.SECONDS)) {
+      throw IllegalStateException("初始化 WebRTC 渲染层超时")
+    }
+    initError?.let { throw it }
+  }
+
+  private fun ensureWebRtcRendererInitializedOnMain() {
+    if (rtcRendererInitialized && rtcEglBase != null) {
+      return
+    }
+    if (rtcEglBase == null) {
+      rtcEglBase = EglBase.create()
+      Log.i(RTC_TAG, "webrtc_init_step egl_created")
+    }
+    // 作者: long；远端画面仍使用普通 Surface 层级承载，避免全屏时 overlay surface 盖住控制层或在真机截屏中表现成整屏黑图。
+    binding.remoteVideoView.setZOrderMediaOverlay(false)
+    if (!rtcRendererInitialized) {
+      binding.remoteVideoView.init(rtcEglBase?.eglBaseContext, null)
+      // 作者: long；远控画面必须完整显示电脑屏幕，WebRTC 默认缩放策略不能依赖库版本，否则全屏横屏时容易被填充裁剪。
+      binding.remoteVideoView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
+      binding.remoteVideoView.setEnableHardwareScaler(true)
+      binding.remoteVideoView.setMirror(false)
+      rtcRendererInitialized = true
+      Log.i(RTC_TAG, "webrtc_init_step surface_renderer_initialized")
+    }
+    if (REMOTE_FULLSCREEN_USE_TEXTURE_RENDERER) {
+      // 作者: long；TextureView 只是全屏渲染 A/B 路径，默认关闭时不初始化，避免真机多建一个 EglRenderer 干扰主渲染链路。
+      binding.remoteTextureVideoView.init(rtcEglBase?.eglBaseContext)
+      rtcTextureRendererInitialized = true
+      Log.i(RTC_TAG, "webrtc_init_step texture_renderer_initialized")
+    }
   }
 
   private fun createRemoteDeskVideoDecoderFactory(): VideoDecoderFactory {
     val eglContext = rtcEglBase?.eglBaseContext
     val shouldAvoidMtkAvc = shouldAvoidMtkAvcHardwareDecoder()
+    if (shouldAvoidMtkAvc) {
+      Log.w(
+        RTC_TAG,
+        "decoder_hardware_factory_retry reason=mtk_software_avc_init_timeout model=${Build.MODEL} device=${Build.DEVICE} sdk=${Build.VERSION.SDK_INT}",
+      )
+      logH264DecoderCandidatesForMtk()
+      // 作者: long；这版 WebRTC AAR 没有 H.264 纯软件解码，而 Android/Google 软件 AVC 在 MTK Android 14 会卡在 initDecode；当前 sender 已补齐 42e028 与 SPS/PPS，先恢复硬解 primary 让最终媒体链路出帧。
+      return RemoteDeskVideoDecoderFactory(eglContext, Predicate { true })
+    }
     val hardwarePredicate = Predicate<MediaCodecInfo> { codecInfo ->
       // 作者: long；Redmi Note 8 Pro 的 MTK AVC 硬解会成功建链但不吐帧，只对白名单机型屏蔽，避免影响其他设备的正常硬解。
       val blocked = shouldAvoidMtkAvc && isMtkAvcHardwareDecoder(codecInfo)
@@ -801,9 +1125,15 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun releaseWebRtc() {
+    rtcRemoteVideoTrack?.let { removeRemoteVideoSinks(it) }
+    rtcActiveVideoSink = null
     if (rtcRendererInitialized) {
       binding.remoteVideoView.release()
       rtcRendererInitialized = false
+    }
+    if (rtcTextureRendererInitialized) {
+      binding.remoteTextureVideoView.release()
+      rtcTextureRendererInitialized = false
     }
     rtcPeerConnection?.dispose()
     rtcPeerConnection = null
@@ -819,6 +1149,9 @@ class MainActivity : AppCompatActivity() {
     if (rtcRendererInitialized) {
       binding.remoteVideoView.clearImage()
     }
+    if (rtcTextureRendererInitialized) {
+      binding.remoteTextureVideoView.clearImage()
+    }
   }
 
   private fun closeWebRtcSession(reason: String = "reset", clearRendererImage: Boolean = true) {
@@ -827,9 +1160,9 @@ class MainActivity : AppCompatActivity() {
     if (!closingSessionId.isNullOrBlank()) {
       logRtcSessionSummary(closingSessionId, reason)
     }
-    rtcRemoteVideoTrack?.removeSink(binding.remoteVideoView)
-    rtcRemoteVideoTrack?.removeSink(rtcProbeSink)
+    rtcRemoteVideoTrack?.let { removeRemoteVideoSinks(it) }
     rtcRemoteVideoTrack = null
+    rtcActiveVideoSink = null
     rtcPeerConnection?.close()
     rtcPeerConnection?.dispose()
     rtcPeerConnection = null
@@ -849,6 +1182,75 @@ class MainActivity : AppCompatActivity() {
       clearRemoteVideoRendererImage()
     }
     updateLiveMetricsPanel()
+  }
+
+  private fun removeRemoteVideoSinks(track: VideoTrack) {
+    rtcActiveVideoSink?.let { track.removeSink(it) }
+    track.removeSink(binding.remoteVideoView)
+    if (rtcTextureRendererInitialized) {
+      track.removeSink(binding.remoteTextureVideoView)
+    }
+    track.removeSink(rtcProbeSink)
+  }
+
+  private fun activateRemoteVideoRenderer(useTexture: Boolean) {
+    if (Looper.myLooper() != Looper.getMainLooper()) {
+      runOnUiThread {
+        if (isActivityAlive) {
+          activateRemoteVideoRenderer(useTexture)
+        }
+      }
+      return
+    }
+    val textureAvailable = useTexture && rtcTextureRendererInitialized
+    val nextSink: VideoSink = if (textureAvailable) {
+      binding.remoteTextureVideoView
+    } else {
+      binding.remoteVideoView
+    }
+    if (rtcActiveVideoSink !== nextSink) {
+      rtcRemoteVideoTrack?.let { track ->
+        rtcActiveVideoSink?.let { track.removeSink(it) }
+        track.addSink(nextSink)
+      }
+      rtcActiveVideoSink = nextSink
+      Log.i(
+        RTC_TAG,
+        "remote_video_renderer_switch mode=${if (textureAvailable) "texture" else "surface"} fullscreen=$remoteFullscreenActive",
+      )
+    }
+    binding.remoteVideoView.isVisible = !textureAvailable
+    binding.remoteTextureVideoView.isVisible = textureAvailable
+  }
+
+  private fun restoreWebRtcRendererAfterFrame(reason: String) {
+    if (Looper.myLooper() != Looper.getMainLooper()) {
+      runOnUiThread {
+        if (isActivityAlive) {
+          restoreWebRtcRendererAfterFrame(reason)
+        }
+      }
+      return
+    }
+    val legacyVisible = binding.remoteFrameView.isVisible
+    val rendererHidden = !binding.remoteVideoView.isVisible && !binding.remoteTextureVideoView.isVisible
+    val hadLegacyBitmap = legacyDisplayedBitmap != null || legacyPreviousDisplayedBitmap != null
+    if (!legacyVisible && !rendererHidden && !hadLegacyBitmap) {
+      return
+    }
+    // 作者: long；legacy JPEG 只是 WebRTC 首帧超时兜底，一旦 H.264 真帧恢复，必须立刻退回 RTC renderer，否则用户会一直看到旧的低清 Bitmap。
+    if (hadLegacyBitmap) {
+      clearLegacyFrameBitmap()
+    }
+    if (legacyVisible) {
+      binding.remoteFrameView.isVisible = false
+    }
+    resetLegacyFailureThrottleState()
+    activateRemoteVideoRenderer(useTexture = remoteFullscreenActive)
+    Log.i(
+      RTC_TAG,
+      "webrtc_renderer_restored session=${rtcCurrentSessionId ?: sessionId ?: "-"} reason=$reason fullscreen=$remoteFullscreenActive legacy_visible=$legacyVisible renderer_hidden=$rendererHidden",
+    )
   }
 
   private fun resetRtcRenderStats() {
@@ -985,7 +1387,11 @@ class MainActivity : AppCompatActivity() {
     legacyFrameSampleFrameCount = 0L
     legacyFrameSampleAtMs = 0L
     legacyFirstFrameAtMs = 0L
+    legacyRenderFpsSampleSum = 0.0
+    legacyRenderFpsSampleCount = 0L
+    legacyFrameDecodeSeq.incrementAndGet()
     lastLegacyFrameUiUpdateAtMs = 0L
+    resetLegacyInteractionFrameGates()
   }
 
   private fun resetLegacyFailureThrottleState() {
@@ -1015,7 +1421,25 @@ class MainActivity : AppCompatActivity() {
     } else {
       null
     }
+    val legacyFirstFrameMs = if (legacyFirstFrameAtMs > 0L && rtcSessionStartedAtMs > 0L) {
+      legacyFirstFrameAtMs - rtcSessionStartedAtMs
+    } else {
+      null
+    }
     val renderFpsAvg = averageMetric(rtcRenderFpsSampleSum, rtcRenderFpsSampleCount)
+    val legacyRenderFpsAvg = averageMetric(legacyRenderFpsSampleSum, legacyRenderFpsSampleCount)
+    val effectiveFirstFrameMs = firstFrameMs ?: legacyFirstFrameMs
+    val effectiveRenderFpsAvg = renderFpsAvg ?: legacyRenderFpsAvg
+    val effectiveRenderedFrameCount = if (rtcRenderedFrameCount > 0L) {
+      rtcRenderedFrameCount
+    } else {
+      legacyFrameCount
+    }
+    val mediaFrameTransport = when {
+      rtcRenderedFrameCount > 0L || firstFrameMs != null -> "webrtc"
+      legacyFrameCount > 0L || legacyFirstFrameMs != null -> "legacy_jpeg"
+      else -> "none"
+    }
     val recvKbpsAvg = averageMetric(rtcNetRecvKbpsSampleSum, rtcNetRecvKbpsSampleCount)
     val rttMsAvg = averageMetric(rtcNetRttMsSampleSum, rtcNetRttMsSampleCount)
     val iceState = rtcPeerConnection?.iceConnectionState()?.name ?: "-"
@@ -1046,16 +1470,24 @@ class MainActivity : AppCompatActivity() {
     }
     Log.i(
       RTC_TAG,
-      "session_summary session=$sessionId reason=$reason duration_ms=${if (sessionDurationMs >= 0L) sessionDurationMs else "-"} first_frame_ms=${firstFrameMs ?: "-"} render_fps_avg=${formatMetric(renderFpsAvg)} render_fps_recent=${formatMetric(recentRenderQuality.fpsAvg)} render_recent_samples=${recentRenderQuality.sampleCount} render_recent_window_ms=${recentRenderQuality.windowMs} rendered_frames=$rtcRenderedFrameCount recv_kbps_avg=${formatMetric(recvKbpsAvg)} rtt_ms_avg=${formatMetric(rttMsAvg)} longest_frame_gap_ms=$rtcLongestFrameGapMs recent_frame_gap_ms=${recentRenderQuality.maxFrameGapMs} low_fps_streak_ms=$rtcLongestLowFpsStreakMs recent_low_fps_streak_ms=${recentRenderQuality.lowFpsStreakMs} frames_dropped_last=$rtcFramesDroppedLast frames_dropped_spike_max=$rtcFramesDroppedSpikeMax frames_dropped_delta_recent=$recentDroppedDelta frames_dropped_spike_recent=$recentDroppedSpikeMax controller_quality_hint=$controllerQualityHint controller_quality_hint_recent=$controllerQualityHintRecent candidate_pair_last=$rtcLastCandidatePair candidate_tier_last=$rtcLastCandidateTier pair_state_last=$rtcLastPairState local_ice_candidate_callbacks=$rtcLocalIceCandidateCallbackCount local_ice_candidate_fallbacks=$rtcLocalIceCandidateFallbackCount local_ice_candidate_sent=$rtcLocalIceCandidateSentCount local_ice_candidate_sdp_count=$rtcLocalIceCandidateSdpCount ice_policy_restarts=$rtcIcePolicyRecoveryAttempts frame_size_last=$frameSize ice_state_last=$iceState",
+      "session_summary session=$sessionId reason=$reason duration_ms=${if (sessionDurationMs >= 0L) sessionDurationMs else "-"} media_frame_transport=$mediaFrameTransport first_frame_ms=${effectiveFirstFrameMs ?: "-"} webrtc_first_frame_ms=${firstFrameMs ?: "-"} legacy_first_frame_ms=${legacyFirstFrameMs ?: "-"} render_fps_avg=${formatMetric(effectiveRenderFpsAvg)} legacy_render_fps_avg=${formatMetric(legacyRenderFpsAvg)} render_fps_recent=${formatMetric(recentRenderQuality.fpsAvg)} render_recent_samples=${recentRenderQuality.sampleCount} render_recent_window_ms=${recentRenderQuality.windowMs} rendered_frames=$effectiveRenderedFrameCount webrtc_rendered_frames=$rtcRenderedFrameCount legacy_rendered_frames=$legacyFrameCount recv_kbps_avg=${formatMetric(recvKbpsAvg)} rtt_ms_avg=${formatMetric(rttMsAvg)} longest_frame_gap_ms=$rtcLongestFrameGapMs recent_frame_gap_ms=${recentRenderQuality.maxFrameGapMs} low_fps_streak_ms=$rtcLongestLowFpsStreakMs recent_low_fps_streak_ms=${recentRenderQuality.lowFpsStreakMs} frames_dropped_last=$rtcFramesDroppedLast frames_dropped_spike_max=$rtcFramesDroppedSpikeMax frames_dropped_delta_recent=$recentDroppedDelta frames_dropped_spike_recent=$recentDroppedSpikeMax controller_quality_hint=$controllerQualityHint controller_quality_hint_recent=$controllerQualityHintRecent candidate_pair_last=$rtcLastCandidatePair candidate_tier_last=$rtcLastCandidateTier pair_state_last=$rtcLastPairState local_ice_candidate_callbacks=$rtcLocalIceCandidateCallbackCount local_ice_candidate_fallbacks=$rtcLocalIceCandidateFallbackCount local_ice_candidate_sent=$rtcLocalIceCandidateSentCount local_ice_candidate_sdp_count=$rtcLocalIceCandidateSdpCount ice_policy_restarts=$rtcIcePolicyRecoveryAttempts frame_size_last=$frameSize ice_state_last=$iceState",
     )
     val metricsPayload = mapOf<String, Any?>(
       "duration_ms" to if (sessionDurationMs >= 0L) sessionDurationMs else -1L,
-      "first_frame_ms" to (firstFrameMs ?: -1L),
-      "render_fps_avg" to metricOrMinusOne(renderFpsAvg),
+      // 作者: long；Redmi 真机当前可见画面走 legacy JPEG fallback，通用视频 proof 需要把这条降级画面也算作“已渲染”，否则自动报告会把有画面的会话误判为无首帧。
+      "media_frame_transport" to mediaFrameTransport,
+      "first_frame_ms" to (effectiveFirstFrameMs ?: -1L),
+      "webrtc_first_frame_ms" to (firstFrameMs ?: -1L),
+      "legacy_first_frame_ms" to (legacyFirstFrameMs ?: -1L),
+      "render_fps_avg" to metricOrMinusOne(effectiveRenderFpsAvg),
+      "webrtc_render_fps_avg" to metricOrMinusOne(renderFpsAvg),
+      "legacy_render_fps_avg" to metricOrMinusOne(legacyRenderFpsAvg),
       "render_fps_recent" to metricOrMinusOne(recentRenderQuality.fpsAvg),
       "render_recent_sample_count" to recentRenderQuality.sampleCount,
       "render_recent_window_ms" to recentRenderQuality.windowMs,
-      "rendered_frames" to rtcRenderedFrameCount,
+      "rendered_frames" to effectiveRenderedFrameCount,
+      "webrtc_rendered_frames" to rtcRenderedFrameCount,
+      "legacy_rendered_frames" to legacyFrameCount,
       "recv_kbps_avg" to metricOrMinusOne(recvKbpsAvg),
       "rtt_ms_avg" to metricOrMinusOne(rttMsAvg),
       "render_longest_frame_gap_ms" to rtcLongestFrameGapMs,
@@ -1120,13 +1552,15 @@ class MainActivity : AppCompatActivity() {
     val now = SystemClock.elapsedRealtime()
     val firstFrameMs = if (rtcFirstFrameAtMs > 0L && rtcSessionStartedAtMs > 0L) {
       rtcFirstFrameAtMs - rtcSessionStartedAtMs
+    } else if (legacyFirstFrameAtMs > 0L && rtcSessionStartedAtMs > 0L) {
+      legacyFirstFrameAtMs - rtcSessionStartedAtMs
     } else {
       -1L
     }
     val proofKey = listOf(
       activeSessionId,
       reason,
-      if (firstFrameMs >= 0L || rtcRenderedFrameCount > 0L) "video:1" else "video:0",
+      if (firstFrameMs >= 0L || rtcRenderedFrameCount > 0L || legacyFrameCount > 0L) "video:1" else "video:0",
       remoteInputResultCount.toString(),
       remoteInputResultAppliedCount.toString(),
       lastRemoteInputResult.inputTraceId,
@@ -1907,17 +2341,23 @@ class MainActivity : AppCompatActivity() {
         attachRemoteVideoTrack(track, source = "onTrack")
       }
     }
+    val createStartedAtMs = SystemClock.elapsedRealtime()
+    Log.i(RTC_TAG, "create_pc_step create_peer_connection_start session=$sessionId")
     rtcPeerConnection = factory.createPeerConnection(config, observer)
+    Log.i(
+      RTC_TAG,
+      "create_pc_step create_peer_connection_done session=$sessionId ok=${rtcPeerConnection != null} elapsed_ms=${SystemClock.elapsedRealtime() - createStartedAtMs}",
+    )
     return rtcPeerConnection
   }
 
   private fun attachRemoteVideoTrack(track: VideoTrack, source: String) {
-    rtcRemoteVideoTrack?.removeSink(binding.remoteVideoView)
-    rtcRemoteVideoTrack?.removeSink(rtcProbeSink)
+    rtcRemoteVideoTrack?.let { removeRemoteVideoSinks(it) }
     rtcRemoteVideoTrack = track
+    rtcActiveVideoSink = null
     rtcTrackAttachedAtMs = SystemClock.elapsedRealtime()
     resetRtcRenderStats()
-    track.addSink(binding.remoteVideoView)
+    activateRemoteVideoRenderer(useTexture = remoteFullscreenActive)
     track.addSink(rtcProbeSink)
     runOnUiThread {
       if (!isActivityAlive) {
@@ -2384,11 +2824,43 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
+  private fun parseLegacyFramePushMessage(text: String) {
+    try {
+      val json = JSONObject(text)
+      val payload = json.optJSONObject("payload")
+      logIncomingSignal(json, payload, text.length)
+      val messageSessionId = json.optNonBlank("session_id") ?: payload?.optNonBlank("session_id")
+      val currentSessionId = sessionId
+      if (currentSessionId.isNullOrBlank() || messageSessionId.isNullOrBlank() || messageSessionId != currentSessionId) {
+        return
+      }
+      val frameId = payload?.optNonBlank("frame_id") ?: "frame-${System.currentTimeMillis()}"
+      val contentB64 = payload?.optNonBlank("content_b64")
+      val frameWidth = payload?.optInt("frame_width") ?: 0
+      val frameHeight = payload?.optInt("frame_height") ?: 0
+      val sourceRect = parseFrameSourceRect(payload)
+      val captureTs = payload?.optLong("capture_ts")?.takeIf { it > 0L } ?: System.currentTimeMillis()
+      val generation = frameGeneration
+      // 作者: long；兜底 JPEG 是大消息热路径，解析后直接进入后台解码队列，只有最终展示才回主线程，避免全屏 pinch 的矩阵动画被每帧消息预处理打断。
+      handleIncomingFrame(
+        frameId = frameId,
+        contentB64 = contentB64,
+        announcedWidth = frameWidth,
+        announcedHeight = frameHeight,
+        sourceRect = sourceRect,
+        captureTs = captureTs,
+        generation = generation,
+      )
+    } catch (error: Exception) {
+      Log.w(RTC_TAG, "legacy_frame_parse_failed error=${error.message ?: "unknown"}")
+    }
+  }
+
   private fun parseMessage(text: String) {
     try {
       val json = JSONObject(text)
-      Log.i(RTC_TAG, "recv_signal ${summarizeEnvelope(json, text.length)}")
       val payload = json.optJSONObject("payload")
+      logIncomingSignal(json, payload, text.length)
       when (json.optString("type")) {
         "device.register.rsp" -> {
           token = payload.optNonBlank("token") ?: token
@@ -2461,6 +2933,7 @@ class MainActivity : AppCompatActivity() {
             }
           }
           appendLog("会话请求结果：$result${sessionId?.let { " session=$it" } ?: ""}")
+          processPendingSharedTools()
         }
         "session.start.push" -> {
           pendingSessionRequest = false
@@ -2492,7 +2965,8 @@ class MainActivity : AppCompatActivity() {
             rtcNegotiationOwner = RTC_NEGOTIATION_OWNER_UNKNOWN
             applyIceServersFromSession(payload)
             applyIcePolicyFromSession(payload)
-            createPeerConnection(current)
+            ensureWebRtcRendererInitializedBlocking()
+            // 作者: long；Mac 受控端会主动发 webrtc.offer，会话开始阶段只准备视频承载层；factory/PeerConnection 放到信令线程，避免真机主线程被 native 初始化拖死后停在旧会话。
             resetRemoteInputResultStats()
             resetLiveE2EProofReportState()
             startRtcWatchdog(current)
@@ -2507,16 +2981,21 @@ class MainActivity : AppCompatActivity() {
           updateLiveMetricsPanel()
           renderedFrameWidth = 0
           renderedFrameHeight = 0
+          remoteFrameSourceRect = NormalizedRect(0.0, 0.0, 1.0, 1.0)
+          remotePinchViewportSourceRect = null
+          remotePinchViewportLargestSourceRect = null
+          resetRemoteSourceRectPreviewTransform()
           resetLegacyFrameStats()
           resetLegacyFailureThrottleState()
-          binding.remoteFrameView.setImageDrawable(null)
+          clearLegacyFrameBitmap()
           binding.remoteFrameView.isVisible = false
-          binding.remoteVideoView.isVisible = true
+          activateRemoteVideoRenderer(useTexture = remoteFullscreenActive)
           if (currentPage != MainPage.SESSION) {
             switchPage(MainPage.SESSION, autoRefreshDevices = false)
           }
           setStatus("会话中")
           appendLog("进入会话 ${sessionId ?: "unknown"}")
+          processPendingSharedTools()
           maybeScheduleAutoProofInput(sessionId)
         }
         "screen.frame.push" -> {
@@ -2532,14 +3011,23 @@ class MainActivity : AppCompatActivity() {
           val contentB64 = payload?.optNonBlank("content_b64")
           val frameWidth = payload?.optInt("frame_width") ?: 0
           val frameHeight = payload?.optInt("frame_height") ?: 0
+          val sourceRect = parseFrameSourceRect(payload)
           val captureTs = payload?.optLong("capture_ts")?.takeIf { it > 0L } ?: System.currentTimeMillis()
-          binding.remoteVideoView.isVisible = false
-          binding.remoteFrameView.isVisible = true
+          if (binding.remoteVideoView.isVisible) {
+            binding.remoteVideoView.isVisible = false
+          }
+          if (binding.remoteTextureVideoView.isVisible) {
+            binding.remoteTextureVideoView.isVisible = false
+          }
+          if (!binding.remoteFrameView.isVisible) {
+            binding.remoteFrameView.isVisible = true
+          }
           handleIncomingFrame(
             frameId = frameId,
             contentB64 = contentB64,
             announcedWidth = frameWidth,
             announcedHeight = frameHeight,
+            sourceRect = sourceRect,
             captureTs = captureTs,
             generation = frameGeneration,
           )
@@ -2591,8 +3079,12 @@ class MainActivity : AppCompatActivity() {
             return
           }
           val echoType = payload.optNonBlank("echo_type") ?: "input"
-          binding.ackText.text = "输入回执：$echoType 已确认"
-          appendLog("收到 $echoType 已确认")
+          if (echoType == "input.mouse.move") {
+            renderMoveAckThrottled(echoType)
+          } else {
+            binding.ackText.text = "输入回执：$echoType 已确认"
+            appendLog("收到 $echoType 已确认")
+          }
         }
         "input.result.push" -> {
           val messageSessionId = json.optNonBlank("session_id") ?: payload.optNonBlank("session_id")
@@ -2602,9 +3094,10 @@ class MainActivity : AppCompatActivity() {
             return
           }
           val result = recordRemoteInputResult(payload, json)
+          val isMoveResult = result.inputType == "input.mouse.move"
           maybeSendLiveE2EProofReport(
             reason = if (result.applied) "live_controller_input_applied" else "live_controller_input_result",
-            force = true,
+            force = !isMoveResult,
           )
           val inputType = result.inputType
           val applied = result.applied
@@ -2614,8 +3107,30 @@ class MainActivity : AppCompatActivity() {
           val executor = result.executor.ifBlank { "-" }
           val summary = result.summary.ifBlank { inputType }
           val resultLabel = if (applied) "目标已执行" else "目标未执行"
-          binding.ackText.text = "输入回执：$resultLabel $inputType [$statusCode/$executor]"
-          appendLog("收到目标端输入执行结果：$resultLabel $summary [$statusCode/$executor]")
+          if (isMoveResult) {
+            renderMoveResultThrottled(resultLabel, summary, statusCode, executor)
+          } else {
+            binding.ackText.text = "输入回执：$resultLabel $inputType [$statusCode/$executor]"
+            appendLog("收到目标端输入执行结果：$resultLabel $summary [$statusCode/$executor]")
+          }
+        }
+        "clipboard.text" -> {
+          handleIncomingClipboardText(json, payload ?: JSONObject())
+        }
+        "clipboard.result" -> {
+          handleIncomingClipboardResult(json, payload ?: JSONObject())
+        }
+        "file.transfer.start" -> {
+          handleIncomingFileTransferStart(json, payload ?: JSONObject())
+        }
+        "file.transfer.chunk" -> {
+          handleIncomingFileTransferChunk(json, payload ?: JSONObject())
+        }
+        "file.transfer.complete" -> {
+          handleIncomingFileTransferComplete(json, payload ?: JSONObject())
+        }
+        "file.transfer.result" -> {
+          handleIncomingFileTransferResult(json, payload ?: JSONObject())
         }
         "session.end.push" -> {
           val reason = payload.optNonBlank("reason") ?: "unknown"
@@ -2710,10 +3225,23 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun shouldHandleLegacyFrameStream(activeSessionId: String): Boolean {
-    if (rtcRemoteVideoTrack == null || !binding.remoteVideoView.isVisible) {
+    if (
+      rtcRemoteVideoTrack == null ||
+      (!binding.remoteVideoView.isVisible && !binding.remoteTextureVideoView.isVisible)
+    ) {
       return true
     }
     val now = SystemClock.elapsedRealtime()
+    if (rtcFirstFrameAtMs <= 0L && rtcTrackAttachedAtMs > 0L && now - rtcTrackAttachedAtMs >= 5_000L) {
+      if (now - lastLegacyFrameIgnoredLogAtMs >= LEGACY_FRAME_IGNORED_LOG_INTERVAL_MS) {
+        lastLegacyFrameIgnoredLogAtMs = now
+        Log.w(
+          RTC_TAG,
+          "legacy_frame_fallback session=$activeSessionId reason=webrtc_waiting_first_frame wait_ms=${now - rtcTrackAttachedAtMs}",
+        )
+      }
+      return true
+    }
     if (now - lastLegacyFrameIgnoredLogAtMs >= LEGACY_FRAME_IGNORED_LOG_INTERVAL_MS) {
       lastLegacyFrameIgnoredLogAtMs = now
       Log.i(
@@ -2724,11 +3252,192 @@ class MainActivity : AppCompatActivity() {
     return false
   }
 
+  private fun shouldSuppressLegacyFrameDuringInteraction(frameId: String, sourceRect: NormalizedRect): Boolean {
+    val now = SystemClock.elapsedRealtime()
+    if (isMaterializedRemoteFrameSourceRect(sourceRect)) {
+      protectMaterializedSourceRectFromFullFrames(now)
+      clearLegacyFullFrameFreeze(reason = "source_rect")
+      if (shouldThrottleFullscreenSourceRectFrame(frameId, now)) {
+        return true
+      }
+      return false
+    }
+    if (legacyPinchFrameGateActive) {
+      synchronized(legacyInteractionFrameGateLock) {
+        if (!legacyPinchFrameGateActive) {
+          return false
+        }
+        if (now - legacyPinchPreviewFrameAtMs >= REMOTE_VIEWPORT_PINCH_PREVIEW_FRAME_INTERVAL_MS) {
+          legacyPinchPreviewFrameAtMs = now
+          Log.i(
+            RTC_TAG,
+            "legacy_pinch_preview_frame_allowed frame_id=$frameId suppressed=$legacyPinchFrameSuppressedCount",
+          )
+          return false
+        }
+        // 作者: long；双指缩放时用户看到的是本地矩阵动画，整屏 JPEG 即使低频插入也会抢占解码和绘制预算；手势中冻结整屏帧，停手后再用局部高清帧补真实细节。
+        legacyPinchFrameSuppressedCount += 1
+        if (legacyPinchFrameSuppressedCount == 1 || legacyPinchFrameSuppressedCount % 30 == 0) {
+          Log.i(
+            RTC_TAG,
+            "legacy_pinch_frame_frozen frame_id=$frameId suppressed=$legacyPinchFrameSuppressedCount",
+          )
+        }
+        return true
+      }
+    }
+    val freezeUntil = legacyFullFrameFreezeUntilMs
+    if (freezeUntil > now) {
+      synchronized(legacyInteractionFrameGateLock) {
+        legacyPostPinchFrameSuppressedCount += 1
+        if (legacyPostPinchFrameSuppressedCount == 1 || legacyPostPinchFrameSuppressedCount % 12 == 0) {
+          Log.i(
+            RTC_TAG,
+            "legacy_post_pinch_full_frame_frozen frame_id=$frameId suppressed=$legacyPostPinchFrameSuppressedCount remaining_ms=${freezeUntil - now}",
+          )
+        }
+      }
+      return true
+    }
+    if (freezeUntil > 0L) {
+      clearLegacyFullFrameFreeze(reason = "expired")
+    }
+    val protectUntil = legacySourceRectFullFrameProtectUntilMs
+    if (protectUntil > now) {
+      synchronized(legacyInteractionFrameGateLock) {
+        legacySourceRectFullFrameSuppressedCount += 1
+        if (legacySourceRectFullFrameSuppressedCount == 1 || legacySourceRectFullFrameSuppressedCount % 12 == 0) {
+          Log.i(
+            RTC_TAG,
+            "legacy_source_rect_full_frame_protected frame_id=$frameId suppressed=$legacySourceRectFullFrameSuppressedCount remaining_ms=${protectUntil - now}",
+          )
+        }
+      }
+      return true
+    }
+    if (protectUntil > 0L) {
+      clearLegacySourceRectFullFrameProtection(reason = "expired")
+    }
+    return false
+  }
+
+  private fun shouldThrottleFullscreenSourceRectFrame(frameId: String, now: Long = SystemClock.elapsedRealtime()): Boolean {
+    if (!remoteFullscreenActive) {
+      remoteFullscreenSourceRectFrameSuppressedCount = 0
+      remoteLastFullscreenSourceRectFrameDisplayedAtMs = now
+      return false
+    }
+    val elapsedMs = now - remoteLastFullscreenSourceRectFrameDisplayedAtMs
+    if (remoteLastFullscreenSourceRectFrameDisplayedAtMs > 0L && elapsedMs < REMOTE_FULLSCREEN_SOURCE_RECT_FRAME_MIN_INTERVAL_MS) {
+      remoteFullscreenSourceRectFrameSuppressedCount += 1
+      if (remoteFullscreenSourceRectFrameSuppressedCount == 1 || remoteFullscreenSourceRectFrameSuppressedCount % 12 == 0) {
+        Log.i(
+          RTC_TAG,
+          "legacy_fullscreen_source_rect_frame_throttled frame_id=$frameId suppressed=$remoteFullscreenSourceRectFrameSuppressedCount elapsed_ms=$elapsedMs",
+        )
+      }
+      return true
+    }
+    if (remoteFullscreenSourceRectFrameSuppressedCount > 0) {
+      Log.i(
+        RTC_TAG,
+        "legacy_fullscreen_source_rect_frame_throttle_clear displayed=$frameId suppressed=$remoteFullscreenSourceRectFrameSuppressedCount",
+      )
+      remoteFullscreenSourceRectFrameSuppressedCount = 0
+    }
+    remoteLastFullscreenSourceRectFrameDisplayedAtMs = now
+    return false
+  }
+
+  private fun resetLegacyInteractionFrameGates() {
+    legacyPinchFrameGateActive = false
+    legacyFullFrameFreezeUntilMs = 0L
+    legacySourceRectFullFrameProtectUntilMs = 0L
+    legacyPinchPreviewFrameAtMs = 0L
+    synchronized(legacyInteractionFrameGateLock) {
+      legacyPinchFrameSuppressedCount = 0
+      legacyPostPinchFrameSuppressedCount = 0
+      legacySourceRectFullFrameSuppressedCount = 0
+    }
+  }
+
+  private fun beginLegacyPinchFrameGate() {
+    legacyPinchFrameGateActive = true
+    legacyFullFrameFreezeUntilMs = 0L
+    legacyPinchPreviewFrameAtMs = SystemClock.elapsedRealtime()
+    synchronized(legacyInteractionFrameGateLock) {
+      legacyPinchFrameSuppressedCount = 0
+      legacyPostPinchFrameSuppressedCount = 0
+    }
+    // 作者: long；进入双指缩放时旧整屏解码结果已经不再代表当前手势位置，先取消一次旧任务，并推迟下一次预览帧，避免低 FPS JPEG 解码抢走手势合成帧。
+    legacyFrameDecodeSeq.incrementAndGet()
+  }
+
+  private fun protectMaterializedSourceRectFromFullFrames(now: Long = SystemClock.elapsedRealtime()) {
+    legacySourceRectFullFrameProtectUntilMs = now + REMOTE_VIEWPORT_SOURCE_RECT_FULL_FRAME_PROTECT_MS
+    synchronized(legacyInteractionFrameGateLock) {
+      legacySourceRectFullFrameSuppressedCount = 0
+    }
+  }
+
+  private fun endLegacyPinchFrameGate(reason: String, keepFullFrameFrozen: Boolean = false) {
+    legacyPinchFrameGateActive = false
+    val suppressed = synchronized(legacyInteractionFrameGateLock) {
+      val count = legacyPinchFrameSuppressedCount
+      legacyPinchFrameSuppressedCount = 0
+      count
+    }
+    if (keepFullFrameFrozen) {
+      legacyFullFrameFreezeUntilMs = SystemClock.elapsedRealtime() + REMOTE_VIEWPORT_POST_PINCH_FULL_FRAME_FREEZE_MS
+      synchronized(legacyInteractionFrameGateLock) {
+        legacyPostPinchFrameSuppressedCount = 0
+      }
+    } else {
+      legacyFullFrameFreezeUntilMs = 0L
+    }
+    if (suppressed > 0) {
+      Log.i(RTC_TAG, "legacy_pinch_frame_gate_end reason=$reason suppressed=$suppressed")
+    }
+  }
+
+  private fun clearLegacyFullFrameFreeze(reason: String) {
+    val freezeUntil = legacyFullFrameFreezeUntilMs
+    if (freezeUntil <= 0L) {
+      return
+    }
+    legacyFullFrameFreezeUntilMs = 0L
+    val suppressed = synchronized(legacyInteractionFrameGateLock) {
+      val count = legacyPostPinchFrameSuppressedCount
+      legacyPostPinchFrameSuppressedCount = 0
+      count
+    }
+    if (suppressed > 0) {
+      Log.i(RTC_TAG, "legacy_full_frame_freeze_clear reason=$reason suppressed=$suppressed")
+    }
+  }
+
+  private fun clearLegacySourceRectFullFrameProtection(reason: String) {
+    val protectUntil = legacySourceRectFullFrameProtectUntilMs
+    if (protectUntil <= 0L) {
+      return
+    }
+    legacySourceRectFullFrameProtectUntilMs = 0L
+    val suppressed = synchronized(legacyInteractionFrameGateLock) {
+      val count = legacySourceRectFullFrameSuppressedCount
+      legacySourceRectFullFrameSuppressedCount = 0
+      count
+    }
+    if (suppressed > 0) {
+      Log.i(RTC_TAG, "legacy_source_rect_full_frame_protect_clear reason=$reason suppressed=$suppressed")
+    }
+  }
+
   private fun handleIncomingFrame(
     frameId: String,
     contentB64: String?,
     announcedWidth: Int,
     announcedHeight: Int,
+    sourceRect: NormalizedRect,
     captureTs: Long,
     generation: Int,
   ) {
@@ -2736,22 +3445,29 @@ class MainActivity : AppCompatActivity() {
       return
     }
     if (contentB64.isNullOrBlank()) {
-      showFrameDecodeFailure("屏幕帧 $frameId 缺少 content_b64")
+      showFrameDecodeFailureOnUiThread("屏幕帧 $frameId 缺少 content_b64")
       return
     }
     if (announcedWidth <= 0 || announcedHeight <= 0 || announcedWidth > MAX_FRAME_DIMENSION || announcedHeight > MAX_FRAME_DIMENSION) {
-      showFrameDecodeFailure("屏幕帧 $frameId 尺寸非法：${formatFrameSize(announcedWidth, announcedHeight)}")
+      showFrameDecodeFailureOnUiThread("屏幕帧 $frameId 尺寸非法：${formatFrameSize(announcedWidth, announcedHeight)}")
       return
     }
     if (contentB64.length > MAX_FRAME_B64_LENGTH) {
-      showFrameDecodeFailure("屏幕帧 $frameId 过大，已拒绝解码")
+      showFrameDecodeFailureOnUiThread("屏幕帧 $frameId 过大，已拒绝解码")
+      return
+    }
+    if (shouldSuppressLegacyFrameDuringInteraction(frameId, sourceRect)) {
       return
     }
 
+    val decodeSeq = legacyFrameDecodeSeq.incrementAndGet()
     frameDecodeExecutor.execute {
-      val decodedFrame = decodeFrameBitmap(contentB64)
+      if (decodeSeq != legacyFrameDecodeSeq.get()) {
+        return@execute
+      }
+      val decodedFrame = decodeFrameBitmap(contentB64, announcedWidth, announcedHeight, sourceRect)
       runOnUiThread {
-        if (!isActivityAlive || generation != frameGeneration) {
+        if (!isActivityAlive || generation != frameGeneration || decodeSeq != legacyFrameDecodeSeq.get()) {
           return@runOnUiThread
         }
         val activeSessionId = sessionId ?: "-"
@@ -2763,11 +3479,44 @@ class MainActivity : AppCompatActivity() {
           showFrameDecodeFailure(decodedFrame.error ?: "屏幕帧 $frameId 解码失败")
           return@runOnUiThread
         }
-        binding.remoteFrameView.setImageBitmap(bitmap)
+        if (binding.remoteVideoView.isVisible) {
+          binding.remoteVideoView.isVisible = false
+        }
+        if (binding.remoteTextureVideoView.isVisible) {
+          binding.remoteTextureVideoView.isVisible = false
+        }
+        if (!binding.remoteFrameView.isVisible) {
+          binding.remoteFrameView.isVisible = true
+        }
         val frameWidth = decodedFrame.width.takeIf { it > 0 } ?: announcedWidth
         val frameHeight = decodedFrame.height.takeIf { it > 0 } ?: announcedHeight
+        val frameSizeChanged = frameWidth != renderedFrameWidth || frameHeight != renderedFrameHeight
+        val sourceRectChanged = sourceRect != remoteFrameSourceRect
+        if (sourceRectChanged) {
+          val viewportReset = materializeRemoteFrameSourceRect(sourceRect)
+          val previewTarget = if (remotePinchZoomActive) {
+            remotePinchViewportLargestSourceRect ?: remotePinchViewportSourceRect
+          } else {
+            null
+          }
+          val previewChanged = previewTarget != null &&
+            updateRemoteSourceRectPreviewTransform(sourceRect, previewTarget)
+          // 作者: long；局部高清帧到达时先把旧的本地放大/平移归一，再绘制新裁剪帧，避免新帧先被上一轮 transform 放大一拍造成闪烁和发虚。
+          if (viewportReset) {
+            applyRemoteViewportTransform(commitRenderScale = false)
+          } else if (previewChanged) {
+            scheduleRemoteViewportTransformApply(commitRenderScale = false)
+          }
+        }
+        binding.remoteFrameView.setHighQualityScaling(shouldUseHighQualityLegacyScaling(sourceRect))
+        setLegacyFrameBitmap(bitmap)
         renderedFrameWidth = frameWidth
         renderedFrameHeight = frameHeight
+        remoteFrameSourceRect = sourceRect
+        if (frameSizeChanged) {
+          // 作者: long；source_rect 平移只改变“看电脑哪一块”，不改变 Android 画面尺寸；最大缩放拖动时避免每个局部帧都触发窗口测量，减少全屏 WM 提交压力。
+          updateRemoteViewportAspect(frameWidth, frameHeight)
+        }
         legacyDecodeFailureSuppressedCount = 0
         val now = SystemClock.elapsedRealtime()
         legacyFrameCount += 1
@@ -2791,9 +3540,11 @@ class MainActivity : AppCompatActivity() {
             } else {
               0.0
             }
+            legacyRenderFpsSampleSum += sampleFps
+            legacyRenderFpsSampleCount += 1
             Log.i(
               RTC_TAG,
-              "legacy_frame_sample session=$activeSessionId frames_total=$legacyFrameCount sample_frames=$sampleFrames sample_ms=$sampleElapsedMs fps=${"%.2f".format(Locale.US, sampleFps)} size=${formatFrameSize(frameWidth, frameHeight)}",
+              "legacy_frame_sample session=$activeSessionId frames_total=$legacyFrameCount sample_frames=$sampleFrames sample_ms=$sampleElapsedMs fps=${"%.2f".format(Locale.US, sampleFps)} size=${formatFrameSize(frameWidth, frameHeight)} source_rect=${formatSourceRectForLog(sourceRect)}",
             )
             legacyFrameSampleAtMs = now
             legacyFrameSampleFrameCount = legacyFrameCount
@@ -2801,7 +3552,12 @@ class MainActivity : AppCompatActivity() {
         }
         if (now - lastLegacyFrameUiUpdateAtMs >= RTC_STATS_UI_UPDATE_INTERVAL_MS) {
           lastLegacyFrameUiUpdateAtMs = now
-          binding.frameMetaText.text = "当前画面：$frameId ${formatFrameSize(frameWidth, frameHeight)} @ ${formatTimestamp(captureTs)}"
+          val sourceRectLabel = if (sourceRect == NormalizedRect(0.0, 0.0, 1.0, 1.0)) {
+            "整屏"
+          } else {
+            "局部 ${formatCoordinate(sourceRect.width)}x${formatCoordinate(sourceRect.height)}"
+          }
+          binding.frameMetaText.text = "当前画面：$frameId ${formatFrameSize(frameWidth, frameHeight)} $sourceRectLabel @ ${formatTimestamp(captureTs)}"
           setStatus("接收远端画面")
         }
       }
@@ -2861,10 +3617,26 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun handleRemoteFrameTouchV2(imageView: View, event: MotionEvent): Boolean {
+    if (remoteOverlayControlTouchActive) {
+      if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+        remoteOverlayControlTouchActive = false
+      }
+      return true
+    }
+    if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+      remoteViewportOverlayControlAt(event.x, event.y)?.let { control ->
+        // 作者: long；远控画面触控层覆盖整块视频区域，命中工具按钮时直接派发给按钮本身，否则用户点“全屏/键盘”会被误发成 Mac 鼠标点击。
+        remoteOverlayControlTouchActive = true
+        control.performClick()
+        return true
+      }
+    }
     remoteScaleGestureDetector.onTouchEvent(event)
     when (event.actionMasked) {
       MotionEvent.ACTION_DOWN -> {
         cancelRemoteLongPressDrag()
+        cancelFrameCoalescedRemoteMouseMove()
+        resetRemoteLocalCursorMotion()
         remoteTouchDownX = event.x
         remoteTouchDownY = event.y
         remoteLastTouchX = event.x
@@ -2875,23 +3647,30 @@ class MainActivity : AppCompatActivity() {
         remoteLongPressDragArmed = false
         remoteScrollGestureActive = false
         remotePinchZoomActive = false
+        resetRemotePinchFocus()
         remoteTouchDownPoint = mapTouchToFrame(imageView, event.x, event.y)
         remoteLastInputPoint = remoteTouchDownPoint
         remoteLastSentMovePoint = null
         remoteLastSentMoveAtMs = 0L
         remoteLastWheelAtMs = 0L
+        updateRemoteLocalCursor(event.x, event.y)
         scheduleRemoteLongPressDrag(imageView)
         return renderedFrameWidth > 0 && renderedFrameHeight > 0
       }
 
       MotionEvent.ACTION_POINTER_DOWN -> {
         cancelRemoteLongPressDrag()
+        flushFrameCoalescedRemoteMouseMove()
         remoteSuppressTap = true
+        remoteMouseViewportPanSourceRect = null
         endRemoteMouseDrag()
         if (event.pointerCount >= 2) {
-          remoteScrollGestureActive = true
+          remoteScrollGestureActive = false
           remoteScrollLastFocusX = averagePointerX(event)
           remoteScrollLastFocusY = averagePointerY(event)
+          remoteMultiTouchStartSpan = pointerSpan(event)
+          remoteManualPinchActive = false
+          remoteManualPinchLastSpan = remoteMultiTouchStartSpan
         }
         return true
       }
@@ -2904,6 +3683,15 @@ class MainActivity : AppCompatActivity() {
         if (remoteScrollGestureActive) {
           remoteScrollLastFocusX = averageRemainingPointerX(event, event.actionIndex)
           remoteScrollLastFocusY = averageRemainingPointerY(event, event.actionIndex)
+          remoteMultiTouchStartSpan = pointerSpan(event)
+        } else {
+          if (remoteManualPinchActive) {
+            endRemoteViewportManualPinch(reason = "pointer_up")
+          } else if (remoteViewportScale > REMOTE_VIEWPORT_MIN_SCALE && !remotePinchZoomActive) {
+            sendRemoteViewportInteractionHint("end", "pan", force = true)
+          }
+          remoteMultiTouchStartSpan = 0f
+          resetRemotePinchFocus()
         }
         return true
       }
@@ -2913,8 +3701,13 @@ class MainActivity : AppCompatActivity() {
           cancelRemoteLongPressDrag()
           endRemoteMouseDrag()
           remoteSuppressTap = true
-          if (remotePinchZoomActive) {
+          if (remoteScaleGestureDetector.isInProgress || remotePinchZoomActive || remoteManualPinchActive || remoteMultiTouchSpanChanged(event)) {
             remoteScrollGestureActive = false
+            if (!remoteScaleGestureDetector.isInProgress && (remoteManualPinchActive || !remotePinchZoomActive)) {
+              handleRemoteViewportManualPinch(event)
+            }
+          } else if (remoteViewportScale > REMOTE_VIEWPORT_MIN_SCALE) {
+            handleRemoteViewportTwoFingerPan(event)
           } else {
             handleRemoteWheelGesture(event)
           }
@@ -2927,43 +3720,31 @@ class MainActivity : AppCompatActivity() {
         val movedFromDown = abs(event.x - remoteTouchDownX) > remoteTouchSlopPx ||
           abs(event.y - remoteTouchDownY) > remoteTouchSlopPx
         if (remoteLongPressDragArmed) {
+          updateRemoteLocalCursor(event.x, event.y)
           if (movedFromDown) {
             remoteSuppressTap = true
           }
-          val currentSessionId = sessionId
-          val point = mapTouchToFrame(imageView, event.x, event.y)
-          if (!currentSessionId.isNullOrBlank() && point != null && remoteMouseButtonDown) {
-            maybeSendRemoteMouseMove(currentSessionId, point)
+          if (remoteMouseButtonDown) {
+            sendRemotePointerMovesFromMotionEvent(imageView, event, inputCategory = "drag")
           }
+          val point = mapTouchToFrame(imageView, event.x, event.y)
           remoteLastInputPoint = point ?: remoteLastInputPoint
           remoteLastTouchX = event.x
           remoteLastTouchY = event.y
           return true
         }
-        if (event.pointerCount == 1 && remoteViewportScale > REMOTE_VIEWPORT_MIN_SCALE) {
-          val dx = event.x - remoteLastTouchX
-          val dy = event.y - remoteLastTouchY
-          if (movedFromDown) {
-            cancelRemoteLongPressDrag()
-            remotePanMoved = true
-            remoteSuppressTap = true
-            endRemoteMouseDrag()
-          }
-          if (remotePanMoved) {
-            remoteViewportOffsetX = clampRemoteViewportOffsetX(remoteViewportOffsetX + dx, remoteViewportScale)
-            remoteViewportOffsetY = clampRemoteViewportOffsetY(remoteViewportOffsetY + dy, remoteViewportScale)
-            applyRemoteViewportTransform()
-          }
-          remoteLastTouchX = event.x
-          remoteLastTouchY = event.y
-          return true
-        }
-
         if (movedFromDown) {
           cancelRemoteLongPressDrag()
           remoteSuppressTap = true
-          // 作者: long；远程画面里的单指滑动优先表示“移动鼠标指针”，拖拽动作改由长按后滑动触发，避免普通移动误按左键。
-          sendRemotePointerMoveFromTouch(imageView, event.x, event.y, force = false)
+          // 作者: long；放大后单指仍承担电脑鼠标移动，同时推动本地/远端局部视角跟随指针；用户不需要再切换“移动窗口视角”的单独模式。
+          val viewportPanMoved = handleZoomedViewportPanFromMouseMove(imageView, event.x, event.y)
+          updateRemoteLocalCursor(event.x, event.y)
+          sendRemotePointerMovesFromMotionEvent(
+            imageView,
+            event,
+            inputCategory = "pointer",
+            moveProfile = if (viewportPanMoved) "zoom_pan" else "pointer",
+          )
         }
         val point = mapTouchToFrame(imageView, event.x, event.y)
         remoteLastInputPoint = point ?: remoteLastInputPoint
@@ -2974,10 +3755,14 @@ class MainActivity : AppCompatActivity() {
 
       MotionEvent.ACTION_UP -> {
         cancelRemoteLongPressDrag()
+        if (remoteManualPinchActive) {
+          endRemoteViewportManualPinch(reason = "touch_up")
+        }
         imageView.performClick()
         val currentSessionId = sessionId
         val upPoint = mapTouchToFrame(imageView, event.x, event.y) ?: remoteLastInputPoint
         if (remoteMouseButtonDown) {
+          flushFrameCoalescedRemoteMouseMove()
           if (!currentSessionId.isNullOrBlank() && upPoint != null) {
             sendRemoteMouseMove(currentSessionId, upPoint, logSuccess = false, force = true, inputCategory = "drag")
             sendRemoteMouseButton(currentSessionId, upPoint, "left", "up", logSuccess = false, inputCategory = "drag")
@@ -2986,6 +3771,11 @@ class MainActivity : AppCompatActivity() {
           return true
         }
         if (remotePanMoved || remoteSuppressTap || remoteScaleGestureDetector.isInProgress || remotePinchZoomActive) {
+          flushFrameCoalescedRemoteMouseMove()
+          flushDeferredRemoteMouseMove()
+          if (remotePanMoved) {
+            sendRemoteViewportInteractionHint("end", "pan", force = true)
+          }
           resetRemoteInputGestureState()
           return true
         }
@@ -3007,7 +3797,14 @@ class MainActivity : AppCompatActivity() {
 
       MotionEvent.ACTION_CANCEL -> {
         cancelRemoteLongPressDrag()
+        cancelFrameCoalescedRemoteMouseMove()
         endRemoteMouseDrag()
+        if (remoteManualPinchActive) {
+          endRemoteViewportManualPinch(reason = "cancel")
+        }
+        if (remotePanMoved) {
+          sendRemoteViewportInteractionHint("end", "pan", force = true)
+        }
         resetRemoteInputGestureState()
         return true
       }
@@ -3015,19 +3812,82 @@ class MainActivity : AppCompatActivity() {
     return false
   }
 
-  private fun sendRemotePointerMoveFromTouch(imageView: View, touchX: Float, touchY: Float, force: Boolean): Boolean {
+  private fun remoteViewportOverlayControlAt(touchX: Float, touchY: Float): View? {
+    val hitSlop = dp(8).toFloat()
+    return listOf(
+      binding.remoteZoomResetButton,
+      binding.remoteFullscreenButton,
+      binding.remoteKeyboardPanelButton,
+    ).firstOrNull { control ->
+      if (!control.isShown) {
+        return@firstOrNull false
+      }
+      val left = control.left.toFloat() - hitSlop
+      val top = control.top.toFloat() - hitSlop
+      val right = control.right.toFloat() + hitSlop
+      val bottom = control.bottom.toFloat() + hitSlop
+      touchX in left..right && touchY in top..bottom
+    }
+  }
+
+  private fun sendRemotePointerMoveFromTouch(
+    imageView: View,
+    touchX: Float,
+    touchY: Float,
+    force: Boolean,
+    sampleAtMs: Long = SystemClock.elapsedRealtime(),
+    inputCategory: String = "pointer",
+  ): Boolean {
     val currentSessionId = sessionId
     if (currentSessionId.isNullOrBlank()) {
       return false
     }
     val point = mapTouchToFrame(imageView, touchX, touchY) ?: return false
+    updateRemoteLocalCursor(touchX, touchY)
     remoteLastInputPoint = point
     return if (force) {
       // 作者: long；单指移动只同步光标位置，不按下鼠标键，避免用户想悬停时被误识别成拖拽。
-      sendRemoteMouseMove(currentSessionId, point, logSuccess = false, force = true, inputCategory = "pointer")
+      sendRemoteMouseMove(currentSessionId, point, logSuccess = false, force = true, inputCategory = inputCategory, sentAtMs = sampleAtMs)
     } else {
-      maybeSendRemoteMouseMove(currentSessionId, point, inputCategory = "pointer")
+      maybeSendRemoteMouseMove(currentSessionId, point, sampleAtMs = sampleAtMs, inputCategory = inputCategory)
     }
+  }
+
+  private fun sendRemotePointerMovesFromMotionEvent(
+    imageView: View,
+    event: MotionEvent,
+    inputCategory: String,
+    moveProfile: String = inputCategory,
+  ): Boolean {
+    val currentSessionId = sessionId ?: return false
+    val now = SystemClock.elapsedRealtime()
+    var candidateX = event.x
+    var candidateY = event.y
+    var point = mapTouchToFrame(imageView, candidateX, candidateY)
+    val historySize = event.historySize
+    val historyStartIndex = maxOf(0, historySize - REMOTE_POINTER_MOVE_MAX_HISTORY_SAMPLES)
+    if (point == null && historySize > 0) {
+      for (historyIndex in historySize - 1 downTo historyStartIndex) {
+        val historicalX = event.getHistoricalX(historyIndex)
+        val historicalY = event.getHistoricalY(historyIndex)
+        val historicalPoint = mapTouchToFrame(imageView, historicalX, historicalY) ?: continue
+        candidateX = historicalX
+        candidateY = historicalY
+        point = historicalPoint
+        break
+      }
+    }
+    val mappedPoint = point ?: return false
+    updateRemoteLocalCursor(candidateX, candidateY, sampleAtMs = now)
+    remoteLastInputPoint = mappedPoint
+    // 作者: long；真机 move 事件可能一帧内合并多个历史点，远控鼠标更需要稳定尾点而不是把历史轨迹全量灌进 CGEvent 队列；每个 Android vsync 只发送最新坐标，抬手时再强制补尾帧。
+    return scheduleFrameCoalescedRemoteMouseMove(
+      sessionId = currentSessionId,
+      point = mappedPoint,
+      sampleAtMs = now,
+      inputCategory = inputCategory,
+      moveProfile = moveProfile,
+    )
   }
 
   private fun scheduleRemoteLongPressDrag(imageView: View) {
@@ -3071,6 +3931,11 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun resetRemoteInputGestureState() {
+    cancelFrameCoalescedRemoteMouseMove()
+    cancelDeferredRemoteMouseMove()
+    if (legacyPinchFrameGateActive) {
+      endLegacyPinchFrameGate(reason = "gesture_reset")
+    }
     remotePanMoved = false
     remoteSuppressTap = false
     remoteMouseButtonDown = false
@@ -3079,14 +3944,32 @@ class MainActivity : AppCompatActivity() {
     remoteLastInputPoint = null
     remoteLastSentMovePoint = null
     remoteLastSentMoveAtMs = 0L
+    remoteMouseViewportPanSourceRect = null
+    remotePinchViewportSourceRect = null
+    remotePinchViewportLargestSourceRect = null
+    val sourceRectPreviewChanged = resetRemoteSourceRectPreviewTransform()
     remoteScrollGestureActive = false
     remotePinchZoomActive = false
+    remoteManualPinchActive = false
+    remoteManualPinchLastSpan = 0f
+    remoteAccumulatedPinchScaleFactor = 1f
+    remoteLastPinchEndHintAtMs = 0L
+    remoteLastPinchEndHintKey = ""
+    resetRemotePinchFocus()
+    remoteMultiTouchStartSpan = 0f
     remoteLastWheelAtMs = 0L
+    resetRemoteLocalCursorMotion()
+    if (sourceRectPreviewChanged) {
+      scheduleRemoteViewportTransformApply(commitRenderScale = false)
+    }
+    scheduleRemoteViewportHardwareLayerRelease()
+    scheduleRemoteLocalCursorHide()
   }
 
   private fun releaseRemoteInputState(sendMouseUp: Boolean = true) {
     cancelRemoteLongPressDrag()
     if (sendMouseUp && remoteMouseButtonDown) {
+      flushPendingRemoteMouseMoveBeforeDiscreteInput()
       val currentSessionId = sessionId
       val point = remoteLastInputPoint
       if (!currentSessionId.isNullOrBlank() && point != null) {
@@ -3101,6 +3984,7 @@ class MainActivity : AppCompatActivity() {
       return
     }
     cancelRemoteLongPressDrag()
+    flushPendingRemoteMouseMoveBeforeDiscreteInput()
     val currentSessionId = sessionId
     val point = remoteLastInputPoint
     if (!currentSessionId.isNullOrBlank() && point != null) {
@@ -3110,21 +3994,288 @@ class MainActivity : AppCompatActivity() {
     remoteLongPressDragArmed = false
   }
 
+  private fun updateRemoteLocalCursor(
+    touchX: Float,
+    touchY: Float,
+    sampleAtMs: Long = SystemClock.elapsedRealtime(),
+  ) {
+    val previousAtMs = remoteLastLocalCursorTouchAtMs
+    val predicted = predictRemoteLocalCursor(touchX, touchY, sampleAtMs)
+    remotePendingLocalCursorX = predicted.first
+    remotePendingLocalCursorY = predicted.second
+    remoteLastLocalCursorTouchX = touchX
+    remoteLastLocalCursorTouchY = touchY
+    remoteLastLocalCursorTouchAtMs = sampleAtMs
+    if (previousAtMs <= 0L) {
+      remotePendingLocalCursorX = touchX
+      remotePendingLocalCursorY = touchY
+    }
+    if (remoteLocalCursorApplyScheduled) {
+      return
+    }
+    remoteLocalCursorApplyScheduled = true
+    binding.remoteViewportContainer.postOnAnimation {
+      remoteLocalCursorApplyScheduled = false
+      if (!isActivityAlive) {
+        return@postOnAnimation
+      }
+      applyRemoteLocalCursor(remotePendingLocalCursorX, remotePendingLocalCursorY)
+    }
+  }
+
+  private fun applyRemoteLocalCursor(touchX: Float, touchY: Float) {
+    if (renderedFrameWidth <= 0 || renderedFrameHeight <= 0 || sessionId.isNullOrBlank()) {
+      hideRemoteLocalCursor()
+      return
+    }
+    val cursor = binding.remoteCursorOverlay
+    val cursorWidth = cursor.width.takeIf { it > 0 } ?: dp(18)
+    val cursorHeight = cursor.height.takeIf { it > 0 } ?: dp(18)
+    val viewportWidth = binding.remoteViewportContainer.width.toFloat()
+    val viewportHeight = binding.remoteViewportContainer.height.toFloat()
+    if (viewportWidth <= 0f || viewportHeight <= 0f) {
+      return
+    }
+    remoteLocalCursorHideRunnable?.let { remoteGestureHandler.removeCallbacks(it) }
+    remoteLocalCursorHideRunnable = null
+    // 作者: long；Mac 光标位置仍以远端视频为准，本地指针只反馈手指移动意图；移动事件可能带大量历史点，合并到动画帧后再更新，避免本地 UI 把远端画面渲染挤掉。
+    cursor.translationX = (touchX - cursorWidth / 2f).coerceIn(0f, (viewportWidth - cursorWidth).coerceAtLeast(0f))
+    cursor.translationY = (touchY - cursorHeight / 2f).coerceIn(0f, (viewportHeight - cursorHeight).coerceAtLeast(0f))
+    cursor.alpha = 1f
+    if (cursor.visibility != View.VISIBLE) {
+      cursor.visibility = View.VISIBLE
+    }
+  }
+
+  private fun predictRemoteLocalCursor(touchX: Float, touchY: Float, sampleAtMs: Long): Pair<Float, Float> {
+    val previousAtMs = remoteLastLocalCursorTouchAtMs
+    if (previousAtMs <= 0L || sampleAtMs <= previousAtMs) {
+      return touchX to touchY
+    }
+    val elapsedMs = sampleAtMs - previousAtMs
+    if (elapsedMs > 80L) {
+      return touchX to touchY
+    }
+    val maxPredictionPx = dpFloat(REMOTE_LOCAL_CURSOR_MAX_PREDICTION_DP)
+    val velocityX = (touchX - remoteLastLocalCursorTouchX) / elapsedMs.toFloat()
+    val velocityY = (touchY - remoteLastLocalCursorTouchY) / elapsedMs.toFloat()
+    val predictX = (velocityX * REMOTE_LOCAL_CURSOR_PREDICTION_MS).coerceIn(-maxPredictionPx, maxPredictionPx)
+    val predictY = (velocityY * REMOTE_LOCAL_CURSOR_PREDICTION_MS).coerceIn(-maxPredictionPx, maxPredictionPx)
+    // 作者: long；本地蓝色指针只表示“手指正在把 Mac 光标往这里带”，轻量预测补偿 UI/信令一帧延迟，不改变真实发送到电脑的坐标。
+    return (touchX + predictX) to (touchY + predictY)
+  }
+
+  private fun resetRemoteLocalCursorMotion() {
+    remoteLastLocalCursorTouchX = 0f
+    remoteLastLocalCursorTouchY = 0f
+    remoteLastLocalCursorTouchAtMs = 0L
+  }
+
+  private fun scheduleRemoteLocalCursorHide() {
+    remoteLocalCursorHideRunnable?.let { remoteGestureHandler.removeCallbacks(it) }
+    remoteLocalCursorHideRunnable = Runnable {
+      remoteLocalCursorHideRunnable = null
+      hideRemoteLocalCursor()
+    }.also { runnable ->
+      remoteGestureHandler.postDelayed(runnable, REMOTE_LOCAL_CURSOR_HIDE_DELAY_MS)
+    }
+  }
+
+  private fun hideRemoteLocalCursor() {
+    remoteLocalCursorHideRunnable?.let { remoteGestureHandler.removeCallbacks(it) }
+    remoteLocalCursorHideRunnable = null
+    if (::binding.isInitialized) {
+      binding.remoteCursorOverlay.visibility = View.GONE
+    }
+  }
+
   private fun maybeSendRemoteMouseMove(
     sessionId: String,
     point: NormalizedPoint,
+    sampleAtMs: Long = SystemClock.elapsedRealtime(),
     inputCategory: String = "drag",
+    moveProfile: String = inputCategory,
   ): Boolean {
-    val now = SystemClock.elapsedRealtime()
+    val minDelta = remotePointerMoveMinDelta(moveProfile)
     val lastPoint = remoteLastSentMovePoint
     if (lastPoint != null) {
-      val movedEnough = abs(point.x - lastPoint.x) >= REMOTE_POINTER_MOVE_MIN_DELTA ||
-        abs(point.y - lastPoint.y) >= REMOTE_POINTER_MOVE_MIN_DELTA
-      if (!movedEnough || now - remoteLastSentMoveAtMs < REMOTE_POINTER_MOVE_MIN_INTERVAL_MS) {
+      val movedEnough = abs(point.x - lastPoint.x) >= minDelta ||
+        abs(point.y - lastPoint.y) >= minDelta
+      if (!movedEnough) {
+        return false
+      }
+      val elapsedSinceLastMove = sampleAtMs - remoteLastSentMoveAtMs
+      val minIntervalMs = remotePointerMoveMinIntervalMs(moveProfile)
+      if (elapsedSinceLastMove < minIntervalMs) {
+        scheduleDeferredRemoteMouseMove(
+          sessionId = sessionId,
+          point = point,
+          inputCategory = inputCategory,
+          sampleAtMs = sampleAtMs,
+          delayMs = (minIntervalMs - elapsedSinceLastMove)
+            .coerceAtMost(remotePointerMoveTrailingMaxDelayMs(moveProfile)),
+        )
         return false
       }
     }
-    return sendRemoteMouseMove(sessionId, point, logSuccess = false, force = true, inputCategory = inputCategory)
+    return sendRemoteMouseMove(sessionId, point, logSuccess = false, force = true, inputCategory = inputCategory, sentAtMs = sampleAtMs)
+  }
+
+  private fun remotePointerMoveMinIntervalMs(moveProfile: String): Long =
+    if (moveProfile == "zoom_pan") REMOTE_ZOOM_PAN_POINTER_MOVE_MIN_INTERVAL_MS else REMOTE_POINTER_MOVE_MIN_INTERVAL_MS
+
+  private fun remotePointerMoveMinDelta(moveProfile: String): Double =
+    if (moveProfile == "zoom_pan") REMOTE_ZOOM_PAN_POINTER_MOVE_MIN_DELTA else REMOTE_POINTER_MOVE_MIN_DELTA
+
+  private fun remotePointerMoveTrailingMaxDelayMs(moveProfile: String): Long =
+    if (moveProfile == "zoom_pan") REMOTE_ZOOM_PAN_POINTER_MOVE_TRAILING_MAX_DELAY_MS else REMOTE_POINTER_MOVE_TRAILING_MAX_DELAY_MS
+
+  private fun scheduleDeferredRemoteMouseMove(
+    sessionId: String,
+    point: NormalizedPoint,
+    inputCategory: String,
+    sampleAtMs: Long,
+    delayMs: Long,
+  ) {
+    remotePendingMoveSessionId = sessionId
+    remotePendingMovePoint = point
+    remotePendingMoveCategory = inputCategory
+    remotePendingMoveAtMs = sampleAtMs
+    if (remotePendingMoveRunnable != null) {
+      return
+    }
+    // 作者: long；触摸事件节流时保留最后一个鼠标坐标，延迟任务按真实发送时间落账，避免旧采样时间让下一次 move 被错误节流。
+    remotePendingMoveRunnable = Runnable {
+      val pendingSessionId = remotePendingMoveSessionId
+      val pendingPoint = remotePendingMovePoint
+      val pendingCategory = remotePendingMoveCategory
+      remotePendingMoveSessionId = null
+      remotePendingMovePoint = null
+      remotePendingMoveAtMs = 0L
+      remotePendingMoveRunnable = null
+      if (!pendingSessionId.isNullOrBlank() && pendingSessionId == sessionId && pendingPoint != null) {
+        sendRemoteMouseMove(
+          pendingSessionId,
+          pendingPoint,
+          logSuccess = false,
+          force = true,
+          inputCategory = pendingCategory,
+          sentAtMs = SystemClock.elapsedRealtime(),
+        )
+      }
+    }.also { runnable ->
+      remoteGestureHandler.postDelayed(runnable, delayMs.coerceAtLeast(1L))
+    }
+  }
+
+  private fun scheduleFrameCoalescedRemoteMouseMove(
+    sessionId: String,
+    point: NormalizedPoint,
+    sampleAtMs: Long,
+    inputCategory: String,
+    moveProfile: String = inputCategory,
+  ): Boolean {
+    remoteFrameMoveSessionId = sessionId
+    remoteFrameMovePoint = point
+    remoteFrameMoveCategory = inputCategory
+    remoteFrameMoveProfile = moveProfile
+    remoteFrameMoveAtMs = sampleAtMs
+    if (remoteFrameMoveDispatchScheduled) {
+      return true
+    }
+    remoteFrameMoveDispatchScheduled = true
+    remoteFrameMoveDispatchToken += 1L
+    val dispatchToken = remoteFrameMoveDispatchToken
+    binding.remoteViewportContainer.postOnAnimation {
+      if (dispatchToken != remoteFrameMoveDispatchToken) {
+        return@postOnAnimation
+      }
+      remoteFrameMoveDispatchScheduled = false
+      if (!isActivityAlive) {
+        clearFrameCoalescedRemoteMouseMove()
+        return@postOnAnimation
+      }
+      val pendingSessionId = remoteFrameMoveSessionId
+      val pendingPoint = remoteFrameMovePoint
+      val pendingCategory = remoteFrameMoveCategory
+      val pendingProfile = remoteFrameMoveProfile
+      clearFrameCoalescedRemoteMouseMove()
+      if (!pendingSessionId.isNullOrBlank() && pendingPoint != null) {
+        maybeSendRemoteMouseMove(
+          pendingSessionId,
+          pendingPoint,
+          sampleAtMs = SystemClock.elapsedRealtime(),
+          inputCategory = pendingCategory,
+          moveProfile = pendingProfile,
+        )
+      }
+    }
+    return true
+  }
+
+  private fun clearFrameCoalescedRemoteMouseMove() {
+    remoteFrameMoveSessionId = null
+    remoteFrameMovePoint = null
+    remoteFrameMoveCategory = "pointer"
+    remoteFrameMoveProfile = "pointer"
+    remoteFrameMoveAtMs = 0L
+  }
+
+  private fun cancelFrameCoalescedRemoteMouseMove() {
+    remoteFrameMoveDispatchScheduled = false
+    remoteFrameMoveDispatchToken += 1L
+    clearFrameCoalescedRemoteMouseMove()
+  }
+
+  private fun flushFrameCoalescedRemoteMouseMove() {
+    val pendingSessionId = remoteFrameMoveSessionId
+    val pendingPoint = remoteFrameMovePoint
+    val pendingCategory = remoteFrameMoveCategory
+    val pendingProfile = remoteFrameMoveProfile
+    cancelFrameCoalescedRemoteMouseMove()
+    if (!pendingSessionId.isNullOrBlank() && pendingPoint != null) {
+      // 作者: long；手指抬起时必须立即补当前帧缓存的最后坐标，否则下一次 vsync 可能已经被 reset 清掉，Mac 光标会停在旧位置。
+      maybeSendRemoteMouseMove(
+        pendingSessionId,
+        pendingPoint,
+        sampleAtMs = SystemClock.elapsedRealtime(),
+        inputCategory = pendingCategory,
+        moveProfile = pendingProfile,
+      )
+    }
+  }
+
+  private fun cancelDeferredRemoteMouseMove() {
+    remotePendingMoveRunnable?.let { remoteGestureHandler.removeCallbacks(it) }
+    remotePendingMoveRunnable = null
+    remotePendingMoveSessionId = null
+    remotePendingMovePoint = null
+    remotePendingMoveCategory = "pointer"
+    remotePendingMoveAtMs = 0L
+  }
+
+  private fun flushDeferredRemoteMouseMove() {
+    val pendingSessionId = remotePendingMoveSessionId
+    val pendingPoint = remotePendingMovePoint
+    val pendingCategory = remotePendingMoveCategory
+    cancelDeferredRemoteMouseMove()
+    if (!pendingSessionId.isNullOrBlank() && pendingPoint != null) {
+      // 作者: long；手指抬起前主动补发尾帧，远端光标最终位置才会贴近用户最后停下的位置。
+      sendRemoteMouseMove(
+        pendingSessionId,
+        pendingPoint,
+        logSuccess = false,
+        force = true,
+        inputCategory = pendingCategory,
+        sentAtMs = SystemClock.elapsedRealtime(),
+      )
+    }
+  }
+
+  private fun flushPendingRemoteMouseMoveBeforeDiscreteInput() {
+    // 作者: long；按钮、键盘和滚轮是离散动作，发送前先补齐 Android 本地合并队列里的最后鼠标坐标，避免目标端按键或抬起落在旧位置。
+    flushFrameCoalescedRemoteMouseMove()
+    flushDeferredRemoteMouseMove()
   }
 
   private fun sendRemoteMouseMove(
@@ -3133,6 +4284,7 @@ class MainActivity : AppCompatActivity() {
     logSuccess: Boolean,
     force: Boolean = false,
     inputCategory: String = "",
+    sentAtMs: Long = SystemClock.elapsedRealtime(),
   ): Boolean {
     if (!force) {
       val lastPoint = remoteLastSentMovePoint
@@ -3149,8 +4301,11 @@ class MainActivity : AppCompatActivity() {
       logSuccess = logSuccess,
     )
     if (sent) {
+      if (remotePendingMoveAtMs > 0L && remotePendingMoveAtMs <= sentAtMs) {
+        cancelDeferredRemoteMouseMove()
+      }
       remoteLastSentMovePoint = point
-      remoteLastSentMoveAtMs = SystemClock.elapsedRealtime()
+      remoteLastSentMoveAtMs = sentAtMs
       remoteLastInputPoint = point
     }
     return sent
@@ -3163,11 +4318,14 @@ class MainActivity : AppCompatActivity() {
     action: String,
     logSuccess: Boolean,
     inputCategory: String = "click",
-  ): Boolean = sendSocketMessage(
-    controller.inputButtonMessage(sessionId, point.x, point.y, button, action, inputCategory),
-    "remote drag -> input.mouse.button $button $action",
-    logSuccess = logSuccess,
-  )
+  ): Boolean {
+    flushPendingRemoteMouseMoveBeforeDiscreteInput()
+    return sendSocketMessage(
+      controller.inputButtonMessage(sessionId, point.x, point.y, button, action, inputCategory),
+      "remote drag -> input.mouse.button $button $action",
+      logSuccess = logSuccess,
+    )
+  }
 
   private fun handleRemoteWheelGesture(event: MotionEvent) {
     val currentSessionId = sessionId
@@ -3199,6 +4357,7 @@ class MainActivity : AppCompatActivity() {
       return
     }
 
+    flushPendingRemoteMouseMoveBeforeDiscreteInput()
     val sent = sendSocketMessage(
       controller.inputWheelMessage(currentSessionId, deltaX = filteredDeltaX, deltaY = filteredDeltaY),
       "remote wheel -> input.wheel.scroll dx=$filteredDeltaX dy=$filteredDeltaY",
@@ -3213,6 +4372,599 @@ class MainActivity : AppCompatActivity() {
 
   private fun clampWheelDelta(delta: Int): Int =
     delta.coerceIn(-REMOTE_WHEEL_MAX_ABS_DELTA, REMOTE_WHEEL_MAX_ABS_DELTA)
+
+  private fun handleRemoteViewportManualPinch(event: MotionEvent) {
+    if (event.pointerCount < 2) {
+      return
+    }
+    val span = pointerSpan(event).takeIf { it > 0f } ?: return
+    val focusX = averagePointerX(event)
+    val focusY = averagePointerY(event)
+    if (!remoteManualPinchActive) {
+      remoteManualPinchActive = true
+      remotePinchZoomActive = true
+      remoteScrollGestureActive = false
+      remoteManualPinchLastSpan = remoteMultiTouchStartSpan.takeIf { it > 0f } ?: span
+      remoteAccumulatedPinchScaleFactor = 1f
+      remotePinchFocusX = focusX
+      remotePinchFocusY = focusY
+      remotePinchFocusInitialized = true
+      remoteLastPinchEndHintAtMs = 0L
+      remoteLastPinchEndHintKey = ""
+      prepareRemoteViewportForInteractiveTransform()
+      beginLegacyPinchFrameGate()
+      binding.remoteFrameView.setHighQualityScaling(false)
+      sendRemoteViewportInteractionHint("start", "pinch", force = true)
+      Log.i(
+        RTC_TAG,
+        "remote_manual_pinch_begin span=${String.format(Locale.US, "%.1f", span)} focus=${String.format(Locale.US, "%.1f", focusX)},${String.format(Locale.US, "%.1f", focusY)}",
+      )
+    }
+    val previousSpan = remoteManualPinchLastSpan.takeIf { it > 0f } ?: span
+    remoteManualPinchLastSpan = span
+    val rawScaleFactor = span / previousSpan
+    if (rawScaleFactor <= 0f || rawScaleFactor.isNaN() || rawScaleFactor.isInfinite()) {
+      return
+    }
+    if (abs(rawScaleFactor - 1f) < REMOTE_PINCH_SCALE_EPSILON) {
+      return
+    }
+    if (applyRemoteViewportSourceRectBackedPinch(rawScaleFactor, focusX, focusY, source = "manual")) {
+      return
+    }
+    // 作者: long；部分真机/调试注入不会稳定触发 ScaleGestureDetector，但两指距离变化本身已经足够明确；兜底逻辑复用同一套本地矩阵和 source_rect 高清链路，避免手势被误当成滚轮后完全不缩放。
+    val smoothedScaleFactor = 1f + ((rawScaleFactor - 1f) * REMOTE_PINCH_SCALE_FACTOR_SMOOTHING)
+    val oldScale = remoteViewportScale
+    val nextScale = (oldScale * smoothedScaleFactor)
+      .coerceIn(REMOTE_VIEWPORT_MIN_SCALE, REMOTE_VIEWPORT_MAX_SCALE)
+    if (abs(nextScale - oldScale) < 0.0005f) {
+      return
+    }
+    val ratio = nextScale / oldScale
+    val smoothFocusX = smoothRemotePinchFocusX(focusX)
+    val smoothFocusY = smoothRemotePinchFocusY(focusY)
+    val newOffsetX = smoothFocusX - ((smoothFocusX - remoteViewportOffsetX) * ratio)
+    val newOffsetY = smoothFocusY - ((smoothFocusY - remoteViewportOffsetY) * ratio)
+    remoteViewportScale = nextScale
+    remoteViewportOffsetX = clampRemoteViewportOffsetX(newOffsetX, nextScale)
+    remoteViewportOffsetY = clampRemoteViewportOffsetY(newOffsetY, nextScale)
+    scheduleRemoteViewportTransformApply(commitRenderScale = false)
+    sendRemoteViewportInteractionHint("update", "pinch")
+    val now = SystemClock.elapsedRealtime()
+    if (remoteDebugPinchDispatchActive || now - remoteLastPinchScaleLogAtMs >= 250L) {
+      remoteLastPinchScaleLogAtMs = now
+      Log.i(RTC_TAG, "remote_viewport_pinch_scale scale=${String.format(Locale.US, "%.3f", nextScale)} source=manual")
+    }
+  }
+
+  private fun endRemoteViewportManualPinch(reason: String) {
+    if (!remoteManualPinchActive) {
+      return
+    }
+    remoteManualPinchActive = false
+    remoteManualPinchLastSpan = 0f
+    endLegacyPinchFrameGate(
+      reason = "manual_$reason",
+      keepFullFrameFrozen = remoteViewportScale >= REMOTE_VIEWPORT_DETAIL_RENDER_MIN_SCALE,
+    )
+    binding.remoteFrameView.setHighQualityScaling(shouldUseHighQualityLegacyScaling(remoteFrameSourceRect))
+    if (remoteViewportScale >= REMOTE_VIEWPORT_DETAIL_RENDER_MIN_SCALE) {
+      scheduleRemoteViewportRenderScaleCommit(remoteViewportRenderCommitDelayMs())
+    } else {
+      scheduleRemoteViewportTransformApply(commitRenderScale = false)
+      scheduleRemoteViewportHardwareLayerRelease()
+    }
+    sendRemoteViewportInteractionHint("end", "pinch", force = true)
+    Log.i(
+      RTC_TAG,
+      "remote_manual_pinch_end reason=$reason scale=${String.format(Locale.US, "%.3f", remoteViewportScale)}",
+    )
+  }
+
+  private fun applyRemoteViewportSourceRectBackedPinch(
+    rawScaleFactor: Float,
+    focusX: Float,
+    focusY: Float,
+    source: String,
+  ): Boolean {
+    if (rawScaleFactor >= 1f || remoteViewportScale > REMOTE_VIEWPORT_MIN_SCALE + 0.005f) {
+      return false
+    }
+    val baseRect = selectRemoteSourceRectBackedPinchBaseRect()
+      ?: return false
+    if (!isMaterializedRemoteFrameSourceRect(baseRect)) {
+      return false
+    }
+    val firstSourceRectBackedPinch =
+      remotePinchViewportSourceRect == null && remotePinchViewportLargestSourceRect == null
+    val smoothedScaleFactor = 1f + ((rawScaleFactor - 1f) * REMOTE_PINCH_SCALE_FACTOR_SMOOTHING)
+    if (smoothedScaleFactor >= 0.9995f) {
+      return false
+    }
+    val focusPoint = mapTouchToFrameInSourceRect(
+      binding.remoteTouchLayer,
+      focusX,
+      focusY,
+      baseRect,
+    ) ?: NormalizedPoint(
+      x = (baseRect.x + baseRect.width / 2.0).coerceIn(0.0, 1.0),
+      y = (baseRect.y + baseRect.height / 2.0).coerceIn(0.0, 1.0),
+    )
+    val nextRect = scaleRemoteViewportSourceRectAroundFocus(
+      baseRect = baseRect,
+      focusPoint = focusPoint,
+      scaleFactor = smoothedScaleFactor,
+    )
+    val changedEnough = abs(nextRect.x - baseRect.x) >= 0.00005 ||
+      abs(nextRect.y - baseRect.y) >= 0.00005 ||
+      abs(nextRect.width - baseRect.width) >= 0.00005 ||
+      abs(nextRect.height - baseRect.height) >= 0.00005
+    if (!changedEnough) {
+      return false
+    }
+    remotePinchZoomActive = true
+    remotePinchViewportSourceRect = nextRect
+    remotePinchViewportLargestSourceRect = selectLargerRemoteViewportSourceRect(
+      remotePinchViewportLargestSourceRect,
+      nextRect,
+    )
+    updateRemoteSourceRectPreviewTransform(
+      currentRect = remoteFrameSourceRect,
+      targetRect = nextRect,
+    )
+    remoteViewportScale = REMOTE_VIEWPORT_MIN_SCALE
+    remoteViewportOffsetX = 0f
+    remoteViewportOffsetY = 0f
+    remoteViewportRenderScale = remoteViewportBaseRenderScale()
+    remoteViewportRenderBoundsDirty = true
+    scheduleRemoteViewportTransformApply(commitRenderScale = false)
+    // 作者: long；局部高清缩小时本地倍率已经是 1x，没有可见 transform 兜底；首次扩大 source_rect 必须绕过 start 事件留下的节流窗口，短捏合才会立刻回传更大的裁剪源。
+    sendRemoteViewportInteractionHint("update", "pinch", force = firstSourceRectBackedPinch)
+    val now = SystemClock.elapsedRealtime()
+    if (remoteDebugPinchDispatchActive || now - remoteLastPinchScaleLogAtMs >= 250L) {
+      remoteLastPinchScaleLogAtMs = now
+      Log.i(
+        RTC_TAG,
+        "remote_viewport_source_rect_pinch scale=${String.format(Locale.US, "%.3f", remoteViewportInteractionScale(nextRect, requestFullViewport = false))} source=$source rect=${formatSourceRectForLog(nextRect)} preview_scale=${String.format(Locale.US, "%.3f", remoteSourceRectPreviewScale)}",
+      )
+    }
+    return true
+  }
+
+  private fun selectRemoteSourceRectBackedPinchBaseRect(): NormalizedRect? {
+    val candidates = listOfNotNull(
+      remotePinchViewportSourceRect,
+      remotePinchViewportLargestSourceRect,
+      currentRemoteViewportVisibleRect(),
+      remoteFrameSourceRect,
+    ).filter { rect -> isMaterializedRemoteFrameSourceRect(rect) }
+    if (candidates.isEmpty()) {
+      return null
+    }
+    // 作者: long；并拢缩小时只能从本轮已经展开过的最大局部继续扩大，不能让 Mac 延迟回来的较小中间帧把手势目标拉回去。
+    return candidates.maxWithOrNull(
+      compareBy<NormalizedRect> { rect -> rect.width * rect.height }
+        .thenBy { rect -> maxOf(rect.width, rect.height) },
+    )
+  }
+
+  private fun selectLargerRemoteViewportSourceRect(
+    current: NormalizedRect?,
+    candidate: NormalizedRect,
+  ): NormalizedRect {
+    val existing = current ?: return candidate
+    val existingArea = existing.width * existing.height
+    val candidateArea = candidate.width * candidate.height
+    return if (
+      candidateArea > existingArea + 0.0000005 ||
+        (abs(candidateArea - existingArea) <= 0.0000005 && maxOf(candidate.width, candidate.height) > maxOf(existing.width, existing.height))
+    ) {
+      candidate
+    } else {
+      existing
+    }
+  }
+
+  private fun updateRemoteSourceRectPreviewTransform(
+    currentRect: NormalizedRect,
+    targetRect: NormalizedRect,
+  ): Boolean {
+    if (!isMaterializedRemoteFrameSourceRect(currentRect) || !isMaterializedRemoteFrameSourceRect(targetRect)) {
+      return resetRemoteSourceRectPreviewTransform()
+    }
+    val viewportWidth = binding.remoteViewportContainer.width.toFloat()
+    val viewportHeight = binding.remoteViewportContainer.height.toFloat()
+    if (viewportWidth <= 1f || viewportHeight <= 1f || targetRect.width <= 0.0 || targetRect.height <= 0.0) {
+      return resetRemoteSourceRectPreviewTransform()
+    }
+    val widthRatio = (currentRect.width / targetRect.width).toFloat()
+    val heightRatio = (currentRect.height / targetRect.height).toFloat()
+    val previewScale = min(widthRatio, heightRatio).takeIf { !it.isNaN() && !it.isInfinite() }
+      ?.coerceIn(0.18f, 1f)
+      ?: return resetRemoteSourceRectPreviewTransform()
+    if (previewScale >= 0.995f) {
+      return resetRemoteSourceRectPreviewTransform()
+    }
+    // 作者: long；本地只有当前局部帧，不能凭空显示目标 rect 外的新内容；先按当前帧在目标 rect 里的相对位置缩小摆放，手势会立即有视觉反馈，真实内容随后由 Mac 回传补齐。
+    val currentCenterX = currentRect.x + currentRect.width / 2.0
+    val currentCenterY = currentRect.y + currentRect.height / 2.0
+    val targetRelativeCenterX = ((currentCenterX - targetRect.x) / targetRect.width)
+      .takeIf { !it.isNaN() && !it.isInfinite() }
+      ?.coerceIn(0.0, 1.0)
+      ?: 0.5
+    val targetRelativeCenterY = ((currentCenterY - targetRect.y) / targetRect.height)
+      .takeIf { !it.isNaN() && !it.isInfinite() }
+      ?.coerceIn(0.0, 1.0)
+      ?: 0.5
+    val nextOffsetX = (targetRelativeCenterX.toFloat() * viewportWidth) - (viewportWidth * previewScale / 2f)
+    val nextOffsetY = (targetRelativeCenterY.toFloat() * viewportHeight) - (viewportHeight * previewScale / 2f)
+    val changed = abs(remoteSourceRectPreviewScale - previewScale) >= 0.002f ||
+      abs(remoteSourceRectPreviewOffsetX - nextOffsetX) >= 0.5f ||
+      abs(remoteSourceRectPreviewOffsetY - nextOffsetY) >= 0.5f
+    remoteSourceRectPreviewScale = previewScale
+    remoteSourceRectPreviewOffsetX = nextOffsetX
+    remoteSourceRectPreviewOffsetY = nextOffsetY
+    return changed
+  }
+
+  private fun resetRemoteSourceRectPreviewTransform(): Boolean {
+    val changed = abs(remoteSourceRectPreviewScale - 1f) >= 0.002f ||
+      abs(remoteSourceRectPreviewOffsetX) >= 0.5f ||
+      abs(remoteSourceRectPreviewOffsetY) >= 0.5f
+    remoteSourceRectPreviewScale = 1f
+    remoteSourceRectPreviewOffsetX = 0f
+    remoteSourceRectPreviewOffsetY = 0f
+    return changed
+  }
+
+  private fun scaleRemoteViewportSourceRectAroundFocus(
+    baseRect: NormalizedRect,
+    focusPoint: NormalizedPoint,
+    scaleFactor: Float,
+  ): NormalizedRect {
+    val safeScale = scaleFactor.toDouble().coerceIn(0.2, 5.0)
+    val focusRatioX = ((focusPoint.x - baseRect.x) / baseRect.width)
+      .takeIf { !it.isNaN() && !it.isInfinite() }
+      ?.coerceIn(0.0, 1.0)
+      ?: 0.5
+    val focusRatioY = ((focusPoint.y - baseRect.y) / baseRect.height)
+      .takeIf { !it.isNaN() && !it.isInfinite() }
+      ?.coerceIn(0.0, 1.0)
+      ?: 0.5
+    val nextWidth = (baseRect.width / safeScale).coerceIn(REMOTE_VIEWPORT_MIN_SOURCE_RECT_SIZE, 1.0)
+    val nextHeight = (baseRect.height / safeScale).coerceIn(REMOTE_VIEWPORT_MIN_SOURCE_RECT_SIZE, 1.0)
+    // 作者: long；局部高清已经物化后，本地倍率回到 1x；两指并拢应扩大 Mac 裁剪源而不是被本地 1x 下限吞掉，焦点比例保持不变才能让用户感觉是在“从当前手指中心缩小”。
+    return clampRemoteViewportSourceRect(
+      NormalizedRect(
+        x = focusPoint.x - (nextWidth * focusRatioX),
+        y = focusPoint.y - (nextHeight * focusRatioY),
+        width = nextWidth,
+        height = nextHeight,
+      ),
+    )
+  }
+
+  private fun handleRemoteViewportTwoFingerPan(event: MotionEvent) {
+    val focusX = averagePointerX(event)
+    val focusY = averagePointerY(event)
+    if (!remoteScrollGestureActive) {
+      remoteScrollGestureActive = true
+      remoteScrollLastFocusX = focusX
+      remoteScrollLastFocusY = focusY
+      sendRemoteViewportInteractionHint("start", "pan", force = true)
+      return
+    }
+    val dx = focusX - remoteScrollLastFocusX
+    val dy = focusY - remoteScrollLastFocusY
+    val movedEnough = abs(dx) > 0.5f || abs(dy) > 0.5f
+    if (!movedEnough) {
+      return
+    }
+    // 作者: long；放大后的视口平移只改变本地观察区域，不向电脑发送输入，防止用户两指找局部内容时误触远端滚轮或鼠标。
+    remoteViewportOffsetX = clampRemoteViewportOffsetX(remoteViewportOffsetX + dx, remoteViewportScale)
+    remoteViewportOffsetY = clampRemoteViewportOffsetY(remoteViewportOffsetY + dy, remoteViewportScale)
+    scheduleRemoteViewportTransformApply()
+    sendRemoteViewportInteractionHint("update", "pan")
+    remoteScrollLastFocusX = focusX
+    remoteScrollLastFocusY = focusY
+  }
+
+  private fun handleZoomedViewportPanFromMouseMove(imageView: View, touchX: Float, touchY: Float): Boolean {
+    val viewportWidth = imageView.width.toFloat()
+    val viewportHeight = imageView.height.toFloat()
+    if (viewportWidth <= 0f || viewportHeight <= 0f) {
+      return false
+    }
+    val isLocalZoomed = remoteViewportScale > REMOTE_ZOOM_MOUSE_VIEWPORT_PAN_MIN_SCALE
+    val isSourceRectZoomed = isMaterializedRemoteFrameSourceRect(remoteFrameSourceRect)
+    if (!isLocalZoomed && !isSourceRectZoomed) {
+      return false
+    }
+
+    val dragPanX = (touchX - remoteLastTouchX) * REMOTE_ZOOM_MOUSE_VIEWPORT_DRAG_PAN_FACTOR
+    val dragPanY = (touchY - remoteLastTouchY) * REMOTE_ZOOM_MOUSE_VIEWPORT_DRAG_PAN_FACTOR
+    val edgePanX = remoteMouseViewportEdgePan(touchX, viewportWidth)
+    val edgePanY = remoteMouseViewportEdgePan(touchY, viewportHeight)
+    val sourcePanX = dragPanX + edgePanX
+    val sourcePanY = dragPanY + edgePanY
+    if (abs(sourcePanX) < 0.35f && abs(sourcePanY) < 0.35f) {
+      return false
+    }
+
+    var moved = false
+    if (isLocalZoomed) {
+      val nextOffsetX = clampRemoteViewportOffsetX(remoteViewportOffsetX - sourcePanX, remoteViewportScale)
+      val nextOffsetY = clampRemoteViewportOffsetY(remoteViewportOffsetY - sourcePanY, remoteViewportScale)
+      moved = abs(nextOffsetX - remoteViewportOffsetX) >= 0.1f || abs(nextOffsetY - remoteViewportOffsetY) >= 0.1f
+      if (moved) {
+        remoteViewportOffsetX = nextOffsetX
+        remoteViewportOffsetY = nextOffsetY
+        scheduleRemoteViewportTransformApply()
+      }
+    } else if (isSourceRectZoomed) {
+      val baseRect = remoteMouseViewportPanSourceRect
+        ?: currentRemoteViewportVisibleRect()
+        ?: remoteFrameSourceRect
+      val shiftX = sourcePanX.toDouble() / viewportWidth.toDouble() * baseRect.width
+      val shiftY = sourcePanY.toDouble() / viewportHeight.toDouble() * baseRect.height
+      val nextRect = clampRemoteViewportSourceRect(
+        baseRect.copy(
+          x = baseRect.x + shiftX,
+          y = baseRect.y + shiftY,
+        ),
+      )
+      moved = abs(nextRect.x - baseRect.x) >= 0.00005 ||
+        abs(nextRect.y - baseRect.y) >= 0.00005
+      if (moved) {
+        remoteMouseViewportPanSourceRect = nextRect
+      }
+    }
+
+    if (!moved) {
+      return false
+    }
+    // 作者: long；放大后的单指移动同时驱动 Mac 鼠标和观察窗口：本地未物化时先平移 transform，局部高清已物化后把期望 source_rect 发回 Mac 重新裁剪。
+    remotePanMoved = true
+    sendRemoteViewportInteractionHint("update", "pan")
+    return true
+  }
+
+  private fun remoteMouseViewportEdgePan(position: Float, size: Float): Float {
+    if (size <= 0f) {
+      return 0f
+    }
+    val edgeZone = dpFloat(REMOTE_ZOOM_MOUSE_VIEWPORT_EDGE_ZONE_DP).coerceAtMost(size / 2f)
+    if (edgeZone <= 1f) {
+      return 0f
+    }
+    val maxStep = dpFloat(REMOTE_ZOOM_MOUSE_VIEWPORT_EDGE_MAX_STEP_DP)
+    return when {
+      position < edgeZone -> -maxStep * ((edgeZone - position) / edgeZone).coerceIn(0f, 1f)
+      position > size - edgeZone -> maxStep * ((position - (size - edgeZone)) / edgeZone).coerceIn(0f, 1f)
+      else -> 0f
+    }
+  }
+
+  private fun sendRemoteViewportInteractionHint(
+    phase: String,
+    interaction: String,
+    force: Boolean = false,
+  ): Boolean {
+    val currentSessionId = sessionId?.trim().orEmpty()
+    if (currentSessionId.isBlank()) {
+      return false
+    }
+    val now = SystemClock.elapsedRealtime()
+    if (!force && phase == "update") {
+      val minIntervalMs = when (interaction) {
+        "pinch" -> REMOTE_VIEWPORT_PINCH_HINT_INTERVAL_MS
+        "pan" -> REMOTE_VIEWPORT_PAN_HINT_INTERVAL_MS
+        else -> REMOTE_VIEWPORT_INTERACTION_HINT_INTERVAL_MS
+      }
+      if (now - remoteLastViewportInteractionHintAtMs < minIntervalMs) {
+        return false
+      }
+    }
+    remoteLastViewportInteractionHintAtMs = now
+    val pinchSourceRect = remotePinchViewportSourceRect
+    val pinchSourceRectRequestsFullViewport =
+      interaction == "pinch" &&
+        phase == "end" &&
+        pinchSourceRect != null &&
+        !isMaterializedRemoteFrameSourceRect(pinchSourceRect)
+    val shouldRequestFullViewport =
+      interaction == "pinch" &&
+        phase == "end" &&
+        remoteViewportScale <= REMOTE_VIEWPORT_MIN_SCALE + 0.005f &&
+        (pinchSourceRect == null || pinchSourceRectRequestsFullViewport)
+    val visibleRect = if (shouldRequestFullViewport) {
+      // 作者: long；用户把远控画面缩回 1x 时，Mac 端也要恢复完整桌面采集，否则 Android 只是在局部 source_rect 上做了本地 1x，后续画面仍会停在局部。
+      NormalizedRect(0.0, 0.0, 1.0, 1.0)
+    } else if (interaction == "pinch" && pinchSourceRect != null) {
+      pinchSourceRect
+    } else if (interaction == "pan" && remoteMouseViewportPanSourceRect != null) {
+      remoteMouseViewportPanSourceRect
+    } else {
+      currentRemoteViewportVisibleRect()
+    }
+    val focusPoint = if (shouldRequestFullViewport) {
+      NormalizedPoint(0.5, 0.5)
+    } else {
+      currentRemoteViewportFocusPoint(visibleRect)
+    }
+    val safeVisibleRect = visibleRect?.let { clampRemoteViewportSourceRect(it) }
+    val safeFocusPoint = focusPoint?.let { point ->
+      NormalizedPoint(point.x.coerceIn(0.0, 1.0), point.y.coerceIn(0.0, 1.0))
+    }
+    val interactionScale = remoteViewportInteractionScale(safeVisibleRect, shouldRequestFullViewport)
+    val pinchEndHintKey = if (interaction == "pinch" && phase == "end") {
+      remoteViewportPinchEndHintKey(currentSessionId, interactionScale, safeVisibleRect, safeFocusPoint)
+    } else {
+      ""
+    }
+    if (
+      pinchEndHintKey.isNotBlank() &&
+      pinchEndHintKey == remoteLastPinchEndHintKey &&
+      now - remoteLastPinchEndHintAtMs <= REMOTE_VIEWPORT_PINCH_END_DEDUPE_MS
+    ) {
+      Log.i(RTC_TAG, "remote_viewport_pinch_end_deduped key=$pinchEndHintKey")
+      return false
+    }
+    // 作者: long；双指缩放、平移和放大后的鼠标移动都是视口操作；上报完整桌面归一化 source_rect，并限制最小窗口，避免最大缩放递归裁到极小区域后触发崩溃或严重卡顿。
+    val sent = sendSocketMessage(
+      controller.viewportInteractionMessage(
+        sessionId = currentSessionId,
+        phase = phase,
+        interaction = interaction,
+        scale = interactionScale,
+        viewportX = safeVisibleRect?.x,
+        viewportY = safeVisibleRect?.y,
+        viewportWidth = safeVisibleRect?.width,
+        viewportHeight = safeVisibleRect?.height,
+        focusX = safeFocusPoint?.x,
+        focusY = safeFocusPoint?.y,
+      ),
+      "remote viewport $interaction $phase",
+      logSuccess = false,
+    )
+    if (sent && pinchEndHintKey.isNotBlank()) {
+      remoteLastPinchEndHintAtMs = now
+      remoteLastPinchEndHintKey = pinchEndHintKey
+    }
+    if (sent && safeVisibleRect != null) {
+      applyExpectedRemoteSourceRectFromViewportHint(
+        sourceRect = safeVisibleRect,
+        interaction = interaction,
+        phase = phase,
+      )
+    }
+    return sent
+  }
+
+  private fun applyExpectedRemoteSourceRectFromViewportHint(
+    sourceRect: NormalizedRect,
+    interaction: String,
+    phase: String,
+  ) {
+    if (Looper.myLooper() != Looper.getMainLooper()) {
+      runOnUiThread {
+        if (isActivityAlive) {
+          applyExpectedRemoteSourceRectFromViewportHint(sourceRect, interaction, phase)
+        }
+      }
+      return
+    }
+    val previousSourceRect = remoteFrameSourceRect
+    if (previousSourceRect == sourceRect) {
+      return
+    }
+    val viewportReset = materializeRemoteFrameSourceRect(sourceRect)
+    val previewTarget = if (remotePinchZoomActive) {
+      remotePinchViewportLargestSourceRect ?: remotePinchViewportSourceRect
+    } else {
+      null
+    }
+    val previewChanged = previewTarget != null &&
+      updateRemoteSourceRectPreviewTransform(sourceRect, previewTarget)
+    remoteFrameSourceRect = sourceRect
+    if (!isMaterializedRemoteFrameSourceRect(sourceRect)) {
+      remoteMouseViewportPanSourceRect = null
+      remotePinchViewportSourceRect = null
+      remotePinchViewportLargestSourceRect = null
+      resetRemoteSourceRectPreviewTransform()
+    }
+    // 作者: long；H.264 帧没有 legacy 的 source_rect 元数据，viewport hint 一旦发出就把本地坐标基准同步到预期裁剪源，否则高清裁剪后触摸仍会按整屏映射。
+    if (viewportReset) {
+      applyRemoteViewportTransform(commitRenderScale = false)
+    } else if (previewChanged) {
+      scheduleRemoteViewportTransformApply(commitRenderScale = false)
+    }
+    Log.i(
+      RTC_TAG,
+      "remote_viewport_source_rect_expected interaction=$interaction phase=$phase from=${formatSourceRectForLog(previousSourceRect)} to=${formatSourceRectForLog(sourceRect)} reset=$viewportReset preview_changed=$previewChanged",
+    )
+  }
+
+  private fun remoteViewportPinchEndHintKey(
+    currentSessionId: String,
+    interactionScale: Float,
+    safeVisibleRect: NormalizedRect?,
+    safeFocusPoint: NormalizedPoint?,
+  ): String {
+    val rect = safeVisibleRect ?: NormalizedRect(0.0, 0.0, 1.0, 1.0)
+    val focus = safeFocusPoint ?: NormalizedPoint(0.5, 0.5)
+    // 作者: long；同一次松手可能同时走系统 ScaleGestureDetector 和手动兜底链路，按最终视口内容去重，避免 Mac 端重复切采集配置。
+    return listOf(
+      currentSessionId,
+      String.format(Locale.US, "%.3f", interactionScale),
+      String.format(Locale.US, "%.4f", rect.x),
+      String.format(Locale.US, "%.4f", rect.y),
+      String.format(Locale.US, "%.4f", rect.width),
+      String.format(Locale.US, "%.4f", rect.height),
+      String.format(Locale.US, "%.4f", focus.x),
+      String.format(Locale.US, "%.4f", focus.y),
+    ).joinToString(separator = "|")
+  }
+
+  private fun remoteViewportInteractionScale(visibleRect: NormalizedRect?, requestFullViewport: Boolean): Float {
+    if (requestFullViewport || visibleRect == null) {
+      return REMOTE_VIEWPORT_MIN_SCALE
+    }
+    val localScale = remoteViewportScale.coerceIn(REMOTE_VIEWPORT_MIN_SCALE, REMOTE_VIEWPORT_MAX_SCALE)
+    val sourceRectScale = if (visibleRect.width < 0.999 || visibleRect.height < 0.999) {
+      (1.0 / maxOf(visibleRect.width, visibleRect.height)).toFloat()
+        .coerceIn(REMOTE_VIEWPORT_DETAIL_RENDER_MIN_SCALE, REMOTE_VIEWPORT_MAX_SCALE)
+    } else {
+      REMOTE_VIEWPORT_MIN_SCALE
+    }
+    // 作者: long；局部高清物化后 Android 本地矩阵会回到 1x，但 Mac 仍要知道当前处在放大视角，否则单指移动窗口视角时会被受控端错误恢复成整屏采集。
+    return maxOf(localScale, sourceRectScale)
+  }
+
+  private fun remoteMultiTouchSpanChanged(event: MotionEvent): Boolean {
+    if (event.pointerCount < 2) {
+      return false
+    }
+    val startSpan = remoteMultiTouchStartSpan.takeIf { it > 0f } ?: return false
+    // 作者: long；两指滚动和两指缩放都从多点触控开始，只有指距变化超过触摸阈值时才切到缩放，避免轻微抖动抢走滚轮。
+    return abs(pointerSpan(event) - startSpan) > remoteTouchSlopPx
+  }
+
+  private fun smoothRemotePinchFocusX(rawFocusX: Float): Float {
+    if (!remotePinchFocusInitialized) {
+      remotePinchFocusX = rawFocusX
+      remotePinchFocusInitialized = true
+      return rawFocusX
+    }
+    // 作者: long；真机两指中心点需要保留抗抖，但全屏放大时焦点跟随太慢会像拖影，响应比例偏高让画面更贴住手势移动。
+    remotePinchFocusX += (rawFocusX - remotePinchFocusX) * REMOTE_PINCH_FOCUS_SMOOTHING
+    return remotePinchFocusX
+  }
+
+  private fun smoothRemotePinchFocusY(rawFocusY: Float): Float {
+    if (!remotePinchFocusInitialized) {
+      remotePinchFocusY = rawFocusY
+      remotePinchFocusInitialized = true
+      return rawFocusY
+    }
+    remotePinchFocusY += (rawFocusY - remotePinchFocusY) * REMOTE_PINCH_FOCUS_SMOOTHING
+    return remotePinchFocusY
+  }
+
+  private fun resetRemotePinchFocus() {
+    remotePinchFocusX = 0f
+    remotePinchFocusY = 0f
+    remotePinchFocusInitialized = false
+  }
+
+  private fun pointerSpan(event: MotionEvent): Float {
+    if (event.pointerCount < 2) {
+      return 0f
+    }
+    val dx = event.getX(0) - event.getX(1)
+    val dy = event.getY(0) - event.getY(1)
+    return kotlin.math.sqrt(((dx * dx) + (dy * dy)).toDouble()).toFloat()
+  }
 
   private fun averagePointerX(event: MotionEvent): Float {
     if (event.pointerCount <= 0) {
@@ -3263,6 +5015,15 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun mapTouchToFrame(imageView: View, touchX: Float, touchY: Float): NormalizedPoint? {
+    return mapTouchToFrameInSourceRect(imageView, touchX, touchY, remoteFrameSourceRect)
+  }
+
+  private fun mapTouchToFrameInSourceRect(
+    imageView: View,
+    touchX: Float,
+    touchY: Float,
+    sourceRect: NormalizedRect,
+  ): NormalizedPoint? {
     val frameWidth = renderedFrameWidth
     val frameHeight = renderedFrameHeight
     if (frameWidth <= 0 || frameHeight <= 0) {
@@ -3295,9 +5056,104 @@ class MainActivity : AppCompatActivity() {
       return null
     }
 
+    val localX = ((mappedTouchX - left) / displayedWidth).coerceIn(0f, 1f).toDouble()
+    val localY = ((mappedTouchY - top) / displayedHeight).coerceIn(0f, 1f).toDouble()
+    // 作者: long；Mac 端可能只回传手机当前放大的局部桌面帧，输入仍必须还原到完整桌面归一化坐标，避免局部高清后鼠标点击整体偏移。
     return NormalizedPoint(
-      x = ((mappedTouchX - left) / displayedWidth).coerceIn(0f, 1f).toDouble(),
-      y = ((mappedTouchY - top) / displayedHeight).coerceIn(0f, 1f).toDouble(),
+      x = (sourceRect.x + localX * sourceRect.width).coerceIn(0.0, 1.0),
+      y = (sourceRect.y + localY * sourceRect.height).coerceIn(0.0, 1.0),
+    )
+  }
+
+  private fun currentRemoteViewportVisibleRect(): NormalizedRect? {
+    val imageView = binding.remoteTouchLayer
+    val frameWidth = renderedFrameWidth
+    val frameHeight = renderedFrameHeight
+    if (frameWidth <= 0 || frameHeight <= 0) {
+      return null
+    }
+    val contentWidth = imageView.width - imageView.paddingLeft - imageView.paddingRight
+    val contentHeight = imageView.height - imageView.paddingTop - imageView.paddingBottom
+    if (contentWidth <= 0 || contentHeight <= 0) {
+      return null
+    }
+    val fitScale = min(
+      contentWidth.toFloat() / frameWidth.toFloat(),
+      contentHeight.toFloat() / frameHeight.toFloat(),
+    )
+    if (fitScale <= 0f) {
+      return null
+    }
+
+    val displayedWidth = frameWidth * fitScale
+    val displayedHeight = frameHeight * fitScale
+    val frameLeft = imageView.paddingLeft + (contentWidth - displayedWidth) / 2f
+    val frameTop = imageView.paddingTop + (contentHeight - displayedHeight) / 2f
+    val frameRight = frameLeft + displayedWidth
+    val frameBottom = frameTop + displayedHeight
+    val sourceRect = remoteFrameSourceRect
+    val visibleLeft = (imageView.paddingLeft.toFloat() - remoteViewportOffsetX) / remoteViewportScale
+    val visibleTop = (imageView.paddingTop.toFloat() - remoteViewportOffsetY) / remoteViewportScale
+    val visibleRight = (imageView.paddingLeft.toFloat() + contentWidth - remoteViewportOffsetX) / remoteViewportScale
+    val visibleBottom = (imageView.paddingTop.toFloat() + contentHeight - remoteViewportOffsetY) / remoteViewportScale
+    val clippedLeft = maxOf(visibleLeft, frameLeft)
+    val clippedTop = maxOf(visibleTop, frameTop)
+    val clippedRight = minOf(visibleRight, frameRight)
+    val clippedBottom = minOf(visibleBottom, frameBottom)
+    if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) {
+      return null
+    }
+
+    // 作者: long；这里输出的是完整电脑桌面里的可见区域，不是手机 View 像素；后续 Mac 端按这个区域裁剪采集时，Android 输入坐标仍能沿用完整桌面归一化坐标。
+    val localX = ((clippedLeft - frameLeft) / displayedWidth).coerceIn(0f, 1f).toDouble()
+    val localY = ((clippedTop - frameTop) / displayedHeight).coerceIn(0f, 1f).toDouble()
+    val localWidth = ((clippedRight - clippedLeft) / displayedWidth).coerceIn(0f, 1f - localX.toFloat()).toDouble()
+    val localHeight = ((clippedBottom - clippedTop) / displayedHeight).coerceIn(0f, 1f - localY.toFloat()).toDouble()
+    return NormalizedRect(
+      x = (sourceRect.x + localX * sourceRect.width).coerceIn(0.0, 1.0),
+      y = (sourceRect.y + localY * sourceRect.height).coerceIn(0.0, 1.0),
+      width = (localWidth * sourceRect.width).coerceIn(0.0, 1.0),
+      height = (localHeight * sourceRect.height).coerceIn(0.0, 1.0),
+    )
+  }
+
+  private fun clampRemoteViewportSourceRect(rect: NormalizedRect): NormalizedRect {
+    val requestedWidth = if (rect.width > 0.0 && rect.width <= 1.0) rect.width else 1.0
+    val requestedHeight = if (rect.height > 0.0 && rect.height <= 1.0) rect.height else 1.0
+    val safeWidth = requestedWidth
+      .coerceAtLeast(REMOTE_VIEWPORT_MIN_SOURCE_RECT_SIZE)
+      .coerceAtMost(1.0)
+    val safeHeight = requestedHeight
+      .coerceAtLeast(REMOTE_VIEWPORT_MIN_SOURCE_RECT_SIZE)
+      .coerceAtMost(1.0)
+    val requestedX = if (rect.x >= 0.0 && rect.x <= 1.0) rect.x else 0.0
+    val requestedY = if (rect.y >= 0.0 && rect.y <= 1.0) rect.y else 0.0
+    val centerX = (requestedX + requestedWidth / 2.0).coerceIn(0.0, 1.0)
+    val centerY = (requestedY + requestedHeight / 2.0).coerceIn(0.0, 1.0)
+    val maxX = (1.0 - safeWidth).coerceAtLeast(0.0)
+    val maxY = (1.0 - safeHeight).coerceAtLeast(0.0)
+    // 作者: long；最大缩放时不能把 Mac 采集源递归裁到过小区域，保留用户视角中心并夹紧最小窗口，避免极小 JPEG/Bitmap 抖动诱发闪退或严重卡顿。
+    return NormalizedRect(
+      x = (centerX - safeWidth / 2.0).coerceIn(0.0, maxX),
+      y = (centerY - safeHeight / 2.0).coerceIn(0.0, maxY),
+      width = safeWidth,
+      height = safeHeight,
+    )
+  }
+
+  private fun currentRemoteViewportFocusPoint(visibleRect: NormalizedRect?): NormalizedPoint? {
+    val touchFocus = if (remotePinchFocusInitialized) {
+      mapTouchToFrame(binding.remoteTouchLayer, remotePinchFocusX, remotePinchFocusY)
+    } else {
+      null
+    }
+    if (touchFocus != null) {
+      return touchFocus
+    }
+    val rect = visibleRect ?: return null
+    return NormalizedPoint(
+      x = (rect.x + rect.width / 2.0).coerceIn(0.0, 1.0),
+      y = (rect.y + rect.height / 2.0).coerceIn(0.0, 1.0),
     )
   }
 
@@ -3354,6 +5210,9 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun initializeRemoteKeyboardControls() {
+    binding.remoteKeyboardPanelButton.setOnClickListener {
+      showRemoteKeyboardDialog()
+    }
     binding.remoteKeyboardSendButton.setOnClickListener {
       val text = binding.remoteKeyboardInput.text?.toString().orEmpty()
       if (sendRemoteKeyboardText(text)) {
@@ -3408,6 +5267,1326 @@ class MainActivity : AppCompatActivity() {
       }
     }
   }
+
+  private fun initializeSessionToolControls() {
+    binding.remoteClipboardSendButton.setOnClickListener {
+      sendAndroidClipboardToRemote()
+    }
+    binding.remoteFileSendButton.setOnClickListener {
+      if (sessionId.isNullOrBlank()) {
+        updateRemoteTransferStatus("剪贴板/文件：请先建立会话")
+        return@setOnClickListener
+      }
+      remoteFilePicker.launch(arrayOf("*/*"))
+    }
+  }
+
+  private fun handleExternalShareIntent(intent: Intent?) {
+    val action = intent?.action ?: return
+    if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) {
+      return
+    }
+    val sharedUris = extractSharedFileUris(intent)
+    val sharedText = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()
+    if (sharedUris.isEmpty() && sharedText.isBlank()) {
+      updateRemoteTransferStatus("分享：没有可发送的文本或文件")
+      return
+    }
+
+    if (sharedText.isNotBlank()) {
+      pendingSharedClipboardText = sharedText
+    }
+    sharedUris.forEach { uri ->
+      persistSharedReadPermissionIfPossible(intent, uri)
+      pendingSharedFileUris.addLast(uri)
+    }
+    updateRemoteTransferStatus(
+      "分享：已接收 ${if (sharedText.isNotBlank()) "文本" else ""}${if (sharedUris.isNotEmpty()) " ${sharedUris.size} 个文件" else ""}".trim(),
+    )
+    processPendingSharedTools()
+  }
+
+  private fun processPendingSharedTools() {
+    if (pendingSharedClipboardText.isNullOrBlank() && pendingSharedFileUris.isEmpty()) {
+      return
+    }
+    if (sessionId.isNullOrBlank()) {
+      updateRemoteTransferStatus("分享：等待建立会话后发送")
+      return
+    }
+
+    pendingSharedClipboardText?.takeIf { it.isNotBlank() }?.let { text ->
+      pendingSharedClipboardText = null
+      sendAndroidClipboardTextToRemote(text)
+    }
+    while (pendingSharedFileUris.isNotEmpty()) {
+      sendAndroidFileToRemote(pendingSharedFileUris.removeFirst())
+    }
+  }
+
+  private fun extractSharedFileUris(intent: Intent): List<Uri> {
+    return when (intent.action) {
+      Intent.ACTION_SEND -> getSharedStreamUri(intent)?.let { listOf(it) }.orEmpty()
+      Intent.ACTION_SEND_MULTIPLE -> getSharedStreamUriList(intent)
+      else -> emptyList()
+    }
+  }
+
+  private fun getSharedStreamUri(intent: Intent): Uri? {
+    @Suppress("DEPRECATION")
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+    } else {
+      intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+    }
+  }
+
+  private fun getSharedStreamUriList(intent: Intent): List<Uri> {
+    @Suppress("DEPRECATION")
+    val uris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+    } else {
+      intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+    }
+    return uris.orEmpty().filterIsInstance<Uri>()
+  }
+
+  private fun persistSharedReadPermissionIfPossible(intent: Intent, uri: Uri) {
+    if ((intent.flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) == 0) {
+      return
+    }
+    try {
+      contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    } catch (error: SecurityException) {
+      Log.w(RTC_TAG, "shared_uri_persist_permission_failed uri=$uri error=${error.message ?: "unknown"}")
+    } catch (error: IllegalArgumentException) {
+      Log.w(RTC_TAG, "shared_uri_persist_permission_unavailable uri=$uri error=${error.message ?: "unknown"}")
+    }
+  }
+
+  private fun persistDocumentReadPermissionIfPossible(uri: Uri) {
+    try {
+      // 作者: long；系统文件选择器返回的 Uri 可能来自云盘或第三方 DocumentsProvider，能持久化就保留读授权，避免后台分块发送时临时权限过早失效。
+      contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    } catch (error: SecurityException) {
+      Log.w(RTC_TAG, "document_uri_persist_permission_failed uri=$uri error=${error.message ?: "unknown"}")
+    } catch (error: IllegalArgumentException) {
+      Log.w(RTC_TAG, "document_uri_persist_permission_unavailable uri=$uri error=${error.message ?: "unknown"}")
+    }
+  }
+
+  private fun sendAndroidClipboardToRemote() {
+    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    val text = clipboard
+      ?.primaryClip
+      ?.takeIf { it.itemCount > 0 }
+      ?.getItemAt(0)
+      ?.coerceToText(this)
+      ?.toString()
+      .orEmpty()
+    if (text.isBlank()) {
+      updateRemoteTransferStatus("剪贴板：本机剪贴板为空")
+      return
+    }
+    sendAndroidClipboardTextToRemote(text)
+  }
+
+  private fun sendAndroidClipboardTextToRemote(text: String) {
+    val currentSessionId = sessionId
+    if (currentSessionId.isNullOrBlank()) {
+      updateRemoteTransferStatus("剪贴板：请先建立会话")
+      return
+    }
+    if (text.isBlank()) {
+      updateRemoteTransferStatus("剪贴板：待发送文本为空")
+      return
+    }
+    val clipboardId = "clip-${UUID.randomUUID()}"
+    val sent = sendSocketMessage(
+      controller.clipboardTextMessage(currentSessionId, clipboardId, text),
+      "发送剪贴板到远端 ${text.length} 字符",
+      logSuccess = false,
+    )
+    updateRemoteTransferStatus(
+      if (sent) "剪贴板：已发送 ${text.length} 字符" else "剪贴板：发送失败",
+    )
+  }
+
+  private fun handleIncomingClipboardText(json: JSONObject, payload: JSONObject) {
+    if (!isCurrentSessionToolMessage(json, payload, "剪贴板")) {
+      return
+    }
+    val clipboardId = payload.optNonBlank("clipboard_id").orEmpty()
+    val text = payload.optString("text").orEmpty()
+    if (text.isEmpty()) {
+      updateRemoteTransferStatus("剪贴板：收到空内容，已忽略")
+      sendClipboardApplyResult(clipboardId, applied = false, chars = 0, errorDetail = "clipboard text is empty")
+      return
+    }
+    try {
+      val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+      clipboard?.setPrimaryClip(ClipData.newPlainText("RemoteDesk", text))
+      if (isDebuggableBuild()) {
+        // 作者: long；双向剪贴板验收要能证明文本内容一致，debug 构建记录精确内容，正式构建不走这条调试日志。
+        Log.i(RTC_TAG, "debug_clipboard_received length=${text.length} text=$text")
+      }
+      updateRemoteTransferStatus("剪贴板：已接收 ${text.length} 字符")
+      appendLog("收到远端剪贴板 ${text.length} 字符，已写入本机剪贴板")
+      sendClipboardApplyResult(clipboardId, applied = true, chars = text.length)
+    } catch (error: Exception) {
+      val detail = error.message ?: "unknown"
+      updateRemoteTransferStatus("剪贴板：接收成功但写入失败 $detail")
+      sendClipboardApplyResult(clipboardId, applied = false, chars = text.length, errorDetail = detail)
+    }
+  }
+
+  private fun sendClipboardApplyResult(
+    clipboardId: String,
+    applied: Boolean,
+    chars: Int,
+    errorDetail: String = "",
+  ): Boolean {
+    val currentSessionId = sessionId
+    val cleanClipboardId = clipboardId.trim()
+    if (currentSessionId.isNullOrBlank() || cleanClipboardId.isBlank()) {
+      return false
+    }
+    // 作者: long；共享剪贴板必须回传本机应用结果，发送端才能区分 relay 已转发和目标设备已经写入系统剪贴板。
+    return sendSocketMessage(
+      controller.clipboardResultMessage(
+        currentSessionId,
+        cleanClipboardId,
+        applied,
+        chars.coerceAtLeast(0),
+        if (applied) "" else errorDetail.ifBlank { "clipboard apply failed" }.take(512),
+      ),
+      "发送剪贴板应用结果 ${if (applied) "success" else "failed"}",
+      logSuccess = false,
+    )
+  }
+
+  private fun handleIncomingClipboardResult(json: JSONObject, payload: JSONObject) {
+    if (!isCurrentSessionToolMessage(json, payload, "剪贴板")) {
+      return
+    }
+    val applied = payload.optBoolean("applied", false)
+    val chars = payload.optInt("chars", 0).coerceAtLeast(0)
+    val detail = payload.optNonBlank("error_detail").orEmpty()
+    updateRemoteTransferStatus(
+      if (applied) "剪贴板：对端已写入 $chars 字符" else "剪贴板：对端写入失败 ${detail.ifBlank { "unknown" }}",
+    )
+  }
+
+  private fun sendAndroidFileToRemote(uri: Uri) {
+    val currentSessionId = sessionId
+    if (currentSessionId.isNullOrBlank()) {
+      updateRemoteTransferStatus("文件：请先建立会话")
+      return
+    }
+    updateRemoteTransferStatus("文件：正在读取本机文件")
+    // 作者: long；用户文件读取可能走系统 DocumentsProvider，必须和设备列表/E2E proof 网络同步隔离，避免同步请求卡住后文件发送排队不执行。
+    fileTransferExecutor.execute {
+      try {
+        val name = queryOpenableDisplayName(uri).ifBlank { "remote-file.bin" }
+        val mime = contentResolver.getType(uri).orEmpty().ifBlank { "application/octet-stream" }
+        val declaredSize = queryOpenableSize(uri)
+        if (declaredSize > ANDROID_INCOMING_FILE_MAX_BYTES) {
+          runOnUiThread {
+            updateRemoteTransferStatus("文件：超过 64MB，未发送")
+          }
+          return@execute
+        }
+        val bytes = readUriBytesWithLimit(uri, ANDROID_INCOMING_FILE_MAX_BYTES)
+        val sent = sendAndroidFileBytesToRemote(currentSessionId, name, mime, bytes)
+        runOnUiThread {
+          updateRemoteTransferStatus(
+            if (sent) "文件：已发送 ${sanitizeRemoteFileName(name)} (${formatBytes(bytes.size.toLong())})" else "文件：发送中断",
+          )
+        }
+      } catch (error: Exception) {
+        runOnUiThread {
+          updateRemoteTransferStatus("文件：发送失败 ${error.message ?: "unknown"}")
+          appendLog("发送文件失败：${error.message ?: "unknown"}")
+        }
+      }
+    }
+  }
+
+  private fun sendAndroidFilePathToRemote(path: String) {
+    val currentSessionId = sessionId
+    if (currentSessionId.isNullOrBlank()) {
+      updateRemoteTransferStatus("文件：请先建立会话")
+      return
+    }
+    val file = File(path)
+    if (!file.isFile) {
+      updateRemoteTransferStatus("文件：调试路径不存在")
+      return
+    }
+    if (file.length() > ANDROID_INCOMING_FILE_MAX_BYTES) {
+      updateRemoteTransferStatus("文件：超过 64MB，未发送")
+      return
+    }
+    // 作者: long；debug 文件同样走真实文件传输链路，独立线程能保证验证时不会被设备同步或 proof 刷新阻塞。
+    fileTransferExecutor.execute {
+      try {
+        val bytes = file.readBytes()
+        val sent = sendAndroidFileBytesToRemote(
+          currentSessionId,
+          file.name.ifBlank { "remote-file.bin" },
+          "application/octet-stream",
+          bytes,
+        )
+        runOnUiThread {
+          updateRemoteTransferStatus(
+            if (sent) "文件：已发送 ${sanitizeRemoteFileName(file.name)} (${formatBytes(bytes.size.toLong())})" else "文件：发送中断",
+          )
+        }
+      } catch (error: Exception) {
+        runOnUiThread {
+          updateRemoteTransferStatus("文件：发送失败 ${error.message ?: "unknown"}")
+          appendLog("发送调试文件失败：${error.message ?: "unknown"}")
+        }
+      }
+    }
+  }
+
+  private fun sendAndroidFileBytesToRemote(
+    currentSessionId: String,
+    name: String,
+    mime: String,
+    bytes: ByteArray,
+  ): Boolean {
+    val totalChunks = ((bytes.size + SESSION_FILE_CHUNK_RAW_BYTES - 1) / SESSION_FILE_CHUNK_RAW_BYTES).coerceAtLeast(1)
+    val fileId = "file-${UUID.randomUUID()}"
+    val cleanName = sanitizeRemoteFileName(name)
+    val sha256 = sha256Hex(bytes)
+    var sent = sendSocketMessage(
+      controller.fileTransferStartMessage(
+        currentSessionId,
+        fileId,
+        cleanName,
+        mime.ifBlank { "application/octet-stream" },
+        bytes.size.toLong(),
+        totalChunks,
+        sha256,
+      ),
+      "发送文件开始 $cleanName",
+      logSuccess = false,
+    )
+    if (sent) {
+      for (chunkIndex in 0 until totalChunks) {
+        val start = chunkIndex * SESSION_FILE_CHUNK_RAW_BYTES
+        val end = min(start + SESSION_FILE_CHUNK_RAW_BYTES, bytes.size)
+        val encoded = Base64.encodeToString(bytes.copyOfRange(start, end), Base64.NO_WRAP)
+        sent = sendSocketMessage(
+          controller.fileTransferChunkMessage(currentSessionId, fileId, chunkIndex, totalChunks, encoded),
+          "发送文件分块 ${chunkIndex + 1}/$totalChunks",
+          logSuccess = false,
+        )
+        if (!sent) {
+          break
+        }
+      }
+    }
+    if (sent) {
+      sent = sendSocketMessage(
+        controller.fileTransferCompleteMessage(
+          currentSessionId,
+          fileId,
+          cleanName,
+          mime.ifBlank { "application/octet-stream" },
+          bytes.size.toLong(),
+          totalChunks,
+          sha256,
+        ),
+        "发送文件完成 $cleanName",
+        logSuccess = false,
+      )
+    }
+    return sent
+  }
+
+  private fun sendFileTransferApplyResult(
+    fileId: String,
+    applied: Boolean,
+    name: String = "",
+    bytes: Long = 0L,
+    sha256: String = "",
+    location: String = "",
+    errorDetail: String = "",
+  ): Boolean {
+    val currentSessionId = sessionId
+    val cleanFileId = fileId.trim()
+    if (currentSessionId.isNullOrBlank() || cleanFileId.isBlank()) {
+      return false
+    }
+    // 作者: long；发送完成只说明分块到达对端，file.transfer.result 才证明接收端完成校验并把文件落到本机存储。
+    return sendSocketMessage(
+      controller.fileTransferResultMessage(
+        currentSessionId,
+        cleanFileId,
+        applied,
+        sanitizeRemoteFileName(name),
+        bytes.coerceAtLeast(0L),
+        sha256.takeIf { it.matches(Regex("^[A-Fa-f0-9]{64}$")) }.orEmpty(),
+        location.take(512),
+        if (applied) "" else errorDetail.ifBlank { "file receive failed" }.take(512),
+      ),
+      "发送文件接收结果 ${if (applied) "success" else "failed"}",
+      logSuccess = false,
+    )
+  }
+
+  private fun handleIncomingFileTransferStart(json: JSONObject, payload: JSONObject) {
+    if (!isCurrentSessionToolMessage(json, payload, "文件")) {
+      return
+    }
+    val fileId = payload.optNonBlank("file_id")
+    val name = sanitizeRemoteFileName(payload.optString("name").orEmpty())
+    val totalChunks = payload.optInt("total_chunks", 0)
+    val size = payload.optLong("size", -1L)
+    if (
+      fileId.isNullOrBlank() ||
+      name.isBlank() ||
+      totalChunks <= 0 ||
+      totalChunks > SESSION_FILE_MAX_CHUNKS ||
+      size > ANDROID_INCOMING_FILE_MAX_BYTES
+    ) {
+      updateRemoteTransferStatus("文件：收到无效文件请求")
+      sendFileTransferApplyResult(
+        fileId.orEmpty(),
+        applied = false,
+        name = name,
+        bytes = size.coerceAtLeast(0L),
+        sha256 = payload.optNonBlank("sha256").orEmpty(),
+        errorDetail = "invalid file transfer start payload",
+      )
+      return
+    }
+    incomingFileTransfers[fileId] = IncomingFileTransfer(
+      fileId = fileId,
+      name = name,
+      mime = payload.optString("mime").orEmpty().ifBlank { "application/octet-stream" },
+      size = size,
+      totalChunks = totalChunks,
+      sha256 = payload.optNonBlank("sha256").orEmpty(),
+    )
+    updateRemoteTransferStatus("文件：开始接收 $name，共 $totalChunks 块")
+  }
+
+  private fun handleIncomingFileTransferChunk(json: JSONObject, payload: JSONObject) {
+    if (!isCurrentSessionToolMessage(json, payload, "文件")) {
+      return
+    }
+    val fileId = payload.optNonBlank("file_id") ?: return
+    val transfer = incomingFileTransfers[fileId]
+    if (transfer == null) {
+      updateRemoteTransferStatus("文件：收到未知分块，已忽略")
+      sendFileTransferApplyResult(
+        fileId,
+        applied = false,
+        errorDetail = "file chunk arrived before transfer start",
+      )
+      return
+    }
+    val chunkIndex = payload.optInt("chunk_index", -1)
+    val totalChunks = payload.optInt("total_chunks", -1)
+    val dataBase64 = payload.optString("data_base64").orEmpty()
+    if (chunkIndex !in 0 until transfer.totalChunks || totalChunks != transfer.totalChunks || dataBase64.isBlank()) {
+      updateRemoteTransferStatus("文件：收到无效分块，已忽略")
+      sendFileTransferApplyResult(
+        fileId,
+        applied = false,
+        name = transfer.name,
+        bytes = transfer.size,
+        sha256 = transfer.sha256,
+        errorDetail = "invalid file transfer chunk payload",
+      )
+      return
+    }
+    try {
+      transfer.chunks[chunkIndex] = Base64.decode(dataBase64, Base64.DEFAULT)
+      updateRemoteTransferStatus("文件：接收 ${transfer.name} ${transfer.chunks.size}/${transfer.totalChunks}")
+    } catch (error: IllegalArgumentException) {
+      updateRemoteTransferStatus("文件：分块解码失败")
+      sendFileTransferApplyResult(
+        fileId,
+        applied = false,
+        name = transfer.name,
+        bytes = transfer.size,
+        sha256 = transfer.sha256,
+        errorDetail = error.message ?: "base64 decode failed",
+      )
+    }
+  }
+
+  private fun handleIncomingFileTransferComplete(json: JSONObject, payload: JSONObject) {
+    if (!isCurrentSessionToolMessage(json, payload, "文件")) {
+      return
+    }
+    val fileId = payload.optNonBlank("file_id") ?: return
+    val transfer = incomingFileTransfers[fileId]
+    if (transfer == null) {
+      updateRemoteTransferStatus("文件：完成消息没有对应文件")
+      sendFileTransferApplyResult(
+        fileId,
+        applied = false,
+        errorDetail = "file complete arrived before transfer start",
+      )
+      return
+    }
+    if (transfer.chunks.size != transfer.totalChunks) {
+      updateRemoteTransferStatus("文件：${transfer.name} 分块未收齐 ${transfer.chunks.size}/${transfer.totalChunks}")
+      sendFileTransferApplyResult(
+        fileId,
+        applied = false,
+        name = transfer.name,
+        bytes = transfer.size,
+        sha256 = transfer.sha256,
+        errorDetail = "missing chunks ${transfer.chunks.size}/${transfer.totalChunks}",
+      )
+      return
+    }
+    val chunksSnapshot = mutableListOf<ByteArray>()
+    for (index in 0 until transfer.totalChunks) {
+      val chunk = transfer.chunks[index]
+      if (chunk == null) {
+        updateRemoteTransferStatus("文件：${transfer.name} 缺少第 ${index + 1} 块")
+        sendFileTransferApplyResult(
+          fileId,
+          applied = false,
+          name = transfer.name,
+          bytes = transfer.size,
+          sha256 = transfer.sha256,
+          errorDetail = "missing chunk ${index + 1}",
+        )
+        return
+      }
+      chunksSnapshot += chunk
+    }
+    val expectedSha256 = payload.optNonBlank("sha256") ?: transfer.sha256
+    incomingFileTransfers.remove(fileId)
+    updateRemoteTransferStatus("文件：正在保存 ${transfer.name}")
+    // 作者: long；接收文件默认先落应用私有目录，避免远控热路径持有 MediaProvider 依赖；后续可单独做“导出到下载目录”的显式动作。
+    // 作者: long；接收文件保存不能复用设备同步线程；真机上 /devices 或 proof 请求一旦超时，会让用户看到“正在保存”但实际文件永远不落盘。
+    fileTransferExecutor.execute {
+      try {
+      val output = ByteArrayOutputStream()
+      for (chunk in chunksSnapshot) {
+        output.write(chunk)
+        if (output.size().toLong() > ANDROID_INCOMING_FILE_MAX_BYTES) {
+          error("file exceeds 64MB")
+        }
+      }
+      val bytes = output.toByteArray()
+      if (transfer.size >= 0 && bytes.size.toLong() != transfer.size) {
+        sendFileTransferApplyResult(
+          fileId,
+          applied = false,
+          name = transfer.name,
+          bytes = bytes.size.toLong(),
+          sha256 = transfer.sha256,
+          errorDetail = "size mismatch expected=${transfer.size} actual=${bytes.size}",
+        )
+        runOnUiThread {
+          updateRemoteTransferStatus("文件：${transfer.name} 大小不匹配，已丢弃")
+        }
+        return@execute
+      }
+      if (expectedSha256.isNotBlank()) {
+        val actualSha256 = sha256Hex(bytes)
+        if (!actualSha256.equals(expectedSha256, ignoreCase = true)) {
+          sendFileTransferApplyResult(
+            fileId,
+            applied = false,
+            name = transfer.name,
+            bytes = bytes.size.toLong(),
+            sha256 = actualSha256,
+            errorDetail = "sha256 mismatch",
+          )
+          runOnUiThread {
+            updateRemoteTransferStatus("文件：${transfer.name} 哈希不匹配，已丢弃")
+            appendLog("文件哈希不匹配：expected=$expectedSha256 actual=$actualSha256")
+          }
+          return@execute
+        }
+      }
+      val savedFile = saveIncomingFileToDownloads(transfer.name, transfer.mime, bytes)
+      sendFileTransferApplyResult(
+        fileId,
+        applied = true,
+        name = savedFile.name,
+        bytes = bytes.size.toLong(),
+        sha256 = expectedSha256.ifBlank { transfer.sha256 },
+        location = savedFile.location,
+      )
+      runOnUiThread {
+        updateRemoteTransferStatus("文件：已保存 ${savedFile.name}")
+        appendLog("收到远端文件 ${transfer.name}，已保存到 ${savedFile.location}")
+      }
+      } catch (error: Exception) {
+        sendFileTransferApplyResult(
+          fileId,
+          applied = false,
+          name = transfer.name,
+          bytes = transfer.size.coerceAtLeast(0L),
+          sha256 = transfer.sha256,
+          errorDetail = error.message ?: "unknown",
+        )
+        runOnUiThread {
+          updateRemoteTransferStatus("文件：保存失败 ${error.message ?: "unknown"}")
+          appendLog("保存远端文件失败：${error.message ?: "unknown"}")
+        }
+      }
+    }
+  }
+
+  private fun handleIncomingFileTransferResult(json: JSONObject, payload: JSONObject) {
+    if (!isCurrentSessionToolMessage(json, payload, "文件")) {
+      return
+    }
+    val applied = payload.optBoolean("applied", false)
+    val name = sanitizeRemoteFileName(payload.optString("name").orEmpty())
+    val bytes = payload.optLong("bytes", 0L).coerceAtLeast(0L)
+    val location = payload.optNonBlank("location").orEmpty()
+    val detail = payload.optNonBlank("error_detail").orEmpty()
+    updateRemoteTransferStatus(
+      if (applied) "文件：对端已保存 $name (${formatBytes(bytes)})" else "文件：对端保存失败 ${detail.ifBlank { "unknown" }}",
+    )
+    if (applied && location.isNotBlank()) {
+      appendLog("文件：对端保存位置 $location")
+    }
+  }
+
+  private fun isCurrentSessionToolMessage(json: JSONObject, payload: JSONObject, label: String): Boolean {
+    val messageSessionId = json.optNonBlank("session_id") ?: payload.optNonBlank("session_id")
+    val currentSessionId = sessionId
+    if (currentSessionId.isNullOrBlank() || messageSessionId.isNullOrBlank() || messageSessionId != currentSessionId) {
+      appendLog("忽略非当前会话${label}消息")
+      return false
+    }
+    return true
+  }
+
+  private fun updateRemoteTransferStatus(text: String) {
+    binding.remoteTransferStatusText.text = text
+    appendLog(text)
+  }
+
+  private fun sha256Hex(bytes: ByteArray): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+    return digest.joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+  }
+
+  private fun handleDebugToolIntent(intent: Intent?, attempt: Int = 0) {
+    if (!isDebuggableBuild() || intent == null) {
+      return
+    }
+    val setClipboardText = intent.getStringExtra(EXTRA_DEBUG_SET_CLIPBOARD_TEXT)
+    val sendClipboardText = intent.getStringExtra(EXTRA_DEBUG_SEND_CLIPBOARD_TEXT)
+    val sendClipboardFromSystem = intent.getBooleanExtra(EXTRA_DEBUG_SEND_CLIPBOARD_FROM_SYSTEM, false)
+    val dumpClipboardText = intent.getBooleanExtra(EXTRA_DEBUG_DUMP_CLIPBOARD_TEXT, false)
+    val sendFilePath = intent.getStringExtra(EXTRA_DEBUG_SEND_FILE_PATH)?.trim().orEmpty()
+    val sendViewportInteraction = intent.getBooleanExtra(EXTRA_DEBUG_SEND_VIEWPORT_INTERACTION, false)
+    val debugFullscreen = intent.hasExtra(EXTRA_DEBUG_FULLSCREEN)
+    val debugSimulatePinch = intent.getBooleanExtra(EXTRA_DEBUG_SIMULATE_PINCH, false)
+    val hasDebugToolAction = setClipboardText != null ||
+      sendClipboardText != null ||
+      sendClipboardFromSystem ||
+      dumpClipboardText ||
+      sendFilePath.isNotBlank() ||
+      sendViewportInteraction ||
+      debugFullscreen ||
+      debugSimulatePinch
+    if (!hasDebugToolAction) {
+      return
+    }
+
+    if (setClipboardText != null && attempt == 0) {
+      val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+      clipboard?.setPrimaryClip(ClipData.newPlainText("RemoteDesk Debug", setClipboardText))
+      updateRemoteTransferStatus("剪贴板：调试文本已写入本机 ${setClipboardText.length} 字符")
+    }
+
+    val needsSession = sendClipboardText != null ||
+      sendClipboardFromSystem ||
+      sendFilePath.isNotBlank() ||
+      sendViewportInteraction ||
+      debugSimulatePinch
+    if (needsSession && sessionId.isNullOrBlank()) {
+      if (attempt < DEBUG_TOOL_MAX_ATTEMPTS) {
+        // 作者: long；adb 调试入口常和自动建链同时触发，短暂等待会话可避免把验证脚本写成固定 sleep。
+        remoteGestureHandler.postDelayed(
+          { handleDebugToolIntent(intent, attempt + 1) },
+          DEBUG_TOOL_RETRY_DELAY_MS,
+        )
+      } else {
+        updateRemoteTransferStatus("调试工具：等待会话超时，未发送")
+      }
+      return
+    }
+
+    if (sendClipboardText != null) {
+      sendAndroidClipboardTextToRemote(sendClipboardText)
+    }
+    if (sendClipboardFromSystem) {
+      sendAndroidClipboardToRemote()
+    }
+    if (dumpClipboardText) {
+      val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+      val text = clipboard
+        ?.primaryClip
+        ?.takeIf { it.itemCount > 0 }
+        ?.getItemAt(0)
+        ?.coerceToText(this)
+        ?.toString()
+        .orEmpty()
+      // 作者: long；Mac -> Android 剪贴板验收需要能从 adb 日志看到精确文本，调试 dump 只在 debuggable 构建响应。
+      Log.i(RTC_TAG, "debug_clipboard_dump length=${text.length} text=$text")
+      updateRemoteTransferStatus("剪贴板：调试读取 ${text.length} 字符")
+    }
+    if (sendFilePath.isNotBlank()) {
+      sendAndroidFilePathToRemote(sendFilePath)
+    }
+    if (debugFullscreen) {
+      val enabled = intent.getBooleanExtra(EXTRA_DEBUG_FULLSCREEN_ENABLED, true)
+      setRemoteViewportFullscreenForDebug(enabled)
+    }
+    if (sendViewportInteraction) {
+      sendDebugViewportInteraction(intent)
+    }
+    if (debugSimulatePinch) {
+      simulateDebugPinchGesture(intent)
+    }
+  }
+
+  private fun setRemoteViewportFullscreenForDebug(enabled: Boolean) {
+    if (enabled == remoteFullscreenActive) {
+      updateRemoteTransferStatus(if (enabled) "视口：已处于全屏" else "视口：已退出全屏")
+      return
+    }
+    // 作者: long；全屏按钮在真机横屏后容易被系统栏和视频层影响命中，adb 调试入口用于验收完整显示和缩放链路，不改变正式交互路径。
+    if (enabled) {
+      enterRemoteViewportFullscreen()
+    } else {
+      exitRemoteViewportFullscreen(reason = "debug_intent")
+    }
+  }
+
+  private fun sendDebugViewportInteraction(intent: Intent) {
+    val currentSessionId = sessionId?.trim().orEmpty()
+    if (currentSessionId.isBlank()) {
+      updateRemoteTransferStatus("视口：调试发送失败，无会话")
+      return
+    }
+    val scale = intent.getDoubleExtra(EXTRA_DEBUG_VIEWPORT_SCALE, 1.6).toFloat()
+      .coerceIn(REMOTE_VIEWPORT_MIN_SCALE, REMOTE_VIEWPORT_MAX_SCALE)
+    val viewportX = intent.getDoubleExtra(EXTRA_DEBUG_VIEWPORT_X, 0.25)
+    val viewportY = intent.getDoubleExtra(EXTRA_DEBUG_VIEWPORT_Y, 0.20)
+    val viewportWidth = intent.getDoubleExtra(EXTRA_DEBUG_VIEWPORT_WIDTH, 0.50)
+    val viewportHeight = intent.getDoubleExtra(EXTRA_DEBUG_VIEWPORT_HEIGHT, 0.45)
+    if (viewportWidth <= 0.0 || viewportHeight <= 0.0 || viewportX < 0.0 || viewportY < 0.0 ||
+      viewportX + viewportWidth > 1.0 || viewportY + viewportHeight > 1.0
+    ) {
+      updateRemoteTransferStatus("视口：调试区域非法，未发送")
+      return
+    }
+    val safeViewport = clampRemoteViewportSourceRect(
+      NormalizedRect(
+        x = viewportX,
+        y = viewportY,
+        width = viewportWidth,
+        height = viewportHeight,
+      ),
+    )
+    val focusX = intent.getDoubleExtra(EXTRA_DEBUG_VIEWPORT_FOCUS_X, viewportX + viewportWidth / 2.0)
+    val focusY = intent.getDoubleExtra(EXTRA_DEBUG_VIEWPORT_FOCUS_Y, viewportY + viewportHeight / 2.0)
+    // 作者: long；该入口只用于真机自动验收区域高清链路，仍走 Android -> relay -> Mac 的会话消息，不替代人工双指手感验收。
+    val sent = sendSocketMessage(
+      controller.viewportInteractionMessage(
+        sessionId = currentSessionId,
+        phase = "end",
+        interaction = "pinch",
+        scale = maxOf(scale, remoteViewportInteractionScale(safeViewport, requestFullViewport = false)),
+        viewportX = safeViewport.x,
+        viewportY = safeViewport.y,
+        viewportWidth = safeViewport.width,
+        viewportHeight = safeViewport.height,
+        focusX = focusX.coerceIn(0.0, 1.0),
+        focusY = focusY.coerceIn(0.0, 1.0),
+      ),
+      "debug viewport pinch end",
+      logSuccess = true,
+    )
+    updateRemoteTransferStatus(if (sent) "视口：已发送调试局部高清提示" else "视口：调试发送失败")
+  }
+
+  private fun simulateDebugPinchGesture(intent: Intent) {
+    val touchLayer = binding.remoteTouchLayer
+    if (renderedFrameWidth <= 0 || renderedFrameHeight <= 0 || touchLayer.width <= 0 || touchLayer.height <= 0) {
+      updateRemoteTransferStatus("视口：调试双指缩放失败，远程画面尚未就绪")
+      return
+    }
+    val centerX = (intent.getDoubleExtra(EXTRA_DEBUG_PINCH_CENTER_X, 0.5).toFloat() * touchLayer.width)
+      .coerceIn(1f, (touchLayer.width - 1).coerceAtLeast(1).toFloat())
+    val centerY = (intent.getDoubleExtra(EXTRA_DEBUG_PINCH_CENTER_Y, 0.5).toFloat() * touchLayer.height)
+      .coerceIn(1f, (touchLayer.height - 1).coerceAtLeast(1).toFloat())
+    val maxSpan = (min(touchLayer.width, touchLayer.height).toFloat() * 0.86f).coerceAtLeast(dpFloat(80))
+    val startSpan = intent.getDoubleExtra(EXTRA_DEBUG_PINCH_START_SPAN, dpFloat(120).toDouble()).toFloat()
+      .coerceIn(dpFloat(48), maxSpan)
+    val endSpan = intent.getDoubleExtra(EXTRA_DEBUG_PINCH_END_SPAN, dpFloat(310).toDouble()).toFloat()
+      .coerceIn(dpFloat(48), maxSpan)
+    val steps = intent.getIntExtra(EXTRA_DEBUG_PINCH_STEPS, 18).coerceIn(4, 60)
+    val intervalMs = intent.getLongExtra(EXTRA_DEBUG_PINCH_INTERVAL_MS, 16L).coerceIn(8L, 80L)
+    val downTime = SystemClock.uptimeMillis()
+    remoteDebugPinchToken += 1L
+    val token = remoteDebugPinchToken
+    postDebugPinchEvent(token, downTime, delayMs = 0L, centerX, centerY, startSpan, MotionEvent.ACTION_DOWN, pointerCount = 1)
+    postDebugPinchEvent(
+      token,
+      downTime,
+      delayMs = intervalMs,
+      centerX,
+      centerY,
+      startSpan,
+      MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+      pointerCount = 2,
+    )
+    for (step in 1..steps) {
+      val progress = step.toFloat() / steps.toFloat()
+      val span = startSpan + ((endSpan - startSpan) * progress)
+      postDebugPinchEvent(
+        token,
+        downTime,
+        delayMs = intervalMs * (step + 1),
+        centerX,
+        centerY,
+        span,
+        MotionEvent.ACTION_MOVE,
+        pointerCount = 2,
+      )
+    }
+    postDebugPinchEvent(
+      token,
+      downTime,
+      delayMs = intervalMs * (steps + 2),
+      centerX,
+      centerY,
+      endSpan,
+      MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+      pointerCount = 2,
+    )
+    postDebugPinchEvent(
+      token,
+      downTime,
+      delayMs = intervalMs * (steps + 3),
+      centerX,
+      centerY,
+      endSpan,
+      MotionEvent.ACTION_UP,
+      pointerCount = 1,
+      afterDispatch = {
+        updateRemoteTransferStatus(
+          "视口：已注入调试双指缩放 ${"%.2f".format(Locale.US, endSpan / startSpan)}x",
+        )
+      },
+    )
+  }
+
+  private fun postDebugPinchEvent(
+    token: Long,
+    downTime: Long,
+    delayMs: Long,
+    centerX: Float,
+    centerY: Float,
+    span: Float,
+    action: Int,
+    pointerCount: Int,
+    afterDispatch: (() -> Unit)? = null,
+  ) {
+    remoteGestureHandler.postDelayed(
+      {
+        if (!isActivityAlive || token != remoteDebugPinchToken) {
+          return@postDelayed
+        }
+        // 作者: long；真机调试双指手势按目标帧间隔分发，才能暴露 ScaleGestureDetector 与全屏 transform 在连续 move 下的真实节奏。
+        dispatchDebugPinchEvent(
+          action = action,
+          downTime = downTime,
+          eventTime = downTime + delayMs,
+          centerX = centerX,
+          centerY = centerY,
+          span = span,
+          pointerCount = pointerCount,
+        )
+        afterDispatch?.invoke()
+      },
+      delayMs,
+    )
+  }
+
+  private fun dispatchDebugPinchEvent(
+    action: Int,
+    downTime: Long,
+    eventTime: Long,
+    centerX: Float,
+    centerY: Float,
+    span: Float,
+    pointerCount: Int,
+  ) {
+    val safeHalfSpan = (span / 2f).coerceAtLeast(1f)
+    val properties = Array(pointerCount) { index ->
+      MotionEvent.PointerProperties().apply {
+        id = index
+        toolType = MotionEvent.TOOL_TYPE_FINGER
+      }
+    }
+    val coords = Array(pointerCount) { index ->
+      MotionEvent.PointerCoords().apply {
+        val direction = if (index == 0) -1f else 1f
+        x = centerX + direction * safeHalfSpan
+        y = centerY
+        pressure = 1f
+        size = 1f
+      }
+    }
+    val event = MotionEvent.obtain(
+      downTime,
+      eventTime,
+      action,
+      pointerCount,
+      properties,
+      coords,
+      0,
+      0,
+      1f,
+      1f,
+      0,
+      0,
+      InputDevice.SOURCE_TOUCHSCREEN,
+      0,
+    )
+    try {
+      // 作者: long；调试双指缩放必须走真实触摸处理链，才能验证 ScaleGestureDetector、viewport hint 和 source_rect 回显，而不是直接伪造后端消息。
+      remoteDebugPinchDispatchActive = true
+      val consumedByView = binding.remoteTouchLayer.dispatchTouchEvent(event)
+      if (!consumedByView) {
+        handleRemoteFrameTouchV2(binding.remoteTouchLayer, event)
+      }
+      Log.i(
+        RTC_TAG,
+        "remote_debug_pinch_event action=${MotionEvent.actionToString(action and MotionEvent.ACTION_MASK)} pointers=$pointerCount consumed=$consumedByView in_progress=${remoteScaleGestureDetector.isInProgress} scale=${String.format(Locale.US, "%.3f", remoteViewportScale)}",
+      )
+    } finally {
+      remoteDebugPinchDispatchActive = false
+      event.recycle()
+    }
+  }
+
+  private fun isDebuggableBuild(): Boolean =
+    (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+  private fun queryOpenableDisplayName(uri: Uri): String {
+    queryOpenableColumn(uri, OpenableColumns.DISPLAY_NAME)?.let { return it }
+    return uri.lastPathSegment?.substringAfterLast('/').orEmpty()
+  }
+
+  private fun queryOpenableSize(uri: Uri): Long {
+    val value = queryOpenableColumn(uri, OpenableColumns.SIZE) ?: return -1L
+    return value.toLongOrNull() ?: -1L
+  }
+
+  private fun queryOpenableColumn(uri: Uri, column: String): String? {
+    var cursor: Cursor? = null
+    return try {
+      cursor = contentResolver.query(uri, arrayOf(column), null, null, null)
+      if (cursor != null && cursor.moveToFirst()) {
+        val index = cursor.getColumnIndex(column)
+        if (index >= 0 && !cursor.isNull(index)) cursor.getString(index) else null
+      } else {
+        null
+      }
+    } catch (_: Exception) {
+      null
+    } finally {
+      cursor?.close()
+    }
+  }
+
+  private fun readUriBytesWithLimit(uri: Uri, maxBytes: Long): ByteArray {
+    val output = ByteArrayOutputStream()
+    contentResolver.openInputStream(uri)?.use { input ->
+      val buffer = ByteArray(64 * 1024)
+      while (true) {
+        val read = input.read(buffer)
+        if (read < 0) {
+          break
+        }
+        output.write(buffer, 0, read)
+        if (output.size().toLong() > maxBytes) {
+          throw IOException("file exceeds 64MB")
+        }
+      }
+    } ?: throw IOException("无法打开文件")
+    return output.toByteArray()
+  }
+
+  private fun saveIncomingFileToDownloads(name: String, mime: String, bytes: ByteArray): SavedIncomingFile {
+    val cleanName = sanitizeRemoteFileName(name)
+    if (ANDROID_INCOMING_FILE_USE_MEDIASTORE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      val executor = Executors.newSingleThreadExecutor()
+      try {
+        val future = executor.submit<SavedIncomingFile> {
+          saveIncomingFileToMediaStore(cleanName, mime, bytes)
+        }
+        return future.get(ANDROID_FILE_MEDIASTORE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+      } catch (error: Exception) {
+        Log.w(RTC_TAG, "incoming_file_mediastore_save_failed name=$cleanName error=${error.message ?: "unknown"}")
+      } finally {
+        executor.shutdownNow()
+      }
+    }
+    return saveIncomingFileToPrivateDirectory(cleanName, bytes)
+  }
+
+  private fun saveIncomingFileToMediaStore(cleanName: String, mime: String, bytes: ByteArray): SavedIncomingFile {
+    val values = ContentValues().apply {
+      put(MediaStore.MediaColumns.DISPLAY_NAME, cleanName)
+      put(MediaStore.MediaColumns.MIME_TYPE, mime.ifBlank { "application/octet-stream" })
+      put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/RemoteDesk")
+      put(MediaStore.MediaColumns.IS_PENDING, 1)
+    }
+    val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+      ?: throw IOException("无法创建系统下载文件")
+    try {
+      contentResolver.openOutputStream(uri)?.use { output ->
+        output.write(bytes)
+      } ?: throw IOException("无法打开系统下载文件")
+      values.clear()
+      values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+      contentResolver.update(uri, values, null, null)
+      // 作者: long；接收远端文件的产品目标是用户能在系统文件管理器找到结果，Android 10+ 优先发布到公开 Downloads/RemoteDesk。
+      return SavedIncomingFile(
+        name = cleanName,
+        location = "Downloads/RemoteDesk/$cleanName (${uri})",
+      )
+    } catch (error: Exception) {
+      contentResolver.delete(uri, null, null)
+      throw error
+    }
+  }
+
+  private fun saveIncomingFileToPrivateDirectory(cleanName: String, bytes: ByteArray): SavedIncomingFile {
+    // 作者: long；公开 Downloads 写入如果在个别 ROM 上超时或失败，仍先保住文件本身，避免远端已经传完的数据被丢弃。
+    val directory = File(filesDir, "RemoteDeskIncoming")
+    if (!directory.exists() && !directory.mkdirs()) {
+      throw IOException("无法创建下载目录")
+    }
+    val file = uniqueFile(directory, cleanName)
+    file.outputStream().use { output ->
+      output.write(bytes)
+    }
+    return SavedIncomingFile(
+      name = file.name,
+      location = "app-private:${file.absolutePath}",
+    )
+  }
+
+  private fun uniqueFile(directory: File, name: String): File {
+    val cleanName = sanitizeRemoteFileName(name).ifBlank { "remote-file.bin" }
+    val dotIndex = cleanName.lastIndexOf('.')
+    val base = if (dotIndex > 0) cleanName.substring(0, dotIndex) else cleanName
+    val ext = if (dotIndex > 0) cleanName.substring(dotIndex) else ""
+    var candidate = File(directory, cleanName)
+    var index = 1
+    while (candidate.exists()) {
+      candidate = File(directory, "$base-$index$ext")
+      index += 1
+    }
+    return candidate
+  }
+
+  private fun sanitizeRemoteFileName(name: String): String =
+    name.trim()
+      .replace(Regex("[\\\\/:*?\"<>|\\n\\r\\t]"), "_")
+      .take(120)
+      .ifBlank { "remote-file.bin" }
+
+  private fun formatBytes(size: Long): String {
+    if (size < 1024L) {
+      return "$size B"
+    }
+    val kb = size.toDouble() / 1024.0
+    if (kb < 1024.0) {
+      return String.format(Locale.US, "%.1f KB", kb)
+    }
+    return String.format(Locale.US, "%.1f MB", kb / 1024.0)
+  }
+
+  private fun showRemoteKeyboardDialog() {
+    val existing = remoteKeyboardDialog
+    if (existing?.isShowing == true) {
+      return
+    }
+    remoteKeyboardModifierButtons.clear()
+    val dialog = Dialog(this).apply {
+      requestWindowFeature(Window.FEATURE_NO_TITLE)
+      setCanceledOnTouchOutside(true)
+      setOnDismissListener {
+        remoteKeyboardDialog = null
+        remoteKeyboardModifierButtons.clear()
+      }
+    }
+    dialog.setContentView(createRemoteKeyboardDialogContent())
+    remoteKeyboardDialog = dialog
+    dialog.show()
+    dialog.window?.apply {
+      setGravity(Gravity.BOTTOM)
+      setLayout(
+        WindowManager.LayoutParams.MATCH_PARENT,
+        WindowManager.LayoutParams.WRAP_CONTENT,
+      )
+      setBackgroundDrawableResource(android.R.color.transparent)
+    }
+  }
+
+  private fun createRemoteKeyboardDialogContent(): View {
+    val root = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding(dp(12), dp(8), dp(12), dp(12))
+      background = GradientDrawable().apply {
+        setColor(Color.parseColor("#101827"))
+        cornerRadii = floatArrayOf(dpFloat(14), dpFloat(14), dpFloat(14), dpFloat(14), 0f, 0f, 0f, 0f)
+      }
+    }
+
+    val keyboardRows = listOf(
+      listOf(
+        keyboardKey("Esc", "Escape", 42),
+        keyboardKey("F1", "F1"),
+        keyboardKey("F2", "F2"),
+        keyboardKey("F3", "F3"),
+        keyboardKey("F4", "F4"),
+        keyboardKey("F5", "F5"),
+        keyboardKey("F6", "F6"),
+        keyboardKey("F7", "F7"),
+        keyboardKey("F8", "F8"),
+        keyboardKey("F9", "F9"),
+        keyboardKey("F10", "F10"),
+        keyboardKey("F11", "F11"),
+        keyboardKey("F12", "F12"),
+        keyboardKey("Prt", "PrintScreen", 42),
+        keyboardKey("Scr", "ScrollLock", 42),
+        keyboardKey("Pause", "Pause", 48),
+      ),
+      listOf(
+        keyboardKey("`", "Backquote"),
+        keyboardKey("1", "Digit1"),
+        keyboardKey("2", "Digit2"),
+        keyboardKey("3", "Digit3"),
+        keyboardKey("4", "Digit4"),
+        keyboardKey("5", "Digit5"),
+        keyboardKey("6", "Digit6"),
+        keyboardKey("7", "Digit7"),
+        keyboardKey("8", "Digit8"),
+        keyboardKey("9", "Digit9"),
+        keyboardKey("0", "Digit0"),
+        keyboardKey("-", "Minus"),
+        keyboardKey("=", "Equal"),
+        keyboardKey("Back", "Backspace", 62),
+        keyboardKey("Ins", "Insert", 38),
+        keyboardKey("Home", "Home", 46),
+        keyboardKey("PgUp", "PageUp", 46),
+      ),
+      listOf(
+        keyboardKey("Tab", "Tab", 50),
+        keyboardKey("Q", "KeyQ"),
+        keyboardKey("W", "KeyW"),
+        keyboardKey("E", "KeyE"),
+        keyboardKey("R", "KeyR"),
+        keyboardKey("T", "KeyT"),
+        keyboardKey("Y", "KeyY"),
+        keyboardKey("U", "KeyU"),
+        keyboardKey("I", "KeyI"),
+        keyboardKey("O", "KeyO"),
+        keyboardKey("P", "KeyP"),
+        keyboardKey("[", "BracketLeft"),
+        keyboardKey("]", "BracketRight"),
+        keyboardKey("\\", "Backslash", 42),
+        keyboardKey("Del", "Delete", 38),
+        keyboardKey("End", "End", 46),
+        keyboardKey("PgDn", "PageDown", 46),
+      ),
+      listOf(
+        keyboardKey("Caps", "CapsLock", 56),
+        keyboardKey("A", "KeyA"),
+        keyboardKey("S", "KeyS"),
+        keyboardKey("D", "KeyD"),
+        keyboardKey("F", "KeyF"),
+        keyboardKey("G", "KeyG"),
+        keyboardKey("H", "KeyH"),
+        keyboardKey("J", "KeyJ"),
+        keyboardKey("K", "KeyK"),
+        keyboardKey("L", "KeyL"),
+        keyboardKey(";", "Semicolon"),
+        keyboardKey("'", "Quote"),
+        keyboardKey("Enter", "Enter", 70),
+      ),
+      listOf(
+        keyboardKey("Shift", "ShiftLeft", 70),
+        keyboardKey("Z", "KeyZ"),
+        keyboardKey("X", "KeyX"),
+        keyboardKey("C", "KeyC"),
+        keyboardKey("V", "KeyV"),
+        keyboardKey("B", "KeyB"),
+        keyboardKey("N", "KeyN"),
+        keyboardKey("M", "KeyM"),
+        keyboardKey(",", "Comma"),
+        keyboardKey(".", "Period"),
+        keyboardKey("/", "Slash"),
+        keyboardKey("Shift", "ShiftRight", 70),
+        keyboardSpacer(42),
+        keyboardKey("↑", "ArrowUp", 38),
+        keyboardSpacer(42),
+      ),
+      listOf(
+        keyboardKey("Ctrl", "ControlLeft", 48),
+        keyboardKey("Alt", "AltLeft", 42),
+        keyboardKey("Cmd", "MetaLeft", 48),
+        keyboardKey("Space", "Space", 178),
+        keyboardKey("Cmd", "MetaRight", 48),
+        keyboardKey("Alt", "AltRight", 42),
+        keyboardKey("Ctrl", "ControlRight", 48),
+        keyboardSpacer(22),
+        keyboardKey("←", "ArrowLeft", 38),
+        keyboardKey("↓", "ArrowDown", 38),
+        keyboardKey("→", "ArrowRight", 38),
+      ),
+    )
+    val keyboardContent = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding(0, 0, 0, 0)
+    }
+    keyboardRows.forEach { rowKeys ->
+      addRemoteKeyboardRow(keyboardContent, rowKeys)
+    }
+    // 作者: long；电脑键盘保留主键区、功能键和导航键六排，右侧独立数字小键盘不放进手机弹框，避免横向宽度挤占远控画面。
+    val horizontalScroll = HorizontalScrollView(this).apply {
+      overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+      isHorizontalScrollBarEnabled = false
+      addView(keyboardContent)
+    }
+    root.addView(
+      horizontalScroll,
+      LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+      ),
+    )
+    updateRemoteKeyboardModifierButtons()
+    return root
+  }
+
+  private fun addRemoteKeyboardRow(parent: LinearLayout, keys: List<RemoteKeyboardKey>) {
+    val row = LinearLayout(this).apply {
+      orientation = LinearLayout.HORIZONTAL
+      gravity = Gravity.CENTER_VERTICAL
+      setPadding(0, dp(1), 0, dp(1))
+    }
+    keys.forEach { key ->
+      if (key.isSpacer) {
+        row.addView(
+          View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(key.widthDp), dp(REMOTE_KEYBOARD_BUTTON_HEIGHT_DP))
+          },
+        )
+      } else {
+        row.addView(createRemoteKeyboardButton(key))
+      }
+    }
+    parent.addView(row)
+  }
+
+  private fun createRemoteKeyboardButton(key: RemoteKeyboardKey): MaterialButton {
+    val button = MaterialButton(this).apply {
+      layoutParams = LinearLayout.LayoutParams(dp(key.widthDp), dp(REMOTE_KEYBOARD_BUTTON_HEIGHT_DP)).apply {
+        marginStart = dp(2)
+        marginEnd = dp(2)
+      }
+      minWidth = 0
+      minHeight = 0
+      minimumWidth = 0
+      minimumHeight = 0
+      insetTop = 0
+      insetBottom = 0
+      includeFontPadding = false
+      maxLines = 1
+      text = key.label
+      textSize = when {
+        key.label.length > 5 -> 8.5f
+        key.label.length > 3 -> 9.5f
+        else -> 11f
+      }
+      isAllCaps = false
+      setPadding(dp(2), 0, dp(2), 0)
+      cornerRadius = dp(6)
+      strokeWidth = dp(1)
+      setTextColor(Color.WHITE)
+      strokeColor = ColorStateList.valueOf(Color.parseColor("#35506F"))
+      backgroundTintList = ColorStateList.valueOf(Color.parseColor("#19263A"))
+      setOnClickListener {
+        handleRemoteKeyboardMappedKey(key)
+      }
+    }
+    if (isRemoteKeyboardModifierKey(key.keyCode)) {
+      remoteKeyboardModifierButtons[key.keyCode] = button
+    }
+    return button
+  }
+
+  private fun handleRemoteKeyboardMappedKey(key: RemoteKeyboardKey) {
+    if (isRemoteKeyboardModifierKey(key.keyCode)) {
+      if (remoteKeyboardActiveModifiers.contains(key.keyCode)) {
+        remoteKeyboardActiveModifiers.remove(key.keyCode)
+      } else {
+        remoteKeyboardActiveModifiers.add(key.keyCode)
+      }
+      updateRemoteKeyboardModifierButtons()
+      return
+    }
+    val modifiers = remoteKeyboardActiveModifiers.toList()
+    // 作者: long；电脑键盘面板发送的是标准键位码，修饰键保持为面板状态，方便连续输入组合键或快捷键。
+    sendRemoteKeyPress(key.keyCode, modifiers, key.label)
+  }
+
+  private fun updateRemoteKeyboardModifierButtons() {
+    remoteKeyboardModifierButtons.forEach { (keyCode, button) ->
+      val active = remoteKeyboardActiveModifiers.contains(keyCode)
+      button.backgroundTintList = ColorStateList.valueOf(
+        Color.parseColor(if (active) "#2B6DFF" else "#19263A"),
+      )
+      button.strokeColor = ColorStateList.valueOf(
+        Color.parseColor(if (active) "#8BB5FF" else "#35506F"),
+      )
+    }
+  }
+
+  private fun isRemoteKeyboardModifierKey(keyCode: String): Boolean =
+    keyCode == "ShiftLeft" ||
+      keyCode == "ShiftRight" ||
+      keyCode == "ControlLeft" ||
+      keyCode == "ControlRight" ||
+      keyCode == "AltLeft" ||
+      keyCode == "AltRight" ||
+      keyCode == "MetaLeft" ||
+      keyCode == "MetaRight"
+
+  private fun keyboardKey(label: String, keyCode: String, widthDp: Int = 34): RemoteKeyboardKey =
+    RemoteKeyboardKey(label = label, keyCode = keyCode, widthDp = widthDp)
+
+  private fun keyboardSpacer(widthDp: Int): RemoteKeyboardKey =
+    RemoteKeyboardKey(label = "", keyCode = "", widthDp = widthDp, isSpacer = true)
 
   private fun sendRemoteShortcut(keyCode: String, modifiers: List<String>, label: String): Boolean {
     // 作者: long；Mac 常用组合键用 MetaLeft 表示 Command，远端执行器会按 modifier down -> 主键 -> modifier up 的顺序落地。
@@ -3467,6 +6646,7 @@ class MainActivity : AppCompatActivity() {
     modifiers: List<String>,
     logLabel: String?,
   ): Boolean {
+    flushPendingRemoteMouseMoveBeforeDiscreteInput()
     if (!sendSocketMessage(
         controller.inputKeyboardMessage(sessionId, keyCode, "down", modifiers),
         logLabel?.let { "发送 input.keyboard.key $it down" } ?: "发送 input.keyboard.key $keyCode down",
@@ -3538,26 +6718,39 @@ class MainActivity : AppCompatActivity() {
     )
   }
 
-  private fun decodeFrameBitmap(contentB64: String): DecodedFrame {
+  private fun decodeFrameBitmap(
+    contentB64: String,
+    announcedWidth: Int,
+    announcedHeight: Int,
+    sourceRect: NormalizedRect,
+  ): DecodedFrame {
     return try {
-      val bytes = Base64.decode(contentB64, Base64.DEFAULT)
+      val bytes = try {
+        Base64.decode(contentB64, Base64.NO_WRAP)
+      } catch (_: IllegalArgumentException) {
+        Base64.decode(contentB64, Base64.DEFAULT)
+      }
       if (bytes.size > MAX_FRAME_BYTES) {
         return DecodedFrame(error = "屏幕帧过大，已拒绝渲染")
       }
 
-      val boundsOptions = BitmapFactory.Options().apply {
-        inJustDecodeBounds = true
-      }
-      BitmapFactory.decodeByteArray(bytes, 0, bytes.size, boundsOptions)
-      if (boundsOptions.outWidth <= 0 || boundsOptions.outHeight <= 0) {
-        return DecodedFrame(error = "屏幕帧不是有效 PNG")
-      }
-      if (boundsOptions.outWidth > MAX_FRAME_DIMENSION || boundsOptions.outHeight > MAX_FRAME_DIMENSION) {
-        return DecodedFrame(error = "屏幕帧尺寸超限 ${boundsOptions.outWidth}x${boundsOptions.outHeight}")
-      }
-
-      val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+      val bitmapConfig = preferredLegacyFrameBitmapConfig(announcedWidth, announcedHeight, sourceRect)
+      val reusableBitmap = takeReusableLegacyBitmap(announcedWidth, announcedHeight, bitmapConfig)
+      val bitmap = decodeLegacyBitmapBytes(bytes, bitmapConfig, reusableBitmap)
         ?: return DecodedFrame(error = "屏幕帧解码失败")
+      if (bitmap.width <= 0 || bitmap.height <= 0) {
+        return DecodedFrame(error = "屏幕帧不是有效图片")
+      }
+      if (bitmap.width > MAX_FRAME_DIMENSION || bitmap.height > MAX_FRAME_DIMENSION) {
+        return DecodedFrame(error = "屏幕帧尺寸超限 ${bitmap.width}x${bitmap.height}")
+      }
+      if (bitmap.width != announcedWidth || bitmap.height != announcedHeight) {
+        Log.w(
+          RTC_TAG,
+          "legacy_frame_size_mismatch announced=${formatFrameSize(announcedWidth, announcedHeight)} decoded=${formatFrameSize(bitmap.width, bitmap.height)}",
+        )
+      }
+      // 作者: long；relay 已经校验了帧尺寸边界，Android 这里单次解码后再复核真实 bitmap 尺寸，并优先复用已退场帧内存，减少全屏移动和局部高清阶段的 Bitmap 分配/GC 抖动。
       DecodedFrame(bitmap = bitmap, width = bitmap.width, height = bitmap.height)
     } catch (error: IllegalArgumentException) {
       DecodedFrame(error = "屏幕帧 Base64 非法：${error.message ?: "unknown"}")
@@ -3565,6 +6758,118 @@ class MainActivity : AppCompatActivity() {
       DecodedFrame(error = "屏幕帧过大，内存不足")
     }
   }
+
+  private fun preferredLegacyFrameBitmapConfig(
+    announcedWidth: Int,
+    announcedHeight: Int,
+    sourceRect: NormalizedRect,
+  ): Bitmap.Config =
+    if (!isMaterializedRemoteFrameSourceRect(sourceRect) && announcedWidth <= 700 && announcedHeight <= 460) {
+      // 作者: long；整屏兜底帧承担的是定位和鼠标反馈，640 宽全屏基础档也要走轻量解码；真正用于读文字的局部裁剪帧仍保留 ARGB_8888。
+      Bitmap.Config.RGB_565
+    } else {
+      // 作者: long；局部裁剪帧会被用户放大查看文字和输入框，哪怕尺寸不大也保留 ARGB_8888，避免 RGB_565 的色阶损失继续放大成发虚。
+      Bitmap.Config.ARGB_8888
+    }
+
+  private fun shouldUseHighQualityLegacyScaling(sourceRect: NormalizedRect): Boolean {
+    if (!remoteFullscreenActive) {
+      return true
+    }
+    if (::remoteScaleGestureDetector.isInitialized && remoteScaleGestureDetector.isInProgress) {
+      // 作者: long；双指缩放进行中优先保证本地矩阵动画跟手，停手后的局部高清帧再打开滤波补文字边缘，避免滤波绘制抢走全屏 pinch 帧预算。
+      return false
+    }
+    return isMaterializedRemoteFrameSourceRect(sourceRect) ||
+      remoteViewportScale > REMOTE_VIEWPORT_DETAIL_RENDER_MIN_SCALE
+  }
+
+  private fun decodeLegacyBitmapBytes(
+    bytes: ByteArray,
+    bitmapConfig: Bitmap.Config,
+    reusableBitmap: Bitmap?,
+  ): Bitmap? {
+    val decodeOptions = BitmapFactory.Options().apply {
+      inPreferredConfig = bitmapConfig
+      inDither = true
+      inMutable = true
+      if (reusableBitmap != null) {
+        inBitmap = reusableBitmap
+      }
+    }
+    return try {
+      BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions).also { bitmap ->
+        if (bitmap == null) {
+          reusableBitmap?.takeIf { !it.isRecycled }?.recycle()
+        }
+      }
+    } catch (error: IllegalArgumentException) {
+      if (reusableBitmap == null) {
+        throw error
+      }
+      reusableBitmap.takeIf { !it.isRecycled }?.recycle()
+      Log.w(RTC_TAG, "legacy_bitmap_reuse_failed retry_without_inBitmap reason=${error.message ?: "unknown"}")
+      BitmapFactory.decodeByteArray(
+        bytes,
+        0,
+        bytes.size,
+        BitmapFactory.Options().apply {
+          inPreferredConfig = bitmapConfig
+          inDither = true
+          inMutable = true
+        },
+      )
+    }
+  }
+
+  private fun takeReusableLegacyBitmap(
+    width: Int,
+    height: Int,
+    bitmapConfig: Bitmap.Config,
+  ): Bitmap? {
+    val requiredBytes = width.toLong() * height.toLong() * legacyBitmapBytesPerPixel(bitmapConfig)
+    if (requiredBytes <= 0L || requiredBytes > Int.MAX_VALUE) {
+      return null
+    }
+    synchronized(legacyReusableBitmaps) {
+      val index = legacyReusableBitmaps.indexOfFirst { bitmap ->
+        !bitmap.isRecycled &&
+          bitmap.isMutable &&
+          bitmap.config == bitmapConfig &&
+          bitmap.allocationByteCount >= requiredBytes
+      }
+      if (index < 0) {
+        return null
+      }
+      return legacyReusableBitmaps.removeAt(index)
+    }
+  }
+
+  private fun storeReusableLegacyBitmap(bitmap: Bitmap?) {
+    if (bitmap == null || bitmap.isRecycled || !bitmap.isMutable) {
+      return
+    }
+    synchronized(legacyReusableBitmaps) {
+      legacyReusableBitmaps.removeAll { it === bitmap || it.isRecycled }
+      if (legacyReusableBitmaps.size >= LEGACY_BITMAP_REUSE_POOL_LIMIT) {
+        bitmap.recycle()
+        return
+      }
+      legacyReusableBitmaps.add(bitmap)
+    }
+  }
+
+  private fun recycleLegacyReusableBitmapPool() {
+    synchronized(legacyReusableBitmaps) {
+      legacyReusableBitmaps.forEach { bitmap ->
+        bitmap.takeIf { !it.isRecycled }?.recycle()
+      }
+      legacyReusableBitmaps.clear()
+    }
+  }
+
+  private fun legacyBitmapBytesPerPixel(bitmapConfig: Bitmap.Config): Long =
+    if (bitmapConfig == Bitmap.Config.RGB_565) 2L else 4L
 
   private fun showFrameDecodeFailure(message: String) {
     val now = SystemClock.elapsedRealtime()
@@ -3577,14 +6882,50 @@ class MainActivity : AppCompatActivity() {
     lastLegacyDecodeFailureAtMs = now
     renderedFrameWidth = 0
     renderedFrameHeight = 0
+    resetRemoteViewportAspect()
     resetLegacyFrameStats()
-    binding.remoteFrameView.setImageDrawable(null)
+    clearLegacyFrameBitmap()
     binding.frameMetaText.text = "当前画面：-"
     setStatus("远端画面解码失败")
     if (suppressedCount > 0) {
       appendLog("legacy 解码失败日志已节流，抑制 $suppressedCount 条重复错误")
     }
     appendLog(message)
+  }
+
+  private fun showFrameDecodeFailureOnUiThread(message: String) {
+    if (Looper.myLooper() == Looper.getMainLooper()) {
+      showFrameDecodeFailure(message)
+      return
+    }
+    runOnUiThread {
+      if (!isActivityAlive) {
+        return@runOnUiThread
+      }
+      showFrameDecodeFailure(message)
+    }
+  }
+
+  private fun setLegacyFrameBitmap(bitmap: Bitmap) {
+    val oldCurrent = legacyDisplayedBitmap
+    binding.remoteFrameView.setFrameBitmap(bitmap)
+    legacyDisplayedBitmap = bitmap
+    legacyPreviousDisplayedBitmap
+      ?.takeIf { previous -> previous !== oldCurrent && previous !== bitmap && !previous.isRecycled }
+      ?.let { previous -> storeReusableLegacyBitmap(previous) }
+    // 作者: long；自定义帧 View 会在下一次 vsync 绘制新图，保留一帧缓冲；更早退场的帧放入复用池，减少高频 JPEG 兜底流的 Bitmap 分配。
+    legacyPreviousDisplayedBitmap = oldCurrent?.takeIf { previous -> previous !== bitmap && !previous.isRecycled }
+  }
+
+  private fun clearLegacyFrameBitmap() {
+    binding.remoteFrameView.clearFrameBitmap()
+    val current = legacyDisplayedBitmap
+    val previous = legacyPreviousDisplayedBitmap
+    legacyDisplayedBitmap = null
+    legacyPreviousDisplayedBitmap = null
+    current?.takeIf { !it.isRecycled }?.recycle()
+    previous?.takeIf { it !== current && !it.isRecycled }?.recycle()
+    recycleLegacyReusableBitmapPool()
   }
 
   private fun updateSessionText() {
@@ -3602,23 +6943,26 @@ class MainActivity : AppCompatActivity() {
     closeWebRtcSession(reason = "reset_session_ui", clearRendererImage = clearFrame)
     renderedFrameWidth = 0
     renderedFrameHeight = 0
+    resetRemoteViewportAspect()
     resetLegacyFrameStats()
     resetLegacyFailureThrottleState()
     resetRemoteInputResultStats()
     resetLiveE2EProofReportState()
+    incomingFileTransfers.clear()
     frameGeneration += 1
     updateSessionText()
     binding.transportText.text = "传输方式：-"
     binding.peerText.text = "会话链路：-"
     binding.ackText.text = "输入回执：-"
     binding.frameMetaText.text = "当前画面：-"
+    binding.remoteTransferStatusText.text = "剪贴板/文件：等待会话"
     updateLiveMetricsPanel()
     resetRemoteViewportTransform(logReason = false)
     exitRemoteViewportFullscreen(reason = "session_reset")
-    binding.remoteVideoView.isVisible = true
+    activateRemoteVideoRenderer(useTexture = false)
     binding.remoteFrameView.isVisible = false
     if (clearFrame) {
-      binding.remoteFrameView.setImageDrawable(null)
+      clearLegacyFrameBitmap()
       clearRemoteVideoRendererImage()
     }
   }
@@ -3642,6 +6986,8 @@ class MainActivity : AppCompatActivity() {
     binding.remoteKeyboardSendButton.isEnabled = hasSession
     binding.remoteKeyboardBackspaceButton.isEnabled = hasSession
     binding.remoteKeyboardEnterButton.isEnabled = hasSession
+    binding.remoteClipboardSendButton.isEnabled = hasSession
+    binding.remoteFileSendButton.isEnabled = hasSession
     binding.sessionEndButton.isEnabled = hasSession || pendingSessionRequest || isRecoveringSession
 
     binding.targetDeviceInput.isEnabled = !hasSession && !pendingSessionRequest && !isRecoveringSession
@@ -4910,6 +8256,40 @@ class MainActivity : AppCompatActivity() {
     return value.takeIf { it.isNotBlank() }
   }
 
+  private fun JSONObject?.optNormalizedNumber(name: String): Double? {
+    val value = this?.optDouble(name, Double.NaN) ?: return null
+    return value.takeIf { !it.isNaN() && !it.isInfinite() && it >= 0.0 && it <= 1.0 }
+  }
+
+  private fun parseFrameSourceRect(payload: JSONObject?): NormalizedRect {
+    val x = payload.optNormalizedNumber("source_rect_x") ?: return NormalizedRect(0.0, 0.0, 1.0, 1.0)
+    val y = payload.optNormalizedNumber("source_rect_y") ?: return NormalizedRect(0.0, 0.0, 1.0, 1.0)
+    val width = payload.optNormalizedNumber("source_rect_width") ?: return NormalizedRect(0.0, 0.0, 1.0, 1.0)
+    val height = payload.optNormalizedNumber("source_rect_height") ?: return NormalizedRect(0.0, 0.0, 1.0, 1.0)
+    if (width <= 0.0 || height <= 0.0 || x + width > 1.000001 || y + height > 1.000001) {
+      return NormalizedRect(0.0, 0.0, 1.0, 1.0)
+    }
+    return NormalizedRect(
+      x = x.coerceIn(0.0, 1.0),
+      y = y.coerceIn(0.0, 1.0),
+      width = width.coerceIn(0.0, 1.0 - x),
+      height = height.coerceIn(0.0, 1.0 - y),
+    )
+  }
+
+  private fun isMaterializedRemoteFrameSourceRect(rect: NormalizedRect = remoteFrameSourceRect): Boolean =
+    abs(rect.x) > 0.000001 ||
+      abs(rect.y) > 0.000001 ||
+      abs(rect.width - 1.0) > 0.000001 ||
+      abs(rect.height - 1.0) > 0.000001
+
+  private fun formatSourceRectForLog(rect: NormalizedRect): String {
+    if (!isMaterializedRemoteFrameSourceRect(rect)) {
+      return "full"
+    }
+    return "${formatCoordinate(rect.x)},${formatCoordinate(rect.y)},${formatCoordinate(rect.width)},${formatCoordinate(rect.height)}"
+  }
+
   private fun org.json.JSONArray.toStringList(): List<String> {
     val values = mutableListOf<String>()
     for (index in 0 until length()) {
@@ -4936,44 +8316,244 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
+  private fun renderMoveAckThrottled(echoType: String) {
+    val now = SystemClock.elapsedRealtime()
+    if (now - remoteLastMoveUiUpdateAtMs < REMOTE_INPUT_MOVE_UI_UPDATE_INTERVAL_MS) {
+      remoteSuppressedMoveAckCount += 1
+      return
+    }
+    remoteLastMoveUiUpdateAtMs = now
+    val suppressedSuffix = if (remoteSuppressedMoveAckCount > 0) {
+      "，已合并 ${remoteSuppressedMoveAckCount} 条移动确认"
+    } else {
+      ""
+    }
+    remoteSuppressedMoveAckCount = 0
+    // 作者: long；鼠标移动会在真机上形成高频回执，日志只保留节流汇总，避免输入越顺滑反而越挤压视频渲染主线程。
+    binding.ackText.text = "输入回执：$echoType 已确认$suppressedSuffix"
+    appendLog("收到 $echoType 已确认$suppressedSuffix")
+  }
+
+  private fun logIncomingSignal(json: JSONObject, payload: JSONObject?, size: Int) {
+    if (json.optString("type") == "screen.frame.push") {
+      logIncomingFrameSignalThrottled(json, size)
+      return
+    }
+    if (!isMoveSignalNoise(json, payload)) {
+      Log.i(RTC_TAG, "recv_signal ${summarizeEnvelope(json, size)}")
+      return
+    }
+    val now = SystemClock.elapsedRealtime()
+    if (now - remoteLastMoveSignalLogAtMs < REMOTE_MOVE_SIGNAL_LOG_INTERVAL_MS) {
+      remoteSuppressedMoveSignalLogCount += 1
+      return
+    }
+    val suppressed = remoteSuppressedMoveSignalLogCount
+    remoteSuppressedMoveSignalLogCount = 0
+    remoteLastMoveSignalLogAtMs = now
+    // 作者: long；鼠标移动链路会产生高频 ack/result，逐条写 logcat 会抢占真机解码和合成预算；这里保留节流样本和合并计数用于验收。
+    Log.i(
+      RTC_TAG,
+      "recv_signal ${summarizeEnvelope(json, size)} suppressed_move_signals=$suppressed",
+    )
+  }
+
+  private fun logIncomingFrameSignalThrottled(json: JSONObject, size: Int) {
+    val now = SystemClock.elapsedRealtime()
+    if (now - remoteLastFrameSignalLogAtMs < REMOTE_FRAME_SIGNAL_LOG_INTERVAL_MS) {
+      remoteSuppressedFrameSignalLogCount += 1
+      return
+    }
+    val suppressed = remoteSuppressedFrameSignalLogCount
+    remoteSuppressedFrameSignalLogCount = 0
+    remoteLastFrameSignalLogAtMs = now
+    // 作者: long；JPEG 帧流的每一帧都是大消息，逐帧写入 RemoteDeskRtc 会把验证日志变成性能瓶颈；这里保留定期样本和合并数量。
+    Log.i(
+      RTC_TAG,
+      "recv_signal ${summarizeEnvelope(json, size)} suppressed_frame_signals=$suppressed",
+    )
+  }
+
+  private fun isMoveSignalNoise(json: JSONObject, payload: JSONObject?): Boolean {
+    return when (json.optString("type")) {
+      "input.ack" -> payload.optNonBlank("echo_type") == "input.mouse.move"
+      "input.result.push" -> payload.optNonBlank("input_type") == "input.mouse.move"
+      else -> false
+    }
+  }
+
+  private fun renderMoveResultThrottled(
+    resultLabel: String,
+    summary: String,
+    statusCode: String,
+    executor: String,
+  ) {
+    val now = SystemClock.elapsedRealtime()
+    if (now - remoteLastMoveUiUpdateAtMs < REMOTE_INPUT_MOVE_UI_UPDATE_INTERVAL_MS) {
+      remoteSuppressedMoveResultCount += 1
+      return
+    }
+    remoteLastMoveUiUpdateAtMs = now
+    val suppressedSuffix = if (remoteSuppressedMoveResultCount > 0) {
+      "，已合并 ${remoteSuppressedMoveResultCount} 条移动结果"
+    } else {
+      ""
+    }
+    remoteSuppressedMoveResultCount = 0
+    binding.ackText.text = "输入回执：$resultLabel input.mouse.move [$statusCode/$executor]$suppressedSuffix"
+    appendLog("收到目标端输入执行结果：$resultLabel $summary [$statusCode/$executor]$suppressedSuffix")
+  }
+
   private fun initializeRemoteViewportControls() {
     remoteTouchSlopPx = ViewConfiguration.get(this).scaledTouchSlop.toFloat()
-    remoteScaleGestureDetector = ScaleGestureDetector(
-      this,
-      object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+    // 作者: long；SurfaceView 在部分真机上会绕过普通 View 绘制顺序，远控控制层需要显式抬高，避免全屏和倍率按钮被视频层吞掉。
+    binding.remoteTouchLayer.bringToFront()
+    binding.remoteCursorOverlay.bringToFront()
+    binding.remoteZoomResetButton.apply {
+      visibility = View.VISIBLE
+      elevation = dpFloat(8)
+      bringToFront()
+    }
+    binding.remoteFullscreenButton.apply {
+      visibility = View.VISIBLE
+      elevation = dpFloat(8)
+      bringToFront()
+    }
+    binding.remoteKeyboardPanelButton.apply {
+      visibility = View.VISIBLE
+      elevation = dpFloat(8)
+      bringToFront()
+    }
+    binding.remoteViewportContainer.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+      if (!remoteFullscreenActive) {
+        return@addOnLayoutChangeListener
+      }
+      val sizeChanged = right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop
+      if (!sizeChanged) {
+        return@addOnLayoutChangeListener
+      }
+      // 作者: long；横屏沉浸切换后系统会分多次给出真实可用尺寸，尺寸一变就复算完整适配框，避免全屏短暂按满屏拉伸后看起来像被裁剪。
+      scheduleRemoteFullscreenAspectReflow()
+    }
+	    remoteScaleGestureDetector = ScaleGestureDetector(
+	      this,
+	      object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-          remoteSuppressTap = true
-          return renderedFrameWidth > 0 && renderedFrameHeight > 0
-        }
-
-        override fun onScale(detector: ScaleGestureDetector): Boolean {
-          if (abs(detector.scaleFactor - 1f) < REMOTE_PINCH_SCALE_EPSILON) {
+          if (renderedFrameWidth <= 0 || renderedFrameHeight <= 0) {
             return false
           }
+          if (remoteDebugPinchDispatchActive) {
+            Log.i(
+              RTC_TAG,
+              "remote_debug_pinch_scale_begin focus=${String.format(Locale.US, "%.1f", detector.focusX)},${String.format(Locale.US, "%.1f", detector.focusY)} span=${String.format(Locale.US, "%.1f", detector.currentSpan)}",
+            )
+          }
+          remoteSuppressTap = true
+          remoteScrollGestureActive = false
+          remoteAccumulatedPinchScaleFactor = 1f
+          remotePinchFocusX = detector.focusX
+          remotePinchFocusY = detector.focusY
+	          remotePinchFocusInitialized = true
+          remoteLastPinchEndHintAtMs = 0L
+          remoteLastPinchEndHintKey = ""
+	          prepareRemoteViewportForInteractiveTransform()
+	          beginLegacyPinchFrameGate()
+	          binding.remoteFrameView.setHighQualityScaling(false)
+	          sendRemoteViewportInteractionHint("start", "pinch", force = true)
+	          return true
+	        }
+
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+          remoteAccumulatedPinchScaleFactor *= detector.scaleFactor
+          if (abs(remoteAccumulatedPinchScaleFactor - 1f) < REMOTE_PINCH_SCALE_EPSILON) {
+            return false
+	          }
+	          // 作者: long；真机两指距离会有细小抖动，但全屏阅读时过度压缩增量会让用户需要反复捏合才获得清晰局部；这里保留轻量抗抖，同时让倍率更贴近手指速度。
+	          val rawScaleFactor = remoteAccumulatedPinchScaleFactor
+	          remoteAccumulatedPinchScaleFactor = 1f
+	          if (applyRemoteViewportSourceRectBackedPinch(rawScaleFactor, detector.focusX, detector.focusY, source = "detector")) {
+	            return true
+	          }
+	          val smoothedScaleFactor = 1f + ((rawScaleFactor - 1f) * REMOTE_PINCH_SCALE_FACTOR_SMOOTHING)
           val oldScale = remoteViewportScale
-          val nextScale = (oldScale * detector.scaleFactor)
+          val nextScale = (oldScale * smoothedScaleFactor)
             .coerceIn(REMOTE_VIEWPORT_MIN_SCALE, REMOTE_VIEWPORT_MAX_SCALE)
           if (abs(nextScale - oldScale) < 0.0005f) {
             return false
           }
           remotePinchZoomActive = true
           val ratio = nextScale / oldScale
-          val focusX = detector.focusX
-          val focusY = detector.focusY
+          val focusX = smoothRemotePinchFocusX(detector.focusX)
+          val focusY = smoothRemotePinchFocusY(detector.focusY)
           val newOffsetX = focusX - ((focusX - remoteViewportOffsetX) * ratio)
           val newOffsetY = focusY - ((focusY - remoteViewportOffsetY) * ratio)
           remoteViewportScale = nextScale
           remoteViewportOffsetX = clampRemoteViewportOffsetX(newOffsetX, nextScale)
           remoteViewportOffsetY = clampRemoteViewportOffsetY(newOffsetY, nextScale)
-          applyRemoteViewportTransform()
-          Log.i(RTC_TAG, "remote_viewport_pinch_scale scale=${String.format(Locale.US, "%.3f", nextScale)}")
+	          // 作者: long；双指连续捏合期间只更新合成层 transform，避免频繁改 Surface 尺寸让全屏缩放一顿一顿；停手后再提交更清晰的真实渲染面。
+	          scheduleRemoteViewportTransformApply(commitRenderScale = false)
+          sendRemoteViewportInteractionHint("update", "pinch")
+          val now = SystemClock.elapsedRealtime()
+          if (remoteDebugPinchDispatchActive || now - remoteLastPinchScaleLogAtMs >= 250L) {
+            remoteLastPinchScaleLogAtMs = now
+            Log.i(RTC_TAG, "remote_viewport_pinch_scale scale=${String.format(Locale.US, "%.3f", nextScale)}")
+          }
           return true
+        }
+
+		        override fun onScaleEnd(detector: ScaleGestureDetector) {
+              if (remoteDebugPinchDispatchActive) {
+                Log.i(
+                  RTC_TAG,
+                  "remote_debug_pinch_scale_end scale=${String.format(Locale.US, "%.3f", remoteViewportScale)} span=${String.format(Locale.US, "%.1f", detector.currentSpan)}",
+                )
+              }
+	              if (abs(remoteAccumulatedPinchScaleFactor - 1f) >= REMOTE_PINCH_END_SNAP_EPSILON) {
+	                val oldScale = remoteViewportScale
+	                val appliedSourceRectPinch = applyRemoteViewportSourceRectBackedPinch(
+	                  remoteAccumulatedPinchScaleFactor,
+	                  detector.focusX,
+	                  detector.focusY,
+	                  source = "detector_end",
+	                )
+	                if (!appliedSourceRectPinch) {
+	                  val nextScale = (oldScale * remoteAccumulatedPinchScaleFactor)
+	                    .coerceIn(REMOTE_VIEWPORT_MIN_SCALE, REMOTE_VIEWPORT_MAX_SCALE)
+	                  if (abs(nextScale - oldScale) >= 0.0005f) {
+	                    val ratio = nextScale / oldScale
+	                    val focusX = smoothRemotePinchFocusX(detector.focusX)
+	                    val focusY = smoothRemotePinchFocusY(detector.focusY)
+	                    val newOffsetX = focusX - ((focusX - remoteViewportOffsetX) * ratio)
+	                    val newOffsetY = focusY - ((focusY - remoteViewportOffsetY) * ratio)
+	                    remoteViewportScale = nextScale
+	                    remoteViewportOffsetX = clampRemoteViewportOffsetX(newOffsetX, nextScale)
+	                    remoteViewportOffsetY = clampRemoteViewportOffsetY(newOffsetY, nextScale)
+	                    scheduleRemoteViewportTransformApply(commitRenderScale = false)
+	                  }
+	                }
+	              }
+              remoteAccumulatedPinchScaleFactor = 1f
+			          endLegacyPinchFrameGate(
+		            reason = "scale_end",
+		            keepFullFrameFrozen = remoteViewportScale >= REMOTE_VIEWPORT_DETAIL_RENDER_MIN_SCALE,
+		          )
+	          resetRemotePinchFocus()
+	          binding.remoteFrameView.setHighQualityScaling(shouldUseHighQualityLegacyScaling(remoteFrameSourceRect))
+          if (remoteViewportScale >= REMOTE_VIEWPORT_DETAIL_RENDER_MIN_SCALE) {
+            scheduleRemoteViewportRenderScaleCommit(remoteViewportRenderCommitDelayMs())
+          } else {
+            // 作者: long；轻微捏合更像快速定位，停手后不重建高清承载面，避免用户刚放手就被 Surface 重新布局卡一下。
+            scheduleRemoteViewportTransformApply(commitRenderScale = false)
+            scheduleRemoteViewportHardwareLayerRelease()
+          }
+          sendRemoteViewportInteractionHint("end", "pinch", force = true)
         }
       },
     )
 
     binding.remoteZoomResetButton.setOnClickListener {
       resetRemoteViewportTransform(logReason = true)
+      sendRemoteViewportInteractionHint("end", "pinch", force = true)
     }
     binding.remoteFullscreenButton.setOnClickListener {
       toggleRemoteViewportFullscreen()
@@ -4981,35 +8561,372 @@ class MainActivity : AppCompatActivity() {
     updateRemoteFullscreenButtonText()
   }
 
-  private fun applyRemoteViewportTransform() {
+  private fun applyRemoteViewportTransform(commitRenderScale: Boolean = false) {
+    val requestedScale = remoteViewportScale
     val tx = remoteViewportOffsetX
     val ty = remoteViewportOffsetY
-    val scale = remoteViewportScale
-    listOf(binding.remoteVideoView, binding.remoteFrameView).forEach { target ->
-      target.pivotX = 0f
-      target.pivotY = 0f
-      target.scaleX = scale
-      target.scaleY = scale
-      target.translationX = tx
-      target.translationY = ty
+    val scale = requestedScale
+    if (commitRenderScale) {
+      remoteViewportRenderScale = coerceRemoteViewportRenderScale(scale)
+      remoteViewportRenderBoundsDirty = true
+      remoteLastRenderScaleCommitAtMs = SystemClock.elapsedRealtime()
     }
-    // 作者: long；这个按钮同时承担“重置缩放”和“当前倍率提示”，否则用户做完捏合后看不出局部放大是否已经生效。
-    binding.remoteZoomResetButton.text = if (scale <= REMOTE_VIEWPORT_MIN_SCALE + 0.005f) {
+    val renderScale = remoteViewportRenderScale.coerceIn(
+      REMOTE_VIEWPORT_MIN_RENDER_SCALE,
+      REMOTE_VIEWPORT_MAX_RENDER_SCALE,
+    )
+    if (remoteViewportRenderBoundsDirty) {
+      remoteViewportRenderBoundsDirty = !updateRemoteViewportContentRenderBounds(renderScale)
+    }
+    val visualScale = (scale / renderScale).coerceIn(
+      REMOTE_VIEWPORT_MIN_SCALE / REMOTE_VIEWPORT_MAX_RENDER_SCALE,
+      REMOTE_VIEWPORT_MAX_SCALE / REMOTE_VIEWPORT_MIN_RENDER_SCALE,
+    )
+    val sourceRectPreviewScale = remoteSourceRectPreviewScale.coerceIn(0.18f, 1f)
+    binding.remoteViewportContent.apply {
+      pivotX = 0f
+      pivotY = 0f
+      scaleX = visualScale * sourceRectPreviewScale
+      scaleY = visualScale * sourceRectPreviewScale
+      translationX = tx + remoteSourceRectPreviewOffsetX
+      translationY = ty + remoteSourceRectPreviewOffsetY
+    }
+    val nextLabel = if (requestedScale <= REMOTE_VIEWPORT_MIN_SCALE + 0.005f) {
       "1x"
     } else {
-      String.format(Locale.US, "%.1fx", scale)
+      String.format(Locale.US, "%.1fx", requestedScale)
+    }
+    if (remoteZoomResetButtonLabel != nextLabel) {
+      val now = SystemClock.elapsedRealtime()
+      val canUpdateLabel = !remoteScaleGestureDetector.isInProgress ||
+        now - remoteLastZoomResetLabelUpdateAtMs >= REMOTE_ZOOM_LABEL_UPDATE_INTERVAL_MS
+      if (canUpdateLabel) {
+        remoteLastZoomResetLabelUpdateAtMs = now
+        remoteZoomResetButtonLabel = nextLabel
+        // 作者: long；倍率提示是辅助信息，不参与远控手势本身；全屏捏合时节流文本更新，避免小按钮频繁测量拖慢内容层矩阵动画。
+        binding.remoteZoomResetButton.text = nextLabel
+      }
     }
   }
 
+  private fun prepareRemoteViewportForInteractiveTransform() {
+    cancelRemoteViewportRenderScaleCommit()
+    setRemoteViewportHardwareLayerActive(true)
+    val interactionRenderScale = remoteViewportInteractionRenderScale()
+    if (remoteViewportRenderScale <= interactionRenderScale) {
+      return
+    }
+    // 作者: long；二次捏合时如果继续拖着上一轮超大 Surface 做 transform，全屏合成成本会明显上升；手势中保留轻量但不低清的承载面，停手后再补高清重绘。
+    remoteViewportRenderScale = interactionRenderScale
+    remoteViewportRenderBoundsDirty = true
+    scheduleRemoteViewportTransformApply(commitRenderScale = false)
+  }
+
+  private fun scheduleRemoteViewportRenderScaleCommit(delayMs: Long) {
+    cancelRemoteViewportRenderScaleCommit()
+    remoteViewportRenderCommitRunnable = Runnable {
+      remoteViewportRenderCommitRunnable = null
+      if (!isActivityAlive) {
+        return@Runnable
+      }
+      // 作者: long；高清承载面提交会触发 Surface 重新布局，延迟到手势稳定后执行，避免用户刚松手或继续微调时出现明显顿挫。
+      scheduleRemoteViewportTransformApply(commitRenderScale = true)
+      scheduleRemoteViewportHardwareLayerRelease()
+    }.also { runnable ->
+      remoteGestureHandler.postDelayed(runnable, delayMs.coerceAtLeast(1L))
+    }
+  }
+
+  private fun remoteViewportRenderCommitDelayMs(): Long =
+    if (remoteFullscreenActive) REMOTE_VIEWPORT_FULLSCREEN_RENDER_COMMIT_DELAY_MS else REMOTE_VIEWPORT_RENDER_COMMIT_DELAY_MS
+
+  private fun cancelRemoteViewportRenderScaleCommit() {
+    remoteViewportRenderCommitRunnable?.let { remoteGestureHandler.removeCallbacks(it) }
+    remoteViewportRenderCommitRunnable = null
+  }
+
+  private fun setRemoteViewportHardwareLayerActive(active: Boolean) {
+    remoteViewportHardwareLayerReleaseRunnable?.let { remoteGestureHandler.removeCallbacks(it) }
+    remoteViewportHardwareLayerReleaseRunnable = null
+    val targetLayerType = if (active) View.LAYER_TYPE_HARDWARE else View.LAYER_TYPE_NONE
+    if (binding.remoteViewportContent.layerType == targetLayerType) {
+      return
+    }
+    // 作者: long；全屏双指缩放时每一帧只改合成层矩阵，临时硬件层能减少 View 层级重绘；停手后释放，避免后续 JPEG 帧更新一直背着大纹理成本。
+    binding.remoteViewportContent.setLayerType(targetLayerType, null)
+  }
+
+  private fun scheduleRemoteViewportHardwareLayerRelease() {
+    remoteViewportHardwareLayerReleaseRunnable?.let { remoteGestureHandler.removeCallbacks(it) }
+    remoteViewportHardwareLayerReleaseRunnable = Runnable {
+      remoteViewportHardwareLayerReleaseRunnable = null
+      if (!isActivityAlive || remoteScaleGestureDetector.isInProgress) {
+        return@Runnable
+      }
+      setRemoteViewportHardwareLayerActive(false)
+    }.also { runnable ->
+      remoteGestureHandler.postDelayed(runnable, REMOTE_VIEWPORT_HARDWARE_LAYER_RELEASE_DELAY_MS)
+    }
+  }
+
+  private fun updateRemoteViewportContentRenderBounds(renderScale: Float): Boolean {
+    val viewportWidth = binding.remoteViewportContainer.width
+    val viewportHeight = binding.remoteViewportContainer.height
+    if (viewportWidth <= 0 || viewportHeight <= 0) {
+      return false
+    }
+    val boundedRenderScale = coerceRemoteViewportRenderScale(renderScale)
+    val targetWidth = (viewportWidth.toFloat() * boundedRenderScale).roundToInt().coerceAtLeast(1)
+    val targetHeight = (viewportHeight.toFloat() * boundedRenderScale).roundToInt().coerceAtLeast(1)
+    val params = (binding.remoteViewportContent.layoutParams as? FrameLayout.LayoutParams)
+      ?: FrameLayout.LayoutParams(targetWidth, targetHeight)
+    val expectedGravity = Gravity.TOP or Gravity.START
+    if (params.width == targetWidth && params.height == targetHeight && params.gravity == expectedGravity) {
+      return true
+    }
+    // 作者: long；捏合结束后提交更大的 WebRTC 渲染面，让后续停留和局部平移尽量使用视频帧重绘结果，而不是一直放大同一张合成位图。
+    params.width = targetWidth
+    params.height = targetHeight
+    params.gravity = expectedGravity
+    binding.remoteViewportContent.layoutParams = params
+    binding.remoteViewportContent.post {
+      if (!isActivityAlive) {
+        return@post
+      }
+      // 作者: long；缩放停手后内容层会变成更大的真实承载面，主动刷新视频子层，避免 Surface 继续沿用旧尺寸合成导致局部放大后发虚。
+      binding.remoteVideoView.requestLayout()
+      binding.remoteVideoView.invalidate()
+      binding.remoteTextureVideoView.requestLayout()
+      binding.remoteTextureVideoView.invalidate()
+      binding.remoteFrameView.requestLayout()
+      binding.remoteFrameView.invalidate()
+    }
+    return true
+  }
+
+  private fun scheduleRemoteViewportTransformApply(commitRenderScale: Boolean = false) {
+    if (commitRenderScale) {
+      remoteViewportTransformCommitRequested = true
+    }
+    if (remoteViewportTransformApplyScheduled) {
+      return
+    }
+    remoteViewportTransformApplyScheduled = true
+    binding.remoteViewportContainer.postOnAnimation {
+      val shouldCommitRenderScale = remoteViewportTransformCommitRequested
+      remoteViewportTransformApplyScheduled = false
+      remoteViewportTransformCommitRequested = false
+      if (!isActivityAlive) {
+        return@postOnAnimation
+      }
+      applyRemoteViewportTransform(commitRenderScale = shouldCommitRenderScale)
+    }
+  }
+
+  private fun coerceRemoteViewportRenderScale(requestedScale: Float): Float {
+    val fallbackScale = requestedScale.coerceIn(REMOTE_VIEWPORT_MIN_RENDER_SCALE, REMOTE_VIEWPORT_MAX_RENDER_SCALE)
+    val viewportWidth = binding.remoteViewportContainer.width.takeIf { it > 0 } ?: return fallbackScale
+    val viewportHeight = binding.remoteViewportContainer.height.takeIf { it > 0 } ?: return fallbackScale
+    val viewportPixels = viewportWidth.toFloat() * viewportHeight.toFloat()
+    if (viewportPixels <= 0f) {
+      return fallbackScale
+    }
+    val maxScaleByPixels = sqrt(REMOTE_VIEWPORT_MAX_RENDER_PIXELS.toFloat() / viewportPixels)
+      .coerceAtLeast(REMOTE_VIEWPORT_MIN_SCALE)
+    if (remoteFullscreenActive) {
+      // 作者: long；全屏最大缩放时只改内容层矩阵和远端裁剪源，不再重建大 Surface/Texture 承载面，避免窗口提交和 JPEG 局部帧同时压垮系统合成。
+      return requestedScale.coerceIn(
+        REMOTE_VIEWPORT_MIN_SCALE,
+        min(REMOTE_VIEWPORT_FULLSCREEN_MAX_RENDER_SCALE, maxScaleByPixels),
+      )
+    }
+    // 作者: long；小窗放大可以适度提高承载面，避免普通页面阅读发虚；全屏路径只允许很小的高清补偿，避免横屏远控时反复重建大 Surface。
+    return requestedScale.coerceIn(
+      REMOTE_VIEWPORT_MIN_SCALE,
+      min(REMOTE_VIEWPORT_MAX_RENDER_SCALE, maxScaleByPixels),
+    )
+  }
+
   private fun resetRemoteViewportTransform(logReason: Boolean) {
+    cancelRemoteViewportRenderScaleCommit()
+    clearLegacySourceRectFullFrameProtection(reason = "viewport_reset")
+    setRemoteViewportHardwareLayerActive(false)
+    remotePinchViewportSourceRect = null
+    remotePinchViewportLargestSourceRect = null
+    resetRemoteSourceRectPreviewTransform()
     remoteViewportScale = REMOTE_VIEWPORT_MIN_SCALE
     remoteViewportOffsetX = 0f
     remoteViewportOffsetY = 0f
+    remoteViewportRenderScale = remoteViewportBaseRenderScale()
+    remoteViewportRenderBoundsDirty = true
+    remoteLastRenderScaleCommitAtMs = SystemClock.elapsedRealtime()
     remotePanMoved = false
     remoteSuppressTap = false
-    applyRemoteViewportTransform()
+    applyRemoteViewportTransform(commitRenderScale = false)
     if (logReason) {
       appendLog("远端画面缩放已重置为 1x")
+    }
+  }
+
+  private fun materializeRemoteFrameSourceRect(sourceRect: NormalizedRect): Boolean {
+    val previousSourceRect = remoteFrameSourceRect
+    val pinchStillInProgress =
+      remoteManualPinchActive ||
+        remotePinchZoomActive ||
+        (::remoteScaleGestureDetector.isInitialized && remoteScaleGestureDetector.isInProgress)
+    // 作者: long；并拢缩小时 Mac 会陆续回显中间 source_rect，目标 rect 跟着手势生命周期走，不能被旧帧物化覆盖；真正清理放在手势 reset。
+    val alreadyMaterializedSource =
+      isMaterializedRemoteFrameSourceRect(previousSourceRect) && isMaterializedRemoteFrameSourceRect(sourceRect)
+    val alreadyNormalizedViewport =
+      remoteViewportScale <= REMOTE_VIEWPORT_MIN_SCALE + 0.005f &&
+        abs(remoteViewportOffsetX) < 0.5f &&
+        abs(remoteViewportOffsetY) < 0.5f
+    val needsViewportReset = !alreadyMaterializedSource || !alreadyNormalizedViewport
+    if (needsViewportReset) {
+      cancelRemoteViewportRenderScaleCommit()
+      scheduleRemoteViewportHardwareLayerRelease()
+      remoteViewportScale = REMOTE_VIEWPORT_MIN_SCALE
+      remoteViewportOffsetX = 0f
+      remoteViewportOffsetY = 0f
+      remoteViewportRenderScale = remoteViewportBaseRenderScale()
+      remoteViewportRenderBoundsDirty = true
+    }
+    if (!pinchStillInProgress) {
+      remotePinchZoomActive = false
+      resetRemotePinchFocus()
+    }
+    if (isMaterializedRemoteFrameSourceRect(sourceRect)) {
+      val now = SystemClock.elapsedRealtime()
+      if (needsViewportReset || now - remoteLastSourceRectMaterializedLogAtMs >= REMOTE_SOURCE_RECT_MATERIALIZED_LOG_INTERVAL_MS) {
+        remoteLastSourceRectMaterializedLogAtMs = now
+        Log.i(RTC_TAG, "remote_viewport_source_rect_materialized rect=${formatSourceRectForLog(sourceRect)} reset=$needsViewportReset")
+      }
+    }
+    // 作者: long；最大缩放后鼠标拖动画面会连续收到局部 source_rect 帧，只有从整屏切到局部或本地仍有缩放残留时才重置内容层，避免反复重建全屏窗口导致卡顿/闪退。
+    return needsViewportReset
+  }
+
+  private fun remoteViewportBaseRenderScale(): Float =
+    if (remoteFullscreenActive) REMOTE_VIEWPORT_FULLSCREEN_BASE_RENDER_SCALE else REMOTE_VIEWPORT_MIN_SCALE
+
+  private fun remoteViewportInteractionRenderScale(): Float =
+    if (remoteFullscreenActive) REMOTE_VIEWPORT_FULLSCREEN_INTERACTION_RENDER_SCALE else REMOTE_VIEWPORT_INTERACTION_RENDER_SCALE
+
+  private fun setRemoteVideoHardwareScalerEnabled(enabled: Boolean) {
+    // 作者: long；手势缩放只改远控内容层，视频 Surface 保持硬件缩放，交给系统合成器处理连续缩放更稳。
+    binding.remoteVideoView.setEnableHardwareScaler(enabled)
+  }
+
+  private fun updateRemoteViewportAspect(frameWidth: Int, frameHeight: Int) {
+    if (frameWidth <= 0 || frameHeight <= 0) {
+      return
+    }
+    if (remoteFullscreenActive) {
+      updateRemoteFullscreenViewportAspect(frameWidth, frameHeight)
+      return
+    }
+    val viewport = binding.remoteViewportContainer
+    viewport.post {
+      if (!isActivityAlive || remoteFullscreenActive) {
+        return@post
+      }
+      val availableWidth = viewport.width.takeIf { it > 0 }
+        ?: (resources.displayMetrics.widthPixels - dp(32)).coerceAtLeast(dp(240))
+      val aspectHeight = (availableWidth.toFloat() * frameHeight.toFloat() / frameWidth.toFloat()).roundToInt()
+      val boundedHeight = aspectHeight.coerceIn(
+        dp(REMOTE_VIEWPORT_SMALL_MIN_HEIGHT_DP),
+        dp(REMOTE_VIEWPORT_SMALL_MAX_HEIGHT_DP),
+      )
+      val params = viewport.layoutParams
+      if (params.height != boundedHeight) {
+        // 作者: long；小窗高度跟随远端屏幕比例，避免固定高度让用户误以为电脑画面被截掉，同时保留上下限防止页面被极端分辨率撑爆。
+        params.height = boundedHeight
+        viewport.layoutParams = params
+        viewport.post {
+          if (isActivityAlive && !remoteFullscreenActive) {
+            resetRemoteViewportTransform(logReason = false)
+          }
+        }
+      }
+    }
+  }
+
+  private fun updateRemoteFullscreenViewportAspect(frameWidth: Int, frameHeight: Int) {
+    if (frameWidth <= 0 || frameHeight <= 0) {
+      return
+    }
+    val host = remoteFullscreenHost ?: return
+    val viewport = binding.remoteViewportContainer
+    host.post {
+      if (!isActivityAlive || !remoteFullscreenActive) {
+        return@post
+      }
+      val hostWidth = host.width
+      val hostHeight = host.height
+      if (hostWidth <= 0 || hostHeight <= 0) {
+        return@post
+      }
+      val frameAspect = frameWidth.toFloat() / frameHeight.toFloat()
+      val hostAspect = hostWidth.toFloat() / hostHeight.toFloat()
+      val fitWidth: Int
+      val fitHeight: Int
+      if (hostAspect > frameAspect) {
+        fitHeight = hostHeight
+        fitWidth = (hostHeight.toFloat() * frameAspect).roundToInt().coerceAtLeast(1)
+      } else {
+        fitWidth = hostWidth
+        fitHeight = (hostWidth.toFloat() / frameAspect).roundToInt().coerceAtLeast(1)
+      }
+      val params = (viewport.layoutParams as? FrameLayout.LayoutParams)
+        ?: FrameLayout.LayoutParams(fitWidth, fitHeight)
+      if (params.width != fitWidth || params.height != fitHeight || params.gravity != Gravity.CENTER) {
+        // 作者: long；全屏也必须完整呈现远端桌面，容器按远端帧比例居中，宁可留黑边也不让系统把上下或左右裁掉。
+        params.width = fitWidth
+        params.height = fitHeight
+        params.gravity = Gravity.CENTER
+        viewport.layoutParams = params
+        viewport.post {
+          if (isActivityAlive && remoteFullscreenActive) {
+            resetRemoteViewportTransform(logReason = false)
+          }
+        }
+      }
+    }
+  }
+
+  private fun scheduleRemoteFullscreenAspectReflow() {
+    if (!remoteFullscreenActive) {
+      return
+    }
+    val frameWidth = renderedFrameWidth
+    val frameHeight = renderedFrameHeight
+    if (frameWidth <= 0 || frameHeight <= 0) {
+      return
+    }
+    val reflow = Runnable {
+      if (!isActivityAlive || !remoteFullscreenActive) {
+        return@Runnable
+      }
+      updateRemoteFullscreenViewportAspect(frameWidth, frameHeight)
+      remoteViewportRenderBoundsDirty = true
+      scheduleRemoteViewportTransformApply(commitRenderScale = false)
+    }
+    binding.remoteViewportContainer.post(reflow)
+    // 作者: long；系统横屏/隐藏导航栏会在进入全屏后继续调整 Insets，补两次延迟复算能把最终可用区域稳定到完整桌面比例，避免上下或左右被误裁。
+    remoteGestureHandler.postDelayed(reflow, 120L)
+    remoteGestureHandler.postDelayed(reflow, 320L)
+  }
+
+  private fun resetRemoteViewportAspect() {
+    if (remoteFullscreenActive) {
+      return
+    }
+    val viewport = binding.remoteViewportContainer
+    val params = viewport.layoutParams
+    val defaultHeight = dp(REMOTE_VIEWPORT_SMALL_DEFAULT_HEIGHT_DP)
+    if (params.height != defaultHeight) {
+      params.height = defaultHeight
+      viewport.layoutParams = params
     }
   }
 
@@ -5032,7 +8949,7 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun toggleRemoteViewportFullscreen() {
-    if (remoteFullscreenDialog == null) {
+    if (!remoteFullscreenActive) {
       enterRemoteViewportFullscreen()
     } else {
       exitRemoteViewportFullscreen(reason = "manual_toggle")
@@ -5040,12 +8957,13 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun enterRemoteViewportFullscreen() {
-    if (remoteFullscreenDialog != null) {
+    if (remoteFullscreenActive) {
       return
     }
     val viewport = binding.remoteViewportContainer
     val originParent = viewport.parent as? ViewGroup ?: return
     val originLayoutParams = viewport.layoutParams ?: return
+    val contentRoot = findViewById<ViewGroup>(android.R.id.content) ?: return
     remoteViewportOriginParent = originParent
     remoteViewportOriginLayoutParams = originLayoutParams
     remoteViewportOriginIndex = originParent.indexOfChild(viewport)
@@ -5057,46 +8975,52 @@ class MainActivity : AppCompatActivity() {
         FrameLayout.LayoutParams.MATCH_PARENT,
       )
       setBackgroundColor(Color.BLACK)
+      isClickable = true
+      isFocusable = true
+      addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+        val sizeChanged = right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop
+        if (sizeChanged) {
+          scheduleRemoteFullscreenAspectReflow()
+        }
+      }
     }
-    remoteFullscreenHost?.addView(
+    val host = remoteFullscreenHost ?: return
+    contentRoot.addView(host)
+    host.addView(
       viewport,
       FrameLayout.LayoutParams(
         FrameLayout.LayoutParams.MATCH_PARENT,
         FrameLayout.LayoutParams.MATCH_PARENT,
+        Gravity.CENTER,
       ),
     )
 
-    val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-    dialog.setCancelable(true)
-    dialog.setContentView(remoteFullscreenHost!!)
-    dialog.setOnDismissListener {
-      if (remoteFullscreenDialog != null) {
-        exitRemoteViewportFullscreen(reason = "dialog_dismiss")
-      }
-    }
-    dialog.window?.setLayout(
-      WindowManager.LayoutParams.MATCH_PARENT,
-      WindowManager.LayoutParams.MATCH_PARENT,
-    )
-    remoteFullscreenDialog = dialog
+    remoteFullscreenActive = true
+    activateRemoteVideoRenderer(useTexture = REMOTE_FULLSCREEN_USE_TEXTURE_RENDERER)
     remoteFullscreenPreviousOrientation = requestedOrientation
     requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-    applyImmersiveMode(dialog, enabled = true)
+    setRemoteVideoHardwareScalerEnabled(true)
+    applyImmersiveMode(enabled = true)
     resetRemoteViewportTransform(logReason = false)
-    dialog.show()
-    applyImmersiveMode(dialog, enabled = true)
+    applyImmersiveMode(enabled = true)
+    updateRemoteFullscreenViewportAspect(renderedFrameWidth, renderedFrameHeight)
+    scheduleRemoteFullscreenAspectReflow()
     updateRemoteFullscreenButtonText()
+    sendRemoteViewportInteractionHint("start", "fullscreen", force = true)
     appendLog("远端画面已进入全屏")
   }
 
   private fun exitRemoteViewportFullscreen(reason: String) {
-    val dialog = remoteFullscreenDialog ?: return
+    if (!remoteFullscreenActive) {
+      return
+    }
     val viewport = binding.remoteViewportContainer
     val host = remoteFullscreenHost
     val originParent = remoteViewportOriginParent
     val originLayoutParams = remoteViewportOriginLayoutParams
     val originIndex = remoteViewportOriginIndex
-    remoteFullscreenDialog = null
+    remoteFullscreenActive = false
+    activateRemoteVideoRenderer(useTexture = false)
     remoteFullscreenHost = null
     remoteViewportOriginParent = null
     remoteViewportOriginLayoutParams = null
@@ -5104,6 +9028,7 @@ class MainActivity : AppCompatActivity() {
 
     (viewport.parent as? ViewGroup)?.removeView(viewport)
     host?.removeView(viewport)
+    (host?.parent as? ViewGroup)?.removeView(host)
     if (originParent != null && originLayoutParams != null) {
       if (originIndex in 0..originParent.childCount) {
         originParent.addView(viewport, originIndex, originLayoutParams)
@@ -5111,24 +9036,23 @@ class MainActivity : AppCompatActivity() {
         originParent.addView(viewport, originLayoutParams)
       }
     }
-    if (dialog.isShowing) {
-      dialog.dismiss()
-    }
     requestedOrientation = remoteFullscreenPreviousOrientation
     remoteFullscreenPreviousOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-    applyImmersiveMode(dialog, enabled = false)
+    setRemoteVideoHardwareScalerEnabled(true)
+    applyImmersiveMode(enabled = false)
     resetRemoteViewportTransform(logReason = false)
     updateRemoteFullscreenButtonText()
+    sendRemoteViewportInteractionHint("end", "fullscreen", force = true)
     appendLog("远端画面已退出全屏（$reason）")
   }
 
   private fun updateRemoteFullscreenButtonText() {
-    binding.remoteFullscreenButton.text = if (remoteFullscreenDialog == null) "全屏" else "退出全屏"
+    binding.remoteFullscreenButton.text = if (!remoteFullscreenActive) "全屏" else "退出全屏"
   }
 
-  private fun applyImmersiveMode(dialog: Dialog, enabled: Boolean) {
-    val window = dialog.window ?: return
+  private fun applyImmersiveMode(enabled: Boolean) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      window.setDecorFitsSystemWindows(!enabled)
       val controller = window.insetsController ?: return
       if (enabled) {
         controller.hide(
@@ -5218,9 +9142,23 @@ class MainActivity : AppCompatActivity() {
     val y: Double,
   )
 
+  private data class NormalizedRect(
+    val x: Double,
+    val y: Double,
+    val width: Double,
+    val height: Double,
+  )
+
   private data class RemoteKey(
     val keyCode: String,
     val modifiers: List<String> = emptyList(),
+  )
+
+  private data class RemoteKeyboardKey(
+    val label: String,
+    val keyCode: String,
+    val widthDp: Int,
+    val isSpacer: Boolean = false,
   )
 
   private data class RemoteInputResult(
@@ -5236,6 +9174,21 @@ class MainActivity : AppCompatActivity() {
     val summary: String = "",
     val inputCount: Long = 0L,
     val targetDeviceId: String = "",
+  )
+
+  private data class IncomingFileTransfer(
+    val fileId: String,
+    val name: String,
+    val mime: String,
+    val size: Long,
+    val totalChunks: Int,
+    val sha256: String,
+    val chunks: MutableMap<Int, ByteArray> = mutableMapOf(),
+  )
+
+  private data class SavedIncomingFile(
+    val name: String,
+    val location: String,
   )
 
   private data class DecodedFrame(
@@ -5315,6 +9268,445 @@ class MainActivity : AppCompatActivity() {
   }
 }
 
+private val REMOTE_DESK_MTK_DIRECT_H264_CODEC_NAMES = listOf(
+  "c2.android.avc.decoder",
+  "OMX.google.avc.decoder",
+  "OMX.google.h264.decoder",
+)
+private val REMOTE_DESK_MTK_PREFERRED_H264_COLOR_FORMATS = listOf(
+  MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible,
+  MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar,
+  MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar,
+)
+private const val REMOTE_DESK_DECODER_LOG_LIMIT = 18
+private const val REMOTE_DESK_DECODER_INIT_TIMEOUT_MS = 2500L
+private const val REMOTE_DESK_DECODER_DECODE_TIMEOUT_MS = 700L
+private const val REMOTE_DESK_DECODER_RELEASE_TIMEOUT_MS = 900L
+
+@Volatile private var remoteDeskMtkH264CodecCandidatesLogged = false
+private val remoteDeskBlockedDirectH264Codecs: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+private fun codecSupportsAvc(codecInfo: MediaCodecInfo): Boolean =
+  !codecInfo.isEncoder && codecInfo.supportedTypes.any { type ->
+    type.equals("video/avc", ignoreCase = true)
+  }
+
+private fun codecSoftwareOnly(codecInfo: MediaCodecInfo): Boolean {
+  val codecName = codecInfo.name.lowercase(Locale.US)
+  return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+    codecInfo.isSoftwareOnly
+  } else {
+    codecName.startsWith("c2.android.") || codecName.startsWith("omx.google.")
+  }
+}
+
+private fun isRemoteDeskSafeSoftwareAvcDecoder(codecInfo: MediaCodecInfo): Boolean {
+  val codecName = codecInfo.name.lowercase(Locale.US)
+  return codecSupportsAvc(codecInfo) &&
+    codecSoftwareOnly(codecInfo) &&
+    (codecName.startsWith("c2.android.") || codecName.startsWith("omx.google."))
+}
+
+private fun logH264DecoderCandidatesForMtk() {
+  if (remoteDeskMtkH264CodecCandidatesLogged) {
+    return
+  }
+  remoteDeskMtkH264CodecCandidatesLogged = true
+  val worker = Thread({
+    try {
+      val codecInfos = MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
+      codecInfos
+        .filter { codecInfo -> codecSupportsAvc(codecInfo) }
+        .forEach { codecInfo ->
+          val hardware = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) codecInfo.isHardwareAccelerated else false
+          val software = codecSoftwareOnly(codecInfo)
+          val vendor = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) codecInfo.isVendor else false
+          Log.i(
+            "RemoteDeskRtc",
+            "decoder_h264_candidate name=${codecInfo.name} software=$software hardware=$hardware vendor=$vendor safe=${isRemoteDeskSafeSoftwareAvcDecoder(codecInfo)}",
+          )
+        }
+    } catch (error: Exception) {
+      Log.w("RemoteDeskRtc", "decoder_h264_candidate_list_failed reason=${error.message ?: "unknown"}")
+    }
+  }, "rd-h264-codec-candidates")
+  worker.isDaemon = true
+  worker.start()
+}
+
+private fun remoteDeskSupportedAvcColorFormats(codecName: String): Set<Int> {
+  return try {
+    MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
+      .firstOrNull { codecInfo -> codecInfo.name.equals(codecName, ignoreCase = true) }
+      ?.getCapabilitiesForType("video/avc")
+      ?.colorFormats
+      ?.toSet()
+      ?: emptySet()
+  } catch (error: Throwable) {
+    Log.w(
+      "RemoteDeskRtc",
+      "decoder_color_formats_query_failed codec_name=$codecName reason=${error.message ?: error.javaClass.simpleName}",
+    )
+    emptySet()
+  }
+}
+
+// 作者: long；AndroidVideoDecoder 构造阶段会硬校验 WebRTC 内置 DECODER_COLOR_FORMATS，MTK 兜底链路只能在这些 byte-buffer 格式里试，否则还没进 initDecode 就会被拒绝。
+private val REMOTE_DESK_WEBRTC_AVC_COLOR_FORMATS = listOf(
+  MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar,
+  MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar,
+  2141391872,
+  2141391876,
+  2141391873,
+  2141391874,
+  2141391875,
+)
+
+private fun remoteDeskPreferredAvcColorFormats(codecName: String, sharedContext: EglBase.Context?): List<Int> {
+  val selected = if (sharedContext != null) {
+    listOf(REMOTE_DESK_WEBRTC_AVC_COLOR_FORMATS.first())
+  } else {
+    REMOTE_DESK_WEBRTC_AVC_COLOR_FORMATS
+  }
+  Log.i(
+    "RemoteDeskRtc",
+    "decoder_color_formats_selected codec_name=$codecName selected=${selected.joinToString(",")} source=webrtc_allowed_static output_mode=${if (sharedContext != null) "texture" else "byte_buffer"}",
+  )
+  return selected
+}
+
+// 作者: long；反射构造失败时真实原因包在 InvocationTargetException 里，日志必须展开到内层异常，才能区分颜色格式拒绝和 codec 本身不可用。
+private fun remoteDeskDecoderCreateErrorMessage(error: Throwable): String {
+  val cause = when (error) {
+    is java.lang.reflect.InvocationTargetException -> error.targetException ?: error
+    is java.util.concurrent.ExecutionException -> error.cause ?: error
+    else -> error
+  }
+  val causeMessage = cause.message ?: cause.javaClass.simpleName
+  return if (cause === error) {
+    causeMessage
+  } else {
+    "${error.javaClass.simpleName}:$causeMessage"
+  }
+}
+
+// 作者: long；Mac native sender 现在声明 Baseline Level 4.0，Android 仍保留旧 3.1/High Profile，保证新全屏 H.264 和旧会话 SDP 都能被匹配。
+private val REMOTE_DESK_H264_PROFILE_LEVEL_IDS = listOf("42e028", "42e01f", "640c1f")
+
+private fun remoteDeskH264Codec(profileLevelId: String): VideoCodecInfo =
+  VideoCodecInfo(
+    0,
+    "H264",
+    mapOf(
+      "level-asymmetry-allowed" to "1",
+      "packetization-mode" to "1",
+      "profile-level-id" to profileLevelId,
+    ),
+  )
+
+private class RemoteDeskMtkSafeH264DecoderFactory(
+  private val eglContext: EglBase.Context?,
+) : VideoDecoderFactory {
+  private val softwareFactory = SoftwareVideoDecoderFactory()
+  @Volatile private var directDecoderError: String = ""
+  @Volatile private var createDecoderLogCount = 0
+
+  override fun createDecoder(codecInfo: VideoCodecInfo): VideoDecoder? {
+    logCreateDecoder(codecInfo, "start")
+    if (!codecInfo.name.equals("H264", ignoreCase = true)) {
+      val softwareDecoder = softwareFactory.createDecoder(codecInfo)
+      logCreateDecoder(codecInfo, if (softwareDecoder != null) "software" else "unsupported")
+      return softwareDecoder
+    }
+    if (codecInfo.params["profile-level-id"].orEmpty().isBlank()) {
+      logCreateDecoder(codecInfo, "h264_missing_profile")
+      return null
+    }
+    createWebRtcSoftwareH264Decoder(codecInfo)?.let { softwareDecoder ->
+      logCreateDecoder(codecInfo, "webrtc_software_h264")
+      return RemoteDeskLoggingVideoDecoder("webrtc-software-h264", softwareDecoder)
+    }
+    // 作者: long；WebRTC 纯软件 H.264 不可用时，才按固定软件 AVC 名称直建 AndroidVideoDecoder，避免全量 MediaCodec 枚举重新选到 MTK 硬解零帧路径。
+    val decoder = createDirectSoftwareAvcDecoder()
+    if (decoder == null) {
+      logCreateDecoder(codecInfo, "direct_software_avc_unavailable:${directDecoderError.ifBlank { "-" }}")
+      return null
+    }
+    logCreateDecoder(codecInfo, "direct_software_avc")
+    return decoder
+  }
+
+  override fun getSupportedCodecs(): Array<VideoCodecInfo> {
+    val codecs = linkedSetOf<VideoCodecInfo>()
+    codecs.addAll(softwareFactory.supportedCodecs)
+    // 作者: long；MTK 规避机型仍需要向 WebRTC 协商 H.264，但 codec 枚举只暴露通用软件 AVC，避免重新选到 MTK 硬解零帧路径。
+    REMOTE_DESK_H264_PROFILE_LEVEL_IDS.forEach { profileLevelId ->
+      codecs.add(remoteDeskH264Codec(profileLevelId))
+    }
+    return codecs.toTypedArray()
+  }
+
+  private fun createWebRtcSoftwareH264Decoder(codecInfo: VideoCodecInfo): VideoDecoder? {
+    return try {
+      val candidates = sequenceOf(codecInfo)
+        .plus(REMOTE_DESK_H264_PROFILE_LEVEL_IDS.asSequence().map(::remoteDeskH264Codec))
+        .distinctBy { candidate ->
+          listOf(
+            candidate.name,
+            candidate.params["profile-level-id"].orEmpty(),
+            candidate.params["packetization-mode"].orEmpty(),
+          )
+        }
+      for (candidate in candidates) {
+        // 作者: long；WebRTC AAR 自带 H.264 软件解码时优先走 native software decoder；部分构建只接受 42e01f 能力名，实际码流仍由 SPS/PPS 决定。
+        val decoder = softwareFactory.createDecoder(candidate)
+        if (decoder != null) {
+          Log.i(
+            "RemoteDeskRtc",
+            "decoder_webrtc_software_h264_created requested_params=${codecInfo.params} software_params=${candidate.params}",
+          )
+          return decoder
+        }
+      }
+      Log.w(
+        "RemoteDeskRtc",
+        "decoder_webrtc_software_h264_unavailable requested_params=${codecInfo.params} supported=${softwareFactory.supportedCodecs.joinToString { supported -> "${supported.name}:${supported.params}" }}",
+      )
+      null
+    } catch (error: Throwable) {
+      Log.w(
+        "RemoteDeskRtc",
+        "decoder_webrtc_software_h264_create_failed codec=${codecInfo.name} reason=${error.message ?: error.javaClass.simpleName}",
+        error,
+      )
+      null
+    }
+  }
+
+  private fun createDirectSoftwareAvcDecoder(): VideoDecoder? {
+    // 作者: long；这台 MTK Android 14 设备在 WebRTC 的 MediaCodecVideoDecoderFactory 全量枚举阶段会卡住，
+    // 这里按系统软件 AVC 的稳定 codec 名直建 AndroidVideoDecoder，让 H.264 接收链路避开枚举死锁；有 EGL 时走 texture 输出，避免 byte-buffer 初始化拖死首帧。
+    val decoders = REMOTE_DESK_MTK_DIRECT_H264_CODEC_NAMES.flatMap { codecName ->
+      remoteDeskPreferredAvcColorFormats(codecName, eglContext).mapNotNull { colorFormat ->
+        createDirectAndroidVideoDecoder(codecName, colorFormat)
+      }
+    }
+    if (decoders.isEmpty()) {
+      return null
+    }
+    var decoder = decoders.last()
+    for (index in decoders.size - 2 downTo 0) {
+      decoder = VideoDecoderFallback(decoder, decoders[index])
+    }
+    return decoder
+  }
+
+  private fun createDirectAndroidVideoDecoder(codecName: String, colorFormat: Int): VideoDecoder? {
+    if (remoteDeskBlockedDirectH264Codecs.contains(codecName)) {
+      Log.w("RemoteDeskRtc", "decoder_direct_h264_skip_blocked codec_name=$codecName")
+      return null
+    }
+    return try {
+      val wrapperFactoryClass = Class.forName("org.webrtc.MediaCodecWrapperFactory")
+      val wrapperImplClass = Class.forName("org.webrtc.MediaCodecWrapperFactoryImpl")
+      val wrapperConstructor = wrapperImplClass.getDeclaredConstructor()
+      wrapperConstructor.isAccessible = true
+      val wrapperFactory = wrapperConstructor.newInstance()
+      val codecTypeClass = Class.forName("org.webrtc.VideoCodecMimeType")
+      val h264Type = codecTypeClass.getMethod("valueOf", String::class.java).invoke(null, "H264")
+      val decoderClass = Class.forName("org.webrtc.AndroidVideoDecoder")
+      val decoderConstructor = decoderClass.getDeclaredConstructor(
+        wrapperFactoryClass,
+        String::class.java,
+        codecTypeClass,
+        Int::class.javaPrimitiveType,
+        EglBase.Context::class.java,
+      )
+      decoderConstructor.isAccessible = true
+      val decoder = decoderConstructor.newInstance(
+        wrapperFactory,
+        codecName,
+        h264Type,
+        colorFormat,
+        eglContext,
+      ) as VideoDecoder
+      directDecoderError = ""
+      Log.i(
+        "RemoteDeskRtc",
+        "decoder_direct_h264_created codec_name=$codecName color_format=$colorFormat output_mode=${if (eglContext != null) "texture" else "byte_buffer"} shared_context_available=${eglContext != null} reflection=true",
+      )
+      RemoteDeskLoggingVideoDecoder(codecName, decoder)
+    } catch (error: Throwable) {
+      val reason = remoteDeskDecoderCreateErrorMessage(error)
+      directDecoderError = "$codecName:$colorFormat:$reason"
+      Log.w(
+        "RemoteDeskRtc",
+        "decoder_direct_h264_create_failed codec_name=$codecName color_format=$colorFormat reason=$reason",
+      )
+      null
+    }
+  }
+
+  private fun logCreateDecoder(codecInfo: VideoCodecInfo, result: String) {
+    val count = createDecoderLogCount
+    if (count >= 18) {
+      return
+    }
+    createDecoderLogCount = count + 1
+    Log.i(
+      "RemoteDeskRtc",
+      "decoder_create_request codec=${codecInfo.name} params=${codecInfo.params} result=$result count=${count + 1}",
+    )
+  }
+}
+
+private class RemoteDeskLoggingVideoDecoder(
+  private val codecName: String,
+  private val delegate: VideoDecoder,
+) : VideoDecoder {
+  @Volatile private var initLogCount = 0
+  @Volatile private var decodeLogCount = 0
+  @Volatile private var decodedFrameLogCount = 0
+  @Volatile private var releaseLogCount = 0
+  private val decoderExecutor = Executors.newSingleThreadExecutor { runnable ->
+    Thread(runnable, "rd-h264-decoder-${codecName.replace('.', '-')}").apply {
+      isDaemon = true
+    }
+  }
+
+  override fun createNative(nativeDecoder: Long): Long {
+    return delegate.createNative(nativeDecoder)
+  }
+
+  override fun initDecode(settings: VideoDecoder.Settings, callback: VideoDecoder.Callback): VideoCodecStatus {
+    val initCount = initLogCount + 1
+    initLogCount = initCount
+    Log.i(
+      "RemoteDeskRtc",
+      "decoder_init_start codec_name=$codecName impl=${implementationName} count=$initCount width=${settings.width} height=${settings.height} cores=${settings.numberOfCores}",
+    )
+    val wrappedCallback = VideoDecoder.Callback { frame: VideoFrame, decodeTimeMs: Int?, qp: Int? ->
+      val frameCount = decodedFrameLogCount + 1
+      decodedFrameLogCount = frameCount
+      if (frameCount <= REMOTE_DESK_DECODER_LOG_LIMIT) {
+        Log.i(
+          "RemoteDeskRtc",
+          "decoder_decoded_frame codec_name=$codecName count=$frameCount size=${frame.rotatedWidth}x${frame.rotatedHeight} decode_time_ms=${decodeTimeMs ?: "-"} qp=${qp ?: "-"}",
+        )
+      }
+      callback.onDecodedFrame(frame, decodeTimeMs, qp)
+    }
+    val status = callDecoder(
+      operation = "initDecode",
+      timeoutMs = REMOTE_DESK_DECODER_INIT_TIMEOUT_MS,
+      fallback = VideoCodecStatus.FALLBACK_SOFTWARE,
+    ) {
+      delegate.initDecode(settings, wrappedCallback)
+    }
+    Log.i(
+      "RemoteDeskRtc",
+      "decoder_init_done codec_name=$codecName count=$initCount status=$status",
+    )
+    return status
+  }
+
+  override fun decode(image: EncodedImage, info: VideoDecoder.DecodeInfo): VideoCodecStatus {
+    val decodeCount = decodeLogCount + 1
+    decodeLogCount = decodeCount
+    val shouldLog = decodeCount <= REMOTE_DESK_DECODER_LOG_LIMIT ||
+      image.frameType == EncodedImage.FrameType.VideoFrameKey
+    if (shouldLog) {
+      val encodedBytes = image.buffer?.remaining() ?: -1
+      Log.i(
+        "RemoteDeskRtc",
+        "decoder_decode_start codec_name=$codecName count=$decodeCount frame_type=${image.frameType} encoded_size=${image.encodedWidth}x${image.encodedHeight} bytes=$encodedBytes missing=${info.isMissingFrames} render_time_ms=${info.renderTimeMs}",
+      )
+    }
+    val status = callDecoder(
+      operation = "decode#$decodeCount",
+      timeoutMs = REMOTE_DESK_DECODER_DECODE_TIMEOUT_MS,
+      fallback = VideoCodecStatus.FALLBACK_SOFTWARE,
+    ) {
+      delegate.decode(image, info)
+    }
+    if (shouldLog || status != VideoCodecStatus.OK) {
+      Log.i(
+        "RemoteDeskRtc",
+        "decoder_decode_done codec_name=$codecName count=$decodeCount status=$status",
+      )
+    }
+    return status
+  }
+
+  override fun release(): VideoCodecStatus {
+    val releaseCount = releaseLogCount + 1
+    releaseLogCount = releaseCount
+    val status = callDecoder(
+      operation = "release#$releaseCount",
+      timeoutMs = REMOTE_DESK_DECODER_RELEASE_TIMEOUT_MS,
+      fallback = VideoCodecStatus.ERROR,
+    ) {
+      delegate.release()
+    }
+    decoderExecutor.shutdownNow()
+    Log.i(
+      "RemoteDeskRtc",
+      "decoder_release_done codec_name=$codecName count=$releaseCount status=$status",
+    )
+    return status
+  }
+
+  override fun getImplementationName(): String {
+    return try {
+      "rd-log:${delegate.implementationName}"
+    } catch (_: Throwable) {
+      "rd-log:$codecName"
+    }
+  }
+
+  private fun <T> callDecoder(
+    operation: String,
+    timeoutMs: Long,
+    fallback: T,
+    block: () -> T,
+  ): T {
+    val future = try {
+      decoderExecutor.submit<T> { block() }
+    } catch (error: Throwable) {
+      Log.e(
+        "RemoteDeskRtc",
+        "decoder_operation_rejected codec_name=$codecName operation=$operation reason=${error.message ?: error.javaClass.simpleName}",
+        error,
+      )
+      return fallback
+    }
+    return try {
+      future.get(timeoutMs, TimeUnit.MILLISECONDS)
+    } catch (error: Throwable) {
+      future.cancel(true)
+      val cause = if (error is java.util.concurrent.ExecutionException) {
+        error.cause ?: error
+      } else {
+        error
+      }
+      val timedOut = error is java.util.concurrent.TimeoutException
+      val level = if (timedOut) "timeout" else "failed"
+      // 作者: long；MTK 真机上部分软件 AVC 名称会在 MediaCodec configure/start 阶段长时间卡住，
+      // 这里同步返回 fallback 状态，让 WebRTC 继续试下一个 decoder，而不是把首帧链路堵死。
+      if (operation == "initDecode" && timedOut) {
+        remoteDeskBlockedDirectH264Codecs.add(codecName)
+        Log.w("RemoteDeskRtc", "decoder_direct_h264_blocked codec_name=$codecName reason=init_timeout timeout_ms=$timeoutMs")
+      }
+      Log.w(
+        "RemoteDeskRtc",
+        "decoder_operation_$level codec_name=$codecName operation=$operation timeout_ms=$timeoutMs fallback=$fallback reason=${cause.message ?: cause.javaClass.simpleName}",
+        cause,
+      )
+      fallback
+    }
+  }
+}
+
 private class RemoteDeskVideoDecoderFactory(
   eglContext: EglBase.Context?,
   hardwareAllowedPredicate: Predicate<MediaCodecInfo>,
@@ -5341,6 +9733,108 @@ private class RemoteDeskVideoDecoderFactory(
     codecs.addAll(softwareFactory.supportedCodecs)
     codecs.addAll(platformSoftwareFactory.supportedCodecs)
     codecs.addAll(hardwareFactory.supportedCodecs)
+    REMOTE_DESK_H264_PROFILE_LEVEL_IDS.forEach { profileLevelId ->
+      codecs.add(remoteDeskH264Codec(profileLevelId))
+    }
+    return codecs.toTypedArray()
+  }
+}
+
+private class RemoteDeskPlatformSoftwareVideoDecoderFactory(
+  eglContext: EglBase.Context?,
+) : VideoDecoderFactory {
+  private val softwareFactory = SoftwareVideoDecoderFactory()
+  private val platformSoftwareFactory = PlatformSoftwareVideoDecoderFactory(eglContext)
+
+  override fun createDecoder(codecInfo: VideoCodecInfo): VideoDecoder? {
+    return softwareFactory.createDecoder(codecInfo)
+      ?: platformSoftwareFactory.createDecoder(codecInfo)
+  }
+
+  override fun getSupportedCodecs(): Array<VideoCodecInfo> {
+    val codecs = linkedSetOf<VideoCodecInfo>()
+    // 作者: long；Redmi Note 8 Pro 上只暴露软件/平台软件解码，保留 H.264 能力但不触碰 MTK AVC 硬解零帧路径。
+    codecs.addAll(softwareFactory.supportedCodecs)
+    codecs.addAll(platformSoftwareFactory.supportedCodecs)
+    REMOTE_DESK_H264_PROFILE_LEVEL_IDS.forEach { profileLevelId ->
+      codecs.add(remoteDeskH264Codec(profileLevelId))
+    }
+    return codecs.toTypedArray()
+  }
+}
+
+private class RemoteDeskLazyPlatformH264DecoderFactory(
+  private val eglContext: EglBase.Context?,
+) : VideoDecoderFactory {
+  private val softwareFactory = SoftwareVideoDecoderFactory()
+  @Volatile private var platformSoftwareFactory: PlatformSoftwareVideoDecoderFactory? = null
+  @Volatile private var createDecoderLogCount = 0
+
+  override fun createDecoder(codecInfo: VideoCodecInfo): VideoDecoder? {
+    logCreateDecoder(codecInfo, "start")
+    val softwareDecoder = softwareFactory.createDecoder(codecInfo)
+    if (softwareDecoder != null) {
+      logCreateDecoder(codecInfo, "software")
+      return softwareDecoder
+    }
+    if (!codecInfo.name.equals("H264", ignoreCase = true)) {
+      logCreateDecoder(codecInfo, "unsupported")
+      return null
+    }
+    val decoder = platformFactory().createDecoder(codecInfo)
+    logCreateDecoder(codecInfo, if (decoder != null) "platform_software" else "platform_software_null")
+    return decoder
+  }
+
+  override fun getSupportedCodecs(): Array<VideoCodecInfo> {
+    val codecs = mutableListOf<VideoCodecInfo>()
+    codecs.addAll(softwareFactory.supportedCodecs)
+    // 作者: long；建 PeerConnection 时只静态声明 H.264，避免提前枚举 MTK MediaCodec；真正收到 H.264 帧时再懒加载平台软件 decoder。
+    codecs.addAll(REMOTE_DESK_H264_PROFILE_LEVEL_IDS.map(::remoteDeskH264Codec))
+    return codecs.toTypedArray()
+  }
+
+  private fun platformFactory(): PlatformSoftwareVideoDecoderFactory {
+    val current = platformSoftwareFactory
+    if (current != null) {
+      return current
+    }
+    synchronized(this) {
+      val existing = platformSoftwareFactory
+      if (existing != null) {
+        return existing
+      }
+      val created = PlatformSoftwareVideoDecoderFactory(eglContext)
+      platformSoftwareFactory = created
+      Log.i("RemoteDeskRtc", "decoder_platform_software_factory_created lazy=true")
+      return created
+    }
+  }
+
+  private fun logCreateDecoder(codecInfo: VideoCodecInfo, result: String) {
+    val count = createDecoderLogCount
+    if (count >= 12) {
+      return
+    }
+    createDecoderLogCount = count + 1
+    Log.i(
+      "RemoteDeskRtc",
+      "decoder_create_request codec=${codecInfo.name} params=${codecInfo.params} result=$result count=${count + 1}",
+    )
+  }
+}
+
+private class RemoteDeskSoftwareVideoDecoderFactory : VideoDecoderFactory {
+  private val softwareFactory = SoftwareVideoDecoderFactory()
+
+  override fun createDecoder(codecInfo: VideoCodecInfo): VideoDecoder? {
+    return softwareFactory.createDecoder(codecInfo)
+  }
+
+  override fun getSupportedCodecs(): Array<VideoCodecInfo> {
+    val codecs = linkedSetOf<VideoCodecInfo>()
+    // 作者: long；MTK 规避机型只暴露 WebRTC 纯软件解码能力，连平台 software codec 枚举也跳过，防止 MediaCodec 列表卡住协商线程。
+    codecs.addAll(softwareFactory.supportedCodecs)
     return codecs.toTypedArray()
   }
 }

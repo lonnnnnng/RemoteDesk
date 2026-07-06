@@ -1,4 +1,8 @@
+use base64::Engine;
 use serde::Serialize;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub mod capture;
@@ -21,6 +25,9 @@ struct BootstrapContext {
     auto_connect: bool,
     auto_register: bool,
     auto_heartbeat: bool,
+    debug_tools_enabled: bool,
+    debug_send_clipboard_text: String,
+    debug_send_file_path: String,
 }
 
 #[derive(Serialize)]
@@ -58,6 +65,24 @@ pub struct DesktopSelfTestReport {
 
 pub type WindowsSelfTestReport = DesktopSelfTestReport;
 
+#[derive(Serialize)]
+pub struct SessionFileSaveResult {
+    pub name: String,
+    pub path: String,
+    pub bytes: usize,
+}
+
+#[derive(Serialize)]
+pub struct DebugFilePayload {
+    pub name: String,
+    pub path: String,
+    pub mime: String,
+    pub size: usize,
+    pub data_base64: String,
+}
+
+const SESSION_FILE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
 fn env_flag(name: &str, fallback: bool) -> bool {
     match std::env::var(name).ok().as_deref() {
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES") => true,
@@ -65,6 +90,10 @@ fn env_flag(name: &str, fallback: bool) -> bool {
         Some(_) => fallback,
         None => fallback,
     }
+}
+
+fn env_string(name: &str) -> String {
+    std::env::var(name).unwrap_or_default()
 }
 
 #[tauri::command]
@@ -83,6 +112,9 @@ fn bootstrap_context() -> BootstrapContext {
         auto_connect: env_flag("RD_DESKTOP_AUTO_CONNECT", true),
         auto_register: env_flag("RD_DESKTOP_AUTO_REGISTER", true),
         auto_heartbeat: env_flag("RD_DESKTOP_AUTO_HEARTBEAT", true),
+        debug_tools_enabled: env_flag("RD_DESKTOP_DEBUG_ENABLE_TOOLS", false),
+        debug_send_clipboard_text: env_string("RD_DESKTOP_DEBUG_SEND_CLIPBOARD_TEXT"),
+        debug_send_file_path: env_string("RD_DESKTOP_DEBUG_SEND_FILE_PATH"),
     }
 }
 
@@ -93,6 +125,207 @@ fn debug_log(line: String) -> Result<(), String> {
         eprintln!("[rd.js] ts_ms={} {text}", now_ms());
     }
     Ok(())
+}
+
+#[tauri::command]
+fn desktop_clipboard_read_text() -> Result<String, String> {
+    platform_read_clipboard_text()
+}
+
+#[tauri::command]
+fn desktop_clipboard_write_text(text: String) -> Result<(), String> {
+    platform_write_clipboard_text(&text)
+}
+
+#[tauri::command]
+fn desktop_save_session_file(
+    name: String,
+    data_base64: String,
+) -> Result<SessionFileSaveResult, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_base64.as_bytes())
+        .map_err(|error| format!("failed to decode file payload: {error}"))?;
+    let directory = session_download_dir()?;
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| format!("failed to create download directory: {error}"))?;
+    let clean_name = sanitize_session_file_name(&name);
+    let path = unique_session_file_path(&directory, &clean_name);
+    std::fs::write(&path, &bytes).map_err(|error| format!("failed to write file: {error}"))?;
+    Ok(SessionFileSaveResult {
+        name: path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or(&clean_name)
+            .to_string(),
+        path: path.to_string_lossy().to_string(),
+        bytes: bytes.len(),
+    })
+}
+
+#[tauri::command]
+fn desktop_debug_read_file(path: String) -> Result<DebugFilePayload, String> {
+    if !env_flag("RD_DESKTOP_DEBUG_ENABLE_TOOLS", false) {
+        return Err("desktop debug tools are disabled".to_string());
+    }
+    let file_path = PathBuf::from(path.trim());
+    if !file_path.is_file() {
+        return Err("debug file path is not a file".to_string());
+    }
+    let metadata = std::fs::metadata(&file_path)
+        .map_err(|error| format!("failed to inspect debug file: {error}"))?;
+    if metadata.len() > SESSION_FILE_MAX_BYTES {
+        return Err("debug file exceeds 64MB".to_string());
+    }
+    let bytes =
+        std::fs::read(&file_path).map_err(|error| format!("failed to read debug file: {error}"))?;
+    let name = file_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(sanitize_session_file_name)
+        .unwrap_or_else(|| "remote-file.bin".to_string());
+    Ok(DebugFilePayload {
+        name,
+        path: file_path.to_string_lossy().to_string(),
+        mime: "application/octet-stream".to_string(),
+        size: bytes.len(),
+        data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+    })
+}
+
+fn platform_read_clipboard_text() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("pbpaste")
+            .output()
+            .map_err(|error| format!("failed to run pbpaste: {error}"))?;
+        if !output.status.success() {
+            return Err(format!("pbpaste exited with status {}", output.status));
+        }
+        return String::from_utf8(output.stdout)
+            .map_err(|error| format!("clipboard text is not valid UTF-8: {error}"));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-Command", "Get-Clipboard -Raw"])
+            .output()
+            .map_err(|error| format!("failed to run Get-Clipboard: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "Get-Clipboard exited with status {}",
+                output.status
+            ));
+        }
+        return String::from_utf8(output.stdout)
+            .map_err(|error| format!("clipboard text is not valid UTF-8: {error}"));
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        Err("clipboard is not implemented on this platform".to_string())
+    }
+}
+
+fn platform_write_clipboard_text(text: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut child = Command::new("pbcopy")
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("failed to run pbcopy: {error}"))?;
+        if let Some(stdin) = child.stdin.as_mut() {
+            stdin
+                .write_all(text.as_bytes())
+                .map_err(|error| format!("failed to write clipboard text: {error}"))?;
+        }
+        let status = child
+            .wait()
+            .map_err(|error| format!("failed to wait for pbcopy: {error}"))?;
+        if status.success() {
+            return Ok(());
+        }
+        return Err(format!("pbcopy exited with status {status}"));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let mut child = Command::new("powershell")
+            .args(["-NoProfile", "-Command", "Set-Clipboard"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("failed to run Set-Clipboard: {error}"))?;
+        if let Some(stdin) = child.stdin.as_mut() {
+            stdin
+                .write_all(text.as_bytes())
+                .map_err(|error| format!("failed to write clipboard text: {error}"))?;
+        }
+        let status = child
+            .wait()
+            .map_err(|error| format!("failed to wait for Set-Clipboard: {error}"))?;
+        if status.success() {
+            return Ok(());
+        }
+        return Err(format!("Set-Clipboard exited with status {status}"));
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = text;
+        Err("clipboard is not implemented on this platform".to_string())
+    }
+}
+
+fn session_download_dir() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "home directory is unavailable".to_string())?;
+    Ok(PathBuf::from(home).join("Downloads").join("RemoteDesk"))
+}
+
+fn sanitize_session_file_name(name: &str) -> String {
+    let cleaned: String = name
+        .trim()
+        .chars()
+        .map(|ch| match ch {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\n' | '\r' | '\t' => '_',
+            _ => ch,
+        })
+        .take(120)
+        .collect();
+    if cleaned.is_empty() {
+        "remote-file.bin".to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn unique_session_file_path(directory: &Path, name: &str) -> PathBuf {
+    let first = directory.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let path = Path::new(name);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("remote-file");
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    for index in 1..10_000 {
+        let next_name = if ext.is_empty() {
+            format!("{stem}-{index}")
+        } else {
+            format!("{stem}-{index}.{ext}")
+        };
+        let candidate = directory.join(next_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    directory.join(format!("remote-file-{}.bin", now_ms()))
 }
 
 fn now_ms() -> u64 {
@@ -453,6 +686,7 @@ pub fn run_desktop_self_test() -> DesktopSelfTestReport {
                             max_height: Some(540),
                             max_fps: Some(8),
                             codec: Some("jpeg-frame-stream".to_string()),
+                            ..capture::CaptureConfigPatch::default()
                         }),
                     }));
                     let start_ok = start_status
@@ -745,6 +979,10 @@ pub fn run_desktop_self_test() -> DesktopSelfTestReport {
             max_height: Some(config.max_height),
             max_fps: Some(config.max_fps),
             codec: Some(config.codec),
+            source_rect_x_ppm: Some(config.source_rect_x_ppm),
+            source_rect_y_ppm: Some(config.source_rect_y_ppm),
+            source_rect_width_ppm: Some(config.source_rect_width_ppm),
+            source_rect_height_ppm: Some(config.source_rect_height_ppm),
         });
     }
     if original_capture_was_active {
@@ -894,6 +1132,10 @@ pub fn run() {
             bootstrap_status,
             bootstrap_context,
             debug_log,
+            desktop_clipboard_read_text,
+            desktop_clipboard_write_text,
+            desktop_save_session_file,
+            desktop_debug_read_file,
             host_bridge_status,
             host_apply_input,
             host_sync_session,

@@ -1,6 +1,6 @@
 use openh264::encoder::{
     BitRate, Complexity, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, Profile,
-    RateControlMode, UsageType,
+    RateControlMode, SpsPpsStrategy, UsageType,
 };
 use openh264::formats::{BgraSliceU8, RgbSliceU8, YUVBuffer};
 use serde::{Deserialize, Serialize};
@@ -252,6 +252,22 @@ const NATIVE_SENDER_PROBE_SAMPLE_WINDOW_MS: u64 = 2000;
 const NATIVE_SENDER_INTRA_PERIOD_SECONDS: u32 = 4;
 const NATIVE_SENDER_FORCE_INTRA_INTERVAL_FRAMES: u64 = 156;
 const NATIVE_SENDER_ENCODER_THREADS: u16 = 4;
+const NATIVE_SENDER_H264_BITRATE_BPS: u32 = 8_000_000;
+const NATIVE_SENDER_H264_NAL_LOG_LIMIT: u64 = 12;
+// 作者: long；手机全屏和桌面 Retina 场景会进入 1080p 以上输入面，SDP 不能继续声明 Level 3.1，否则部分 Android 解码器会建链成功但不吐首帧。
+const NATIVE_SENDER_H264_FMTP_LINE: &str =
+    "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e028";
+
+#[derive(Debug, Clone)]
+struct H264SampleInfo {
+    nal_count: usize,
+    nal_types: String,
+    has_annexb_start_code: bool,
+    has_sps: bool,
+    has_pps: bool,
+    has_idr: bool,
+    added_annexb_start_code: bool,
+}
 
 fn target_loop_interval_ms(capture_fps: u32) -> u64 {
     let fps = capture_fps.max(1);
@@ -508,17 +524,112 @@ fn build_h264_encoder(target_fps: u16) -> Result<Encoder, String> {
     let config = EncoderConfig::new()
         .usage_type(UsageType::ScreenContentRealTime)
         .rate_control_mode(RateControlMode::Bitrate)
-        // 作者: long；真机远控优先守住 720p 下的实时帧率，低复杂度换取编码耗时下降，清晰度仍由码率和分辨率兜底。
+        // 作者: long；真机远控优先把软件编码耗时压低，低复杂度换取鼠标移动时的可见帧率；码率抬到 1000p 文本放大的可读区间，避免缩放后被压缩块拖糊。
         .complexity(Complexity::Low)
         .profile(Profile::Baseline)
-        .bitrate(BitRate::from_bps(2_500_000))
+        // 作者: long；远控解码端可能在 ICE 连通后才真正创建 H.264 decoder，IDR 附近持续带 SPS/PPS 能让迟到的接收端不必等下一轮参数集。
+        .sps_pps_strategy(SpsPpsStrategy::SpsPpsListing)
+        .bitrate(BitRate::from_bps(NATIVE_SENDER_H264_BITRATE_BPS))
         .max_frame_rate(FrameRate::from_hz(fps))
         .intra_frame_period(intra_period)
-        // 作者: long；720p 真机远控的 soak 低点集中在关键帧和高码率窗口，拉长周期关键帧并增加编码线程，为 26fps 采集留出 24fps 以上的稳定余量。
+        // 作者: long；真机远控的帧率低点集中在关键帧和高码率窗口，拉长周期关键帧并增加编码线程，为连续桌面画面留出稳定余量。
         .num_threads(NATIVE_SENDER_ENCODER_THREADS)
         .skip_frames(false);
     Encoder::with_api_config(openh264::OpenH264API::from_source(), config)
         .map_err(|error| format!("native sender build h264 encoder failed: {error}"))
+}
+
+fn h264_start_code_at(bytes: &[u8], offset: usize) -> Option<usize> {
+    if offset + 4 <= bytes.len() && bytes[offset..offset + 4] == [0, 0, 0, 1] {
+        Some(4)
+    } else if offset + 3 <= bytes.len() && bytes[offset..offset + 3] == [0, 0, 1] {
+        Some(3)
+    } else {
+        None
+    }
+}
+
+fn find_h264_start_code(bytes: &[u8], from: usize) -> Option<(usize, usize)> {
+    if bytes.len() < 3 || from >= bytes.len() {
+        return None;
+    }
+    let mut offset = from;
+    while offset + 3 <= bytes.len() {
+        if let Some(length) = h264_start_code_at(bytes, offset) {
+            return Some((offset, length));
+        }
+        offset += 1;
+    }
+    None
+}
+
+fn append_h264_nal_as_annexb(dst: &mut Vec<u8>, nal: &[u8], added_start_code: &mut bool) {
+    if nal.is_empty() {
+        return;
+    }
+    if h264_start_code_at(nal, 0).is_some() {
+        dst.extend_from_slice(nal);
+    } else {
+        // 作者: long；webrtc-rs 的 H.264 payloader 依赖 Annex-B start code 才能拆出 SPS/PPS/IDR，
+        // 所以这里把 OpenH264 返回的裸 NAL 兜底补成 Annex-B，避免 RTP 有包但 Android 无法组帧。
+        dst.extend_from_slice(&[0, 0, 0, 1]);
+        dst.extend_from_slice(nal);
+        *added_start_code = true;
+    }
+}
+
+fn describe_h264_annexb_sample(encoded: &[u8], added_annexb_start_code: bool) -> H264SampleInfo {
+    let mut nal_types = Vec::new();
+    let mut has_sps = false;
+    let mut has_pps = false;
+    let mut has_idr = false;
+    let has_annexb_start_code = find_h264_start_code(encoded, 0).is_some();
+
+    if has_annexb_start_code {
+        let mut search_from = 0;
+        while let Some((start, start_len)) = find_h264_start_code(encoded, search_from) {
+            let nal_start = start + start_len;
+            let next_start = find_h264_start_code(encoded, nal_start)
+                .map(|(next, _)| next)
+                .unwrap_or(encoded.len());
+            let mut nal_end = next_start;
+            while nal_end > nal_start && encoded[nal_end - 1] == 0 {
+                nal_end -= 1;
+            }
+            if nal_start < nal_end {
+                let nal_type = encoded[nal_start] & 0x1f;
+                has_sps |= nal_type == 7;
+                has_pps |= nal_type == 8;
+                has_idr |= nal_type == 5;
+                nal_types.push(nal_type);
+            }
+            search_from = next_start;
+        }
+    } else if let Some(first) = encoded.first() {
+        let nal_type = first & 0x1f;
+        has_sps = nal_type == 7;
+        has_pps = nal_type == 8;
+        has_idr = nal_type == 5;
+        nal_types.push(nal_type);
+    }
+
+    let nal_count = nal_types.len();
+    let nal_types = nal_types
+        .iter()
+        .take(12)
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    H264SampleInfo {
+        nal_count,
+        nal_types,
+        has_annexb_start_code,
+        has_sps,
+        has_pps,
+        has_idr,
+        added_annexb_start_code,
+    }
 }
 
 fn crop_bgra_even(
@@ -617,7 +728,7 @@ fn decode_jpeg_to_rgb(
 fn encode_h264_sample_from_capture_frame(
     encoder: &mut Encoder,
     frame: &crate::capture::CaptureFrameSnapshot,
-) -> Result<(Vec<u8>, FrameType), String> {
+) -> Result<(Vec<u8>, FrameType, H264SampleInfo), String> {
     let yuv = if frame.mime_type == "application/x-rd-raw-bgra" {
         let (bgra_bytes, width, height) = crop_bgra_even(frame)?;
         let bgra = BgraSliceU8::new(bgra_bytes.as_ref(), (width as usize, height as usize));
@@ -636,11 +747,23 @@ fn encode_h264_sample_from_capture_frame(
         .encode(&yuv)
         .map_err(|error| format!("native sender h264 encode failed: {error}"))?;
     let frame_type = bitstream.frame_type();
-    let encoded = bitstream.to_vec();
+    let mut encoded = Vec::new();
+    let mut added_annexb_start_code = false;
+    for layer_index in 0..bitstream.num_layers() {
+        let Some(layer) = bitstream.layer(layer_index) else {
+            continue;
+        };
+        for nal_index in 0..layer.nal_count() {
+            if let Some(nal) = layer.nal_unit(nal_index) {
+                append_h264_nal_as_annexb(&mut encoded, nal, &mut added_annexb_start_code);
+            }
+        }
+    }
     if encoded.is_empty() {
         return Err("native sender h264 encode returned empty bitstream".to_string());
     }
-    Ok((encoded, frame_type))
+    let sample_info = describe_h264_annexb_sample(&encoded, added_annexb_start_code);
+    Ok((encoded, frame_type, sample_info))
 }
 
 fn shadow_video_track_for_session(session_id: &str) -> Option<Arc<TrackLocalStaticSample>> {
@@ -897,8 +1020,7 @@ fn create_shadow_peer_connection(
             mime_type: MIME_TYPE_H264.to_string(),
             clock_rate: 90_000,
             channels: 0,
-            sdp_fmtp_line: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
-                .to_string(),
+            sdp_fmtp_line: NATIVE_SENDER_H264_FMTP_LINE.to_string(),
             ..Default::default()
         },
         "rd-native-video".to_string(),
@@ -1206,6 +1328,7 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
             let mut sample_started_at = now_ms();
             let mut first_frame_logged = false;
             let mut h264_encoder: Option<Encoder> = None;
+            let mut h264_encoder_signature: Option<(u32, u32, u16)> = None;
             let mut published_frames = 0_u64;
             let mut last_publish_error_ts = 0_u64;
             let mut force_intra_counter = 0_u64;
@@ -1278,23 +1401,32 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                             loop_target_interval_ms =
                                 target_loop_interval_ms(u32::from(capture_fps));
                             let frame_duration_ms = loop_target_interval_ms.max(1);
-                            if h264_encoder.is_none() {
+                            let encoder_signature =
+                                (frame.frame_width, frame.frame_height, capture_fps);
+                            if h264_encoder_signature != Some(encoder_signature) {
+                                h264_encoder = None;
                                 match build_h264_encoder(capture_fps) {
                                     Ok(encoder) => {
                                         h264_encoder = Some(encoder);
+                                        h264_encoder_signature = Some(encoder_signature);
+                                        force_intra_counter = 0;
                                         trace_native_sender(
                                             "encoder.ready",
                                             format!(
-                                                "session={} mime=video/H264 capture_fps={} encoder_threads={} intra_period_sec={} force_intra_frames={}",
+                                                "session={} mime=video/H264 frame={}x{} capture_fps={} encoder_threads={} bitrate_bps={} intra_period_sec={} force_intra_frames={}",
                                                 session_for_thread,
+                                                frame.frame_width,
+                                                frame.frame_height,
                                                 capture_fps,
                                                 NATIVE_SENDER_ENCODER_THREADS,
+                                                NATIVE_SENDER_H264_BITRATE_BPS,
                                                 NATIVE_SENDER_INTRA_PERIOD_SECONDS,
                                                 NATIVE_SENDER_FORCE_INTRA_INTERVAL_FRAMES
                                             ),
                                         );
                                     }
                                     Err(detail) => {
+                                        h264_encoder_signature = None;
                                         if let Ok(mut state) = native_sender_state().lock() {
                                             state.last_error_code = "native_sender.encoder.init_failed".to_string();
                                             state.last_error_detail = detail.clone();
@@ -1316,7 +1448,7 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                                 sample_encode_ms = sample_encode_ms
                                     .saturating_add(now_ms().saturating_sub(encode_started_at));
                                 match encoded {
-                                    Ok((bitstream, frame_type)) => {
+                                    Ok((bitstream, frame_type, h264_info)) => {
                                         let mut sample = webrtc::media::Sample::default();
                                         let sample_len_bytes = bitstream.len() as u64;
                                         sample.data = bitstream.into();
@@ -1343,18 +1475,28 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                                                     }
                                                     state.updated_at_ms = now;
                                                 }
-                                                if published_frames == 1 || published_frames % 60 == 0 {
+                                                if published_frames <= NATIVE_SENDER_H264_NAL_LOG_LIMIT
+                                                    || matches!(frame_type, FrameType::IDR)
+                                                    || published_frames % 60 == 0
+                                                {
                                                     trace_native_sender(
                                                         "encoder.sample_published",
                                                         format!(
-                                                            "session={} count={} frame={}x{} duration_ms={} mime={} frame_type={:?}",
+                                                            "session={} count={} frame={}x{} duration_ms={} mime={} frame_type={:?} nal_count={} nal_types={} annexb_start={} sps={} pps={} idr={} added_annexb_start={}",
                                                             session_for_thread,
                                                             published_frames,
                                                             frame.frame_width,
                                                             frame.frame_height,
                                                             sample.duration.as_millis(),
                                                             frame.mime_type,
-                                                            frame_type
+                                                            frame_type,
+                                                            h264_info.nal_count,
+                                                            if h264_info.nal_types.is_empty() { "-" } else { h264_info.nal_types.as_str() },
+                                                            h264_info.has_annexb_start_code,
+                                                            h264_info.has_sps,
+                                                            h264_info.has_pps,
+                                                            h264_info.has_idr,
+                                                            h264_info.added_annexb_start_code
                                                         ),
                                                     );
                                                 }
@@ -1975,4 +2117,19 @@ pub fn native_sender_drain_outbound_signals(
         drained.push(item);
     }
     Ok(drained)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn h264_fmtp_declares_android_fullscreen_safe_level() {
+        assert!(NATIVE_SENDER_H264_FMTP_LINE.contains("level-asymmetry-allowed=1"));
+        assert!(NATIVE_SENDER_H264_FMTP_LINE.contains("packetization-mode=1"));
+        assert!(
+            NATIVE_SENDER_H264_FMTP_LINE
+                .contains("profile-level-id=42e028")
+        );
+    }
 }

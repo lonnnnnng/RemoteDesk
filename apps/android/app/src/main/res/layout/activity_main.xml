@@ -319,22 +319,47 @@
                 android:layout_width="match_parent"
                 android:layout_height="262dp"
                 android:layout_marginTop="10dp"
-                android:background="#F3F7FF">
+                android:background="#000000"
+                android:clipChildren="true"
+                android:clipToPadding="true">
 
-                <org.webrtc.SurfaceViewRenderer
-                  android:id="@+id/remoteVideoView"
+                <FrameLayout
+                  android:id="@+id/remoteViewportContent"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent">
+
+                  <org.webrtc.SurfaceViewRenderer
+                    android:id="@+id/remoteVideoView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:keepScreenOn="true" />
+
+                  <com.remotedesk.app.ui.RemoteDeskTextureVideoView
+                    android:id="@+id/remoteTextureVideoView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:visibility="gone" />
+
+                  <com.remotedesk.app.ui.RemoteDeskFrameView
+                    android:id="@+id/remoteFrameView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:contentDescription="远端画面预览"
+                    android:visibility="gone" />
+                </FrameLayout>
+
+                <View
+                  android:id="@+id/remoteTouchLayer"
                   android:layout_width="match_parent"
                   android:layout_height="match_parent"
-                  android:keepScreenOn="true" />
+                  android:clickable="true"
+                  android:focusable="false" />
 
-                <ImageView
-                  android:id="@+id/remoteFrameView"
-                  android:layout_width="match_parent"
-                  android:layout_height="match_parent"
-                  android:adjustViewBounds="true"
-                  android:contentDescription="远端画面预览"
-                  android:padding="8dp"
-                  android:scaleType="fitCenter"
+                <View
+                  android:id="@+id/remoteCursorOverlay"
+                  android:layout_width="18dp"
+                  android:layout_height="18dp"
+                  android:background="@drawable/remote_cursor_overlay"
                   android:visibility="gone" />
 
                 <com.google.android.material.button.MaterialButton
@@ -369,6 +394,25 @@
                   android:paddingStart="10dp"
                   android:paddingEnd="10dp"
                   android:text="全屏"
+                  android:textAllCaps="false"
+                  android:textColor="#1E3A8A"
+                  android:textSize="11sp"
+                  app:backgroundTint="#DCE9FF"
+                  app:cornerRadius="10dp" />
+
+                <com.google.android.material.button.MaterialButton
+                  android:id="@+id/remoteKeyboardPanelButton"
+                  android:layout_width="wrap_content"
+                  android:layout_height="32dp"
+                  android:layout_gravity="bottom|end"
+                  android:layout_marginEnd="8dp"
+                  android:layout_marginBottom="8dp"
+                  android:insetTop="0dp"
+                  android:insetBottom="0dp"
+                  android:minWidth="0dp"
+                  android:paddingStart="10dp"
+                  android:paddingEnd="10dp"
+                  android:text="键盘"
                   android:textAllCaps="false"
                   android:textColor="#1E3A8A"
                   android:textSize="11sp"
@@ -458,13 +502,62 @@
                   android:textAllCaps="false"
                   android:textColor="#35598C"
                   android:textSize="13sp"
-                  app:cornerRadius="12dp"
-                  app:strokeColor="#D4E2F8" />
-              </LinearLayout>
+	                  app:cornerRadius="12dp"
+	                  app:strokeColor="#D4E2F8" />
+	              </LinearLayout>
 
-              <HorizontalScrollView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+	              <LinearLayout
+	                android:layout_width="match_parent"
+	                android:layout_height="wrap_content"
+	                android:layout_marginTop="8dp"
+	                android:orientation="horizontal">
+
+	                <com.google.android.material.button.MaterialButton
+	                  android:id="@+id/remoteClipboardSendButton"
+	                  style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+	                  android:layout_width="0dp"
+	                  android:layout_height="38dp"
+	                  android:layout_weight="1"
+	                  android:insetTop="0dp"
+	                  android:insetBottom="0dp"
+	                  android:text="发剪贴板"
+	                  android:textAllCaps="false"
+	                  android:textColor="#35598C"
+	                  android:textSize="12sp"
+	                  app:cornerRadius="10dp"
+	                  app:strokeColor="#D4E2F8" />
+
+	                <com.google.android.material.button.MaterialButton
+	                  android:id="@+id/remoteFileSendButton"
+	                  style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+	                  android:layout_width="0dp"
+	                  android:layout_height="38dp"
+	                  android:layout_marginStart="8dp"
+	                  android:layout_weight="1"
+	                  android:insetTop="0dp"
+	                  android:insetBottom="0dp"
+	                  android:text="发文件"
+	                  android:textAllCaps="false"
+	                  android:textColor="#35598C"
+	                  android:textSize="12sp"
+	                  app:cornerRadius="10dp"
+	                  app:strokeColor="#D4E2F8" />
+	              </LinearLayout>
+
+	              <TextView
+	                android:id="@+id/remoteTransferStatusText"
+	                android:layout_width="match_parent"
+	                android:layout_height="wrap_content"
+	                android:layout_marginTop="6dp"
+	                android:ellipsize="end"
+	                android:maxLines="2"
+	                android:text="剪贴板/文件：等待会话"
+	                android:textColor="#5F6F85"
+	                android:textSize="12sp" />
+
+	              <HorizontalScrollView
+	                android:layout_width="match_parent"
+	                android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:overScrollMode="never"
                 android:scrollbars="none">

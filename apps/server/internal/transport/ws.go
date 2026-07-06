@@ -27,6 +27,11 @@ type clientConn struct {
 
 const (
 	sessionMetricsRetentionWindow = 3 * time.Minute
+	sessionToolTextMaxBytes       = 256 * 1024
+	sessionFileChunkMaxBase64     = 384 * 1024
+	sessionFileMaxChunks          = 512
+	sessionFrameMaxBase64         = 2 * 1024 * 1024
+	sessionFrameMaxDimension      = 8192
 	qualityHintFpsLowThreshold    = 10.0
 	qualityHintStallFpsThreshold  = 16.0
 	qualityHintBitrateLowKbps     = 350.0
@@ -201,15 +206,17 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		h.logger.Info(map[string]any{
-			"event":      "ws.message_received",
-			"type":       msg.Type,
-			"trace_id":   msg.TraceID,
-			"msg_id":     msg.MessageID,
-			"session_id": msg.SessionID,
-			"device_id":  msg.From.DeviceID,
-			"role":       msg.From.Role,
-		})
+		if !isHighFrequencyRelayLogMessage(msg.Type) {
+			h.logger.Info(map[string]any{
+				"event":      "ws.message_received",
+				"type":       msg.Type,
+				"trace_id":   msg.TraceID,
+				"msg_id":     msg.MessageID,
+				"session_id": msg.SessionID,
+				"device_id":  msg.From.DeviceID,
+				"role":       msg.From.Role,
+			})
+		}
 
 		switch msg.Type {
 		case "hello":
@@ -322,6 +329,8 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 			h.handleInput(client, msg)
 		case "input.result.push":
 			h.handleInputResult(client, msg)
+		case "clipboard.text", "clipboard.result", "file.transfer.start", "file.transfer.chunk", "file.transfer.complete", "file.transfer.result", "session.viewport.interaction", "screen.frame.push":
+			h.handleSessionToolMessage(client, msg)
 		case "webrtc.offer", "webrtc.answer", "webrtc.ice_candidate", "webrtc.restart_ice":
 			h.handleWebRTCSignal(client, msg)
 		default:
@@ -560,6 +569,43 @@ func (h *Hub) handleInputResult(client *clientConn, msg protocol.Envelope) {
 	})
 }
 
+func (h *Hub) handleSessionToolMessage(client *clientConn, msg protocol.Envelope) {
+	if msg.SessionID == "" {
+		h.writeError(client, msg.TraceID, msg.MessageID, 4002, "SESSION_TOOL_NOT_ALLOWED", "session_id is required for session tool messages", msg.From.DeviceID)
+		return
+	}
+	if !h.sessions.HasParticipant(msg.SessionID, msg.From.DeviceID) {
+		h.writeError(client, msg.TraceID, msg.MessageID, 4002, "SESSION_TOOL_NOT_ALLOWED", "only session participants can use session tool messages", msg.From.DeviceID)
+		return
+	}
+	if !validateSessionToolPayload(msg) {
+		h.writeError(client, msg.TraceID, msg.MessageID, 4001, "SESSION_TOOL_INVALID_PAYLOAD", "invalid session tool payload", msg.From.DeviceID)
+		return
+	}
+	peerDeviceID, ok := h.sessions.PeerDeviceID(msg.SessionID, msg.From.DeviceID)
+	if !ok {
+		h.writeError(client, msg.TraceID, msg.MessageID, 3003, "SESSION_NOT_FOUND", "session not found", msg.From.DeviceID)
+		return
+	}
+	if !h.writeToDevice(peerDeviceID, msg) {
+		h.writeError(client, msg.TraceID, msg.MessageID, 2002, "DEVICE_OFFLINE", "session peer is offline", msg.From.DeviceID)
+		return
+	}
+	if !isHighFrequencyRelayLogMessage(msg.Type) {
+		h.logger.Info(map[string]any{
+			"event":        "session.tool.forwarded",
+			"type":         msg.Type,
+			"session_id":   msg.SessionID,
+			"from_device":  msg.From.DeviceID,
+			"peer_device":  peerDeviceID,
+			"trace_id":     msg.TraceID,
+			"message_id":   msg.MessageID,
+			"payload_keys": payloadKeys(msg.Payload),
+		})
+	}
+	h.writeEnvelope(client, session.BuildInputAck(msg.SessionID, msg.TraceID, msg.Type))
+}
+
 func (h *Hub) handleWebRTCSignal(client *clientConn, msg protocol.Envelope) {
 	if msg.SessionID == "" {
 		h.writeError(client, msg.TraceID, msg.MessageID, 5001, "MEDIA_NEGOTIATION_FAILED", "session_id is required for webrtc signaling", msg.From.DeviceID)
@@ -712,6 +758,308 @@ func isInputMessageType(messageType string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func validateSessionToolPayload(msg protocol.Envelope) bool {
+	if msg.Payload == nil {
+		return false
+	}
+	switch msg.Type {
+	case "clipboard.text":
+		clipboardID, ok := msg.Payload["clipboard_id"].(string)
+		if !ok || strings.TrimSpace(clipboardID) == "" {
+			return false
+		}
+		text, ok := msg.Payload["text"].(string)
+		return ok && len(text) <= sessionToolTextMaxBytes
+	case "clipboard.result":
+		clipboardID, ok := msg.Payload["clipboard_id"].(string)
+		if !ok || strings.TrimSpace(clipboardID) == "" {
+			return false
+		}
+		applied, ok := msg.Payload["applied"].(bool)
+		if !ok {
+			return false
+		}
+		if chars, exists := msg.Payload["chars"]; exists {
+			value, ok := integralPayloadNumber(chars)
+			if !ok || value < 0 || value > sessionToolTextMaxBytes {
+				return false
+			}
+		}
+		if !applied {
+			return requiredStringPayloadWithin(msg.Payload, "error_detail", 512)
+		}
+		return optionalStringPayloadWithin(msg.Payload, "error_detail", 512)
+	case "file.transfer.start":
+		fileID, ok := msg.Payload["file_id"].(string)
+		if !ok || strings.TrimSpace(fileID) == "" {
+			return false
+		}
+		name, ok := msg.Payload["name"].(string)
+		if !ok || strings.TrimSpace(name) == "" || len(name) > 255 {
+			return false
+		}
+		size, ok := integralPayloadNumber(msg.Payload["size"])
+		if !ok || size < 0 {
+			return false
+		}
+		totalChunks, ok := integralPayloadNumber(msg.Payload["total_chunks"])
+		if !ok || totalChunks <= 0 || totalChunks > sessionFileMaxChunks {
+			return false
+		}
+		if mime, exists := msg.Payload["mime"]; exists {
+			value, ok := mime.(string)
+			if !ok || len(value) > 128 {
+				return false
+			}
+		}
+		if !validOptionalSHA256(msg.Payload["sha256"]) {
+			return false
+		}
+		return true
+	case "file.transfer.chunk":
+		fileID, ok := msg.Payload["file_id"].(string)
+		if !ok || strings.TrimSpace(fileID) == "" {
+			return false
+		}
+		chunkIndex, ok := integralPayloadNumber(msg.Payload["chunk_index"])
+		if !ok || chunkIndex < 0 {
+			return false
+		}
+		totalChunks, ok := integralPayloadNumber(msg.Payload["total_chunks"])
+		if !ok || totalChunks <= 0 || totalChunks > sessionFileMaxChunks || chunkIndex >= totalChunks {
+			return false
+		}
+		data, ok := msg.Payload["data_base64"].(string)
+		return ok && data != "" && len(data) <= sessionFileChunkMaxBase64
+	case "file.transfer.complete":
+		fileID, ok := msg.Payload["file_id"].(string)
+		if !ok || strings.TrimSpace(fileID) == "" {
+			return false
+		}
+		if totalChunks, exists := msg.Payload["total_chunks"]; exists {
+			value, ok := integralPayloadNumber(totalChunks)
+			if !ok || value <= 0 || value > sessionFileMaxChunks {
+				return false
+			}
+		}
+		if !validOptionalSHA256(msg.Payload["sha256"]) {
+			return false
+		}
+		return true
+	case "file.transfer.result":
+		fileID, ok := msg.Payload["file_id"].(string)
+		if !ok || strings.TrimSpace(fileID) == "" {
+			return false
+		}
+		applied, ok := msg.Payload["applied"].(bool)
+		if !ok {
+			return false
+		}
+		if !applied && !requiredStringPayloadWithin(msg.Payload, "error_detail", 512) {
+			return false
+		}
+		if bytes, exists := msg.Payload["bytes"]; exists {
+			value, ok := integralPayloadNumber(bytes)
+			if !ok || value < 0 {
+				return false
+			}
+		}
+		if !validOptionalSHA256(msg.Payload["sha256"]) {
+			return false
+		}
+		return optionalStringPayloadWithin(msg.Payload, "name", 255) &&
+			optionalStringPayloadWithin(msg.Payload, "location", 512) &&
+			optionalStringPayloadWithin(msg.Payload, "error_detail", 512)
+	case "session.viewport.interaction":
+		phase, ok := msg.Payload["phase"].(string)
+		if !ok {
+			return false
+		}
+		switch strings.TrimSpace(phase) {
+		case "start", "update", "end":
+		default:
+			return false
+		}
+		interaction, ok := msg.Payload["interaction"].(string)
+		if !ok {
+			return false
+		}
+		switch strings.TrimSpace(interaction) {
+		case "pinch", "pan", "fullscreen":
+		default:
+			return false
+		}
+		if scale, exists := msg.Payload["scale"]; exists {
+			value, ok := asNumber(scale)
+			if !ok || value < 1.0 || value > 4.5 {
+				return false
+			}
+		}
+		if !validOptionalViewportRegion(msg.Payload) {
+			return false
+		}
+		return true
+	case "screen.frame.push":
+		frameID, ok := msg.Payload["frame_id"].(string)
+		if !ok || strings.TrimSpace(frameID) == "" {
+			return false
+		}
+		content, ok := msg.Payload["content_b64"].(string)
+		if !ok || content == "" || len(content) > sessionFrameMaxBase64 {
+			return false
+		}
+		width, ok := integralPayloadNumber(msg.Payload["frame_width"])
+		if !ok || width <= 0 || width > sessionFrameMaxDimension {
+			return false
+		}
+		height, ok := integralPayloadNumber(msg.Payload["frame_height"])
+		if !ok || height <= 0 || height > sessionFrameMaxDimension {
+			return false
+		}
+		if mime, exists := msg.Payload["mime_type"]; exists {
+			value, ok := mime.(string)
+			if !ok {
+				return false
+			}
+			switch strings.ToLower(strings.TrimSpace(value)) {
+			case "image/png", "image/jpeg", "image/jpg", "image/webp":
+			default:
+				return false
+			}
+		}
+		if !validOptionalNormalizedRect(
+			msg.Payload,
+			"source_rect_x",
+			"source_rect_y",
+			"source_rect_width",
+			"source_rect_height",
+		) {
+			return false
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func validOptionalSHA256(value any) bool {
+	if value == nil {
+		return true
+	}
+	text, ok := value.(string)
+	if !ok {
+		return false
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return true
+	}
+	if len(text) != 64 {
+		return false
+	}
+	for _, ch := range text {
+		if (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func optionalStringPayloadWithin(payload map[string]any, key string, maxBytes int) bool {
+	value, exists := payload[key]
+	if !exists || value == nil {
+		return true
+	}
+	text, ok := value.(string)
+	if !ok {
+		return false
+	}
+	return len(text) <= maxBytes
+}
+
+func requiredStringPayloadWithin(payload map[string]any, key string, maxBytes int) bool {
+	value, exists := payload[key]
+	if !exists || value == nil {
+		return false
+	}
+	text, ok := value.(string)
+	if !ok || strings.TrimSpace(text) == "" {
+		return false
+	}
+	return len(text) <= maxBytes
+}
+
+func validOptionalViewportRegion(payload map[string]any) bool {
+	if !validOptionalNormalizedRect(payload, "viewport_x", "viewport_y", "viewport_width", "viewport_height") {
+		return false
+	}
+	for _, key := range []string{"focus_x", "focus_y"} {
+		if _, _, ok := optionalNormalizedPayloadNumber(payload[key]); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func validOptionalNormalizedRect(payload map[string]any, xKey string, yKey string, widthKey string, heightKey string) bool {
+	viewportX, hasViewportX, ok := optionalNormalizedPayloadNumber(payload[xKey])
+	if !ok {
+		return false
+	}
+	viewportY, hasViewportY, ok := optionalNormalizedPayloadNumber(payload[yKey])
+	if !ok {
+		return false
+	}
+	viewportWidth, hasViewportWidth, ok := optionalNormalizedPayloadNumber(payload[widthKey])
+	if !ok {
+		return false
+	}
+	viewportHeight, hasViewportHeight, ok := optionalNormalizedPayloadNumber(payload[heightKey])
+	if !ok {
+		return false
+	}
+	hasAnyViewport := hasViewportX || hasViewportY || hasViewportWidth || hasViewportHeight
+	if !hasAnyViewport {
+		return true
+	}
+	if !(hasViewportX && hasViewportY && hasViewportWidth && hasViewportHeight) {
+		return false
+	}
+	if viewportWidth <= 0 || viewportHeight <= 0 {
+		return false
+	}
+	const epsilon = 0.000001
+	return viewportX+viewportWidth <= 1.0+epsilon && viewportY+viewportHeight <= 1.0+epsilon
+}
+
+func optionalNormalizedPayloadNumber(value any) (float64, bool, bool) {
+	if value == nil {
+		return 0, false, true
+	}
+	number, ok := asNumber(value)
+	if !ok || number < 0 || number > 1 {
+		return 0, true, false
+	}
+	return number, true, true
+}
+
+func integralPayloadNumber(value any) (int64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) || math.Trunc(typed) != typed {
+			return 0, false
+		}
+		return int64(typed), true
+	case int:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	default:
+		return 0, false
 	}
 }
 
@@ -1223,12 +1571,19 @@ func extractSessionCombinedSummary(controllerReport, agentReport map[string]any)
 	)
 
 	firstFrameMs, firstFrameOk := asNumber(controller["first_frame_ms"])
+	mediaFrameTransport, mediaFrameTransportOK := asTrimmedString(controller["media_frame_transport"])
+	webrtcFirstFrameMs, webrtcFirstFrameMsOK := asNumber(controller["webrtc_first_frame_ms"])
+	legacyFirstFrameMs, legacyFirstFrameMsOK := asNumber(controller["legacy_first_frame_ms"])
 	renderFpsAvg, renderFpsOk := asNumber(controller["render_fps_avg"])
+	webrtcRenderFpsAvg, webrtcRenderFpsAvgOK := asNumber(controller["webrtc_render_fps_avg"])
+	legacyRenderFpsAvg, legacyRenderFpsAvgOK := asNumber(controller["legacy_render_fps_avg"])
 	renderFpsRecent, renderFpsRecentOK := asNumber(controller["render_fps_recent"])
 	renderRecentSampleCount, renderRecentSampleCountOK := asNumber(controller["render_recent_sample_count"])
 	renderRecentWindowMs, renderRecentWindowMsOK := asNumber(controller["render_recent_window_ms"])
 	recvKbpsAvg, recvKbpsOk := asNumber(controller["recv_kbps_avg"])
 	renderedFrames, renderedFramesOk := asNumber(controller["rendered_frames"])
+	webrtcRenderedFrames, webrtcRenderedFramesOK := asNumber(controller["webrtc_rendered_frames"])
+	legacyRenderedFrames, legacyRenderedFramesOK := asNumber(controller["legacy_rendered_frames"])
 	rttMsAvg, rttMsAvgOk := asNumber(controller["rtt_ms_avg"])
 	icePolicyRestarts, icePolicyRestartsOk := asNumber(controller["ice_policy_restarts"])
 	renderLongestFrameGapMs, renderLongestFrameGapMsOK := asNumber(controller["render_longest_frame_gap_ms"])
@@ -1336,8 +1691,23 @@ func extractSessionCombinedSummary(controllerReport, agentReport map[string]any)
 	if firstFrameOk {
 		summary["first_frame_ms"] = firstFrameMs
 	}
+	if mediaFrameTransportOK {
+		summary["media_frame_transport"] = mediaFrameTransport
+	}
+	if webrtcFirstFrameMsOK {
+		summary["webrtc_first_frame_ms"] = webrtcFirstFrameMs
+	}
+	if legacyFirstFrameMsOK {
+		summary["legacy_first_frame_ms"] = legacyFirstFrameMs
+	}
 	if renderFpsOk {
 		summary["render_fps_avg"] = renderFpsAvg
+	}
+	if webrtcRenderFpsAvgOK {
+		summary["webrtc_render_fps_avg"] = webrtcRenderFpsAvg
+	}
+	if legacyRenderFpsAvgOK {
+		summary["legacy_render_fps_avg"] = legacyRenderFpsAvg
 	}
 	if renderFpsRecentOK {
 		summary["render_fps_recent"] = renderFpsRecent
@@ -1353,6 +1723,12 @@ func extractSessionCombinedSummary(controllerReport, agentReport map[string]any)
 	}
 	if renderedFramesOk {
 		summary["rendered_frames"] = renderedFrames
+	}
+	if webrtcRenderedFramesOK {
+		summary["webrtc_rendered_frames"] = webrtcRenderedFrames
+	}
+	if legacyRenderedFramesOK {
+		summary["legacy_rendered_frames"] = legacyRenderedFrames
 	}
 	if rttMsAvgOk {
 		summary["rtt_ms_avg"] = rttMsAvg
@@ -1741,8 +2117,9 @@ func extractSessionCombinedSummary(controllerReport, agentReport map[string]any)
 		)
 	}
 	summary["session_perf_summary"] = fmt.Sprintf(
-		"route=%s first_frame_ms=%s render_fps_avg=%s render_fps_recent=%s recv_kbps_avg=%s stutter_gap_ms=%s recent_gap_ms=%s low_fps_streak_ms=%s recent_low_fps_streak_ms=%s drop_spike=%s recent_drop_spike=%s send_fps=%s send_kbps=%s path=%s tier=%s canvas_share=%s local_ice_sent=%s agent_remote_ice=%s remote_input_applied=%s/%s input_coverage=%s last_executor=%s last_status=%s",
+		"route=%s media=%s first_frame_ms=%s render_fps_avg=%s render_fps_recent=%s recv_kbps_avg=%s stutter_gap_ms=%s recent_gap_ms=%s low_fps_streak_ms=%s recent_low_fps_streak_ms=%s drop_spike=%s recent_drop_spike=%s send_fps=%s send_kbps=%s path=%s tier=%s canvas_share=%s local_ice_sent=%s agent_remote_ice=%s remote_input_applied=%s/%s input_coverage=%s last_executor=%s last_status=%s",
 		formatSummaryString(sessionRouteLabel, sessionRouteOK),
+		formatSummaryString(mediaFrameTransport, mediaFrameTransportOK),
 		formatSummaryNumber(firstFrameMs, firstFrameOk, 0),
 		formatSummaryNumber(renderFpsAvg, renderFpsOk, 2),
 		formatSummaryNumber(renderFpsRecent, renderFpsRecentOK, 2),
@@ -2133,16 +2510,18 @@ func (h *Hub) writeToDevice(deviceID string, msg protocol.Envelope) bool {
 		})
 		return false
 	}
-	h.logger.Info(map[string]any{
-		"event":       "ws.forward",
-		"to_device":   deviceID,
-		"from_device": msg.From.DeviceID,
-		"type":        msg.Type,
-		"session_id":  msg.SessionID,
-		"trace_id":    msg.TraceID,
-		"msg_id":      msg.MessageID,
-		"payload":     summarizeSignalPayload(msg),
-	})
+	if !isHighFrequencyRelayLogMessage(msg.Type) {
+		h.logger.Info(map[string]any{
+			"event":       "ws.forward",
+			"to_device":   deviceID,
+			"from_device": msg.From.DeviceID,
+			"type":        msg.Type,
+			"session_id":  msg.SessionID,
+			"trace_id":    msg.TraceID,
+			"msg_id":      msg.MessageID,
+			"payload":     summarizeSignalPayload(msg),
+		})
+	}
 	if h.writeEnvelope(client, msg) {
 		return true
 	}
@@ -2283,4 +2662,9 @@ func payloadKeys(payload map[string]any) string {
 		keys = append(keys, key)
 	}
 	return strings.Join(keys, ",")
+}
+
+func isHighFrequencyRelayLogMessage(messageType string) bool {
+	// 作者: long；远控画面帧是热路径，relay 逐帧写三类结构化日志会把 JPEG 兜底流拖慢；转发和校验仍照常执行，只跳过高频观测噪声。
+	return messageType == "screen.frame.push"
 }

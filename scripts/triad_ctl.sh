@@ -26,11 +26,18 @@ RD_ANDROID_AUTO_PROOF_INPUT="${RD_ANDROID_AUTO_PROOF_INPUT:-1}"
 RD_EMULATOR_ARGS="${RD_EMULATOR_ARGS:--no-snapshot-load -no-snapshot-save}"
 RD_SCREEN_PREFIX="${RD_SCREEN_PREFIX:-rdtriad}"
 RD_AGENT_DEVICE_ID="${RD_AGENT_DEVICE_ID:-auto}"
+RD_DESKTOP_DEBUG_ENABLE_TOOLS="${RD_DESKTOP_DEBUG_ENABLE_TOOLS:-0}"
+RD_DESKTOP_DEBUG_SEND_CLIPBOARD_TEXT="${RD_DESKTOP_DEBUG_SEND_CLIPBOARD_TEXT:-}"
+RD_DESKTOP_DEBUG_SEND_FILE_PATH="${RD_DESKTOP_DEBUG_SEND_FILE_PATH:-}"
 RD_DETECTED_AGENT_DEVICE_ID=""
 
 ANDROID_SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
 ANDROID_EMULATOR_BIN="${ANDROID_EMULATOR_BIN:-${ANDROID_SDK}/emulator/emulator}"
 RD_ACTIVE_TURN_PORT="${RD_TURN_PORT}"
+RD_ANDROID_JAVA_HOME="${RD_ANDROID_JAVA_HOME:-${JAVA_HOME:-}}"
+if [[ -z "${RD_ANDROID_JAVA_HOME}" && -d "/Applications/Android Studio.app/Contents/jbr/Contents/Home" ]]; then
+  RD_ANDROID_JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+fi
 
 RELAY_SCREEN="${RD_SCREEN_PREFIX}_relay"
 TURN_SCREEN="${RD_SCREEN_PREFIX}_turn"
@@ -46,6 +53,10 @@ log() {
 
 warn() {
   printf '[triad_ctl] %s WARN: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >&2
+}
+
+shell_quote() {
+  printf '%q' "$1"
 }
 
 adb_cmd() {
@@ -443,9 +454,16 @@ screen_start() {
 
 screen_stop() {
   local session="$1"
-  if screen_has_session "${session}"; then
-    screen -S "${session}" -X quit || true
-  fi
+  local sockets=""
+  # 作者: long；反复真机联调时 screen 可能留下多个同名日志会话，单次 `screen -S name -X quit` 只能命中一个或因重名失败；逐个 socket 清理才能避免几十个 logcat 同时写日志拖慢性能测试。
+  sockets="$(screen -ls 2>/dev/null | awk -v name="${session}" '
+    $1 ~ ("^[0-9]+\\." name "$") { print $1 }
+  ' || true)"
+  [[ -n "${sockets}" ]] || return 0
+  while IFS= read -r socket_name; do
+    [[ -n "${socket_name}" ]] || continue
+    screen -S "${socket_name}" -X quit || true
+  done <<< "${sockets}"
 }
 
 start_relay() {
@@ -480,7 +498,13 @@ start_mac() {
     return 0
   fi
   log "starting mac desktop dev app"
-  screen_start "${MAC_SCREEN}" bash -lc "cd '${ROOT_DIR}/apps/desktop' && RD_DESKTOP_AUTO_CONNECT=1 RD_DESKTOP_AUTO_REGISTER=1 RD_DESKTOP_AUTO_HEARTBEAT=1 npm exec tauri dev -- --no-watch >> '${MAC_LOG}' 2>&1"
+  local debug_tools_q
+  local debug_clipboard_q
+  local debug_file_q
+  debug_tools_q="$(shell_quote "${RD_DESKTOP_DEBUG_ENABLE_TOOLS}")"
+  debug_clipboard_q="$(shell_quote "${RD_DESKTOP_DEBUG_SEND_CLIPBOARD_TEXT}")"
+  debug_file_q="$(shell_quote "${RD_DESKTOP_DEBUG_SEND_FILE_PATH}")"
+  screen_start "${MAC_SCREEN}" bash -lc "cd '${ROOT_DIR}/apps/desktop' && env RD_DESKTOP_AUTO_CONNECT=1 RD_DESKTOP_AUTO_REGISTER=1 RD_DESKTOP_AUTO_HEARTBEAT=1 RD_DESKTOP_DEBUG_ENABLE_TOOLS=${debug_tools_q} RD_DESKTOP_DEBUG_SEND_CLIPBOARD_TEXT=${debug_clipboard_q} RD_DESKTOP_DEBUG_SEND_FILE_PATH=${debug_file_q} npm exec tauri dev -- --no-watch >> '${MAC_LOG}' 2>&1"
   if ! wait_for_tcp_listen "${RD_MAC_DEV_PORT}" 60; then
     warn "mac app did not expose port ${RD_MAC_DEV_PORT} in time, check ${MAC_LOG}"
     return 1
@@ -540,12 +564,17 @@ start_android() {
   fi
 
   log "installing android debug app"
-  (cd "${ROOT_DIR}/apps/android" && ./gradlew :app:assembleDebug >> "${ANDROID_LOG}" 2>&1)
+  if [[ -n "${RD_ANDROID_JAVA_HOME}" ]]; then
+    (cd "${ROOT_DIR}/apps/android" && env JAVA_HOME="${RD_ANDROID_JAVA_HOME}" ./gradlew :app:assembleDebug >> "${ANDROID_LOG}" 2>&1)
+  else
+    (cd "${ROOT_DIR}/apps/android" && ./gradlew :app:assembleDebug >> "${ANDROID_LOG}" 2>&1)
+  fi
   adb_cmd install -r "${ROOT_DIR}/apps/android/app/build/outputs/apk/debug/app-debug.apk" >> "${ANDROID_LOG}" 2>&1
 
   log "starting android logcat capture (RemoteDesk* tags)"
   adb_cmd logcat -c >/dev/null 2>&1 || true
   screen_stop "${ANDROID_LOGCAT_SCREEN}"
+  pkill -f "adb .*logcat -v time RemoteDeskRtc:I RemoteDeskWs:I RemoteDeskUi:I RemoteDeskSoak:I" >/dev/null 2>&1 || true
   if [[ -n "${RD_ANDROID_SERIAL}" ]]; then
     screen_start "${ANDROID_LOGCAT_SCREEN}" bash -lc "adb -s '${RD_ANDROID_SERIAL}' logcat -v time RemoteDeskRtc:I RemoteDeskWs:I RemoteDeskUi:I RemoteDeskSoak:I '*:S' >> '${ANDROID_LOG}' 2>&1"
   else
@@ -586,6 +615,7 @@ stop_android() {
   fi
 
   screen_stop "${ANDROID_LOGCAT_SCREEN}"
+  pkill -f "adb .*logcat -v time RemoteDeskRtc:I RemoteDeskWs:I RemoteDeskUi:I RemoteDeskSoak:I" >/dev/null 2>&1 || true
   if [[ "${RD_ANDROID_MODE}" != "physical" ]]; then
     kill_android_emulator
   fi
@@ -673,6 +703,9 @@ Environment overrides:
   RD_ICE_DISABLE_STUN=0|1
   RD_ICE_TURN_TRANSPORT=all|udp|tcp
   RD_ICE_POLICY_RELAY_UDP_HIGH_RTT_MS=220
+  RD_DESKTOP_DEBUG_ENABLE_TOOLS=0|1
+  RD_DESKTOP_DEBUG_SEND_CLIPBOARD_TEXT=<text-for-agent-to-send-after-session>
+  RD_DESKTOP_DEBUG_SEND_FILE_PATH=<local-file-for-agent-to-send-after-session>
   ANDROID_HOME / ANDROID_SDK_ROOT / ANDROID_EMULATOR_BIN
 EOF
 }

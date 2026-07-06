@@ -241,13 +241,61 @@ const EMULATOR_SESSION_PROFILE_INDEX = 0
 const EMULATOR_SESSION_MIN_PROFILE_INDEX = 0
 const EMULATOR_SESSION_MAX_PROFILE_INDEX = 0
 const EMULATOR_SESSION_MAX_SCALE_DOWN_BY = 1.0
-const ANDROID_PHONE_SESSION_PROFILE_INDEX = 1
-const ANDROID_PHONE_SESSION_MAX_WIDTH = 1280
-const ANDROID_PHONE_SESSION_MAX_HEIGHT = 720
-const ANDROID_PHONE_SESSION_MAX_FPS = 26
-const ANDROID_PHONE_SESSION_MAX_BITRATE = 5200000
-const ANDROID_PHONE_SESSION_MAX_SCALE_DOWN_BY = 1.15
-const CAPTURE_FRAME_INTERVAL_MS = 1200
+const ANDROID_PHONE_SESSION_PROFILE_INDEX = 2
+const ANDROID_PHONE_SESSION_MAX_WIDTH = 1440
+const ANDROID_PHONE_SESSION_MAX_HEIGHT = 936
+const ANDROID_PHONE_SESSION_MAX_FPS = 24
+const ANDROID_PHONE_SESSION_MAX_BITRATE = 14000000
+const ANDROID_PHONE_SESSION_MAX_SCALE_DOWN_BY = 1.0
+const ANDROID_PHONE_INTERACTIVE_MAX_WIDTH = 384
+const ANDROID_PHONE_INTERACTIVE_MAX_HEIGHT = 250
+const ANDROID_PHONE_INTERACTIVE_MAX_FPS = 30
+// 作者: long；WebRTC/H.264 主链路不再受 legacy JPEG 的 800px 档限制，全屏查看先给足真实像素，再由输入态临时降档保证跟手。
+const ANDROID_PHONE_FULLSCREEN_MAX_WIDTH = CAPTURE_MAX_WIDTH
+const ANDROID_PHONE_FULLSCREEN_MAX_HEIGHT = CAPTURE_MAX_HEIGHT
+const ANDROID_PHONE_FULLSCREEN_MAX_FPS = 24
+const ANDROID_PHONE_FULLSCREEN_MAX_BITRATE = 18000000
+const ANDROID_PHONE_PINCH_PREVIEW_MAX_WIDTH = 320
+const ANDROID_PHONE_PINCH_PREVIEW_MAX_HEIGHT = 208
+const ANDROID_PHONE_PINCH_PREVIEW_MAX_FPS = 8
+const ANDROID_PHONE_PINCH_PREVIEW_MAX_BITRATE = 3600000
+const ANDROID_PHONE_ZOOM_MOTION_MAX_WIDTH = 512
+const ANDROID_PHONE_ZOOM_MOTION_MAX_HEIGHT = 333
+const ANDROID_PHONE_ZOOM_MOTION_MAX_FPS = 12
+const ANDROID_PHONE_ZOOM_MOTION_MAX_BITRATE = 8200000
+const ANDROID_PHONE_ZOOM_DETAIL_MAX_WIDTH = 1280
+const ANDROID_PHONE_ZOOM_DETAIL_MAX_HEIGHT = 832
+const ANDROID_PHONE_ZOOM_DETAIL_MAX_FPS = 18
+const ANDROID_PHONE_ZOOM_DETAIL_MAX_BITRATE = 14000000
+const ANDROID_PHONE_ZOOM_STILL_MAX_WIDTH = 1600
+const ANDROID_PHONE_ZOOM_STILL_MAX_HEIGHT = 1040
+const ANDROID_PHONE_ZOOM_STILL_MAX_FPS = 12
+const ANDROID_PHONE_ZOOM_STILL_MAX_BITRATE = 18000000
+const ANDROID_PHONE_ZOOM_DETAIL_MIN_SCALE = 1.08
+// 作者: long；H.264 native sender 已经把重负载从 Android JPEG 解码挪到视频解码器，停手后的局部区域可以升到真实高清帧补文字细节。
+const ANDROID_PHONE_ZOOM_DETAIL_UPGRADE_DELAY_MS = 150
+const ANDROID_PHONE_ZOOM_STILL_UPGRADE_DELAY_MS = 760
+const ANDROID_PHONE_SOURCE_RECT_UNITS = 1000000
+const ANDROID_PHONE_MIN_SOURCE_RECT_PPM = 286000
+// 作者: long；最大缩放后鼠标移动会连续推动局部视角，裁剪源仍要跟随，但拖动中只做低频重配，抬手再强制落最终 source_rect，避免 JPEG 采集和 Android 全屏窗口提交叠加出系统回压。
+const ANDROID_PHONE_ZOOM_REGION_SOURCE_RECT_UPDATE_MIN_MS = 520
+const ANDROID_PHONE_ZOOM_REGION_SOURCE_RECT_UPDATE_THRESHOLD_PPM = 45000
+// 作者: long；真机输入通常是一串短促 move/pinch 事件，恢复窗口过短会让采集分辨率在移动中来回跳档，画面看起来更抖。
+const NATIVE_SENDER_INTERACTIVE_RESTORE_DELAY_MS = 1800
+const NATIVE_SENDER_VIEWPORT_INTERACTION_RESTORE_DELAY_MS = 520
+const NATIVE_SENDER_PINCH_RESTORE_DELAY_MS = 650
+const NATIVE_SENDER_PAN_RESTORE_DELAY_MS = 650
+// 作者: long；Android 真机现在默认验证 WebRTC/H.264 native sender 主链路，JPEG 帧流只在首帧失败或兼容性异常时兜底可见画面。
+const ANDROID_PHONE_LEGACY_FRAME_STREAM_ONLY = false
+// 作者: long；兜底帧流承担真机可视操作时，移动中用更小帧换刷新，停手后再用局部清晰帧补文字细节。
+const CAPTURE_FRAME_INTERVAL_MS = 100
+const ANDROID_PHONE_LEGACY_INTERACTIVE_INTERVAL_MS = 33
+const ANDROID_PHONE_LEGACY_PINCH_PREVIEW_INTERVAL_MS = 125
+const ANDROID_PHONE_LEGACY_FULLSCREEN_INTERVAL_MS = 42
+const ANDROID_PHONE_LEGACY_FULLSCREEN_HD_INTERVAL_MS = 167
+const ANDROID_PHONE_LEGACY_ZOOM_DETAIL_INTERVAL_MS = 84
+const ANDROID_PHONE_LEGACY_ZOOM_STILL_INTERVAL_MS = 125
+const ANDROID_PHONE_LEGACY_CLEAR_INTERVAL_MS = 62
 const AUTO_CONNECT_DELAY_MS = 1200
 const SETTINGS_AUTO_CONNECT_DELAY_MS = 500
 const WS_RECONNECT_INITIAL_DELAY_MS = 1000
@@ -259,13 +307,23 @@ const MAX_UI_LOG_LINES = 120
 const DESKTOP_TRACE_VERBOSE = true
 const INPUT_UI_RENDER_THROTTLE_MS = 120
 const INPUT_MOVE_LOG_THROTTLE_MS = 800
+// 作者: long；鼠标移动本身按接近 60Hz 执行，成功回执降频回传，避免 ACK 流量反过来抢占远控画面和后续 move 信令。
+const INPUT_MOVE_RESULT_PUSH_THROTTLE_MS = 240
+// 作者: long；兜底 JPEG 流每帧都会推给 Android，桌面端本地预览不需要同频 render，降频可把 CPU 留给采集编码和输入执行。
+const FRAME_STREAM_UI_RENDER_THROTTLE_MS = 500
 const LOCAL_PREVIEW_FPS_SAMPLE_MS = 1000
 const SESSION_LINK_SNAPSHOT_LOG_INTERVAL_MS = 2000
 const LIVE_E2E_PROOF_REPORT_MIN_INTERVAL_MS = 1500
 const REMOTE_POINTER_MOVE_THROTTLE_MS = 16
+// 作者: long；Android 最大缩放平移视角时，source_rect 重配、JPEG 帧和原生鼠标事件会叠加成系统合成压力，受控端同步降到约 25fps 执行鼠标 move。
+const REMOTE_ZOOM_PAN_MOUSE_MOVE_THROTTLE_MS = 48
+const REMOTE_ZOOM_PAN_MOUSE_MOVE_RECENT_MS = 1800
 const REMOTE_WHEEL_DELTA_SCALE = 120
 const REMOTE_WHEEL_MAX_DELTA = 4096
 const REMOTE_INPUT_REQUIRED_CATEGORIES = ["click", "drag", "keyboard", "wheel"]
+const SESSION_FILE_CHUNK_RAW_BYTES = 192 * 1024
+const SESSION_FILE_MAX_BYTES = 64 * 1024 * 1024
+// 作者: long；Android 电脑键盘面板和桌面内置控制端共用这组标准 DOM key code，白名单必须覆盖目标端原生执行器支持的键位。
 const REMOTE_KEY_CODES = new Set([
   "Backquote", "Backslash", "Backspace", "BracketLeft", "BracketRight", "Comma", "Digit0",
   "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9",
@@ -273,9 +331,15 @@ const REMOTE_KEY_CODES = new Set([
   "KeyI", "KeyJ", "KeyK", "KeyL", "KeyM", "KeyN", "KeyO", "KeyP", "KeyQ", "KeyR", "KeyS",
   "KeyT", "KeyU", "KeyV", "KeyW", "KeyX", "KeyY", "KeyZ", "Minus", "Period", "Quote",
   "Semicolon", "Slash", "Space", "Tab", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp",
+  "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+  "Insert", "Delete", "Home", "End", "PageUp", "PageDown", "PrintScreen", "ScrollLock",
+  "Pause", "CapsLock", "NumLock", "Numpad0", "Numpad1", "Numpad2", "Numpad3", "Numpad4",
+  "Numpad5", "Numpad6", "Numpad7", "Numpad8", "Numpad9", "NumpadAdd", "NumpadSubtract",
+  "NumpadMultiply", "NumpadDivide", "NumpadDecimal", "NumpadEnter", "NumpadEqual",
 ])
 const REMOTE_MODIFIER_CODES = new Set([
   "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight", "MetaLeft",
+  "MetaRight",
 ])
 
 const state = {
@@ -294,6 +358,13 @@ const state = {
   localFrameMeta: null,
   lastInput: "",
   lastAck: "",
+  clipboardStatus: "剪贴板：等待会话",
+  fileTransferStatus: "文件：等待会话",
+  incomingFileTransfers: new Map(),
+  debugToolsEnabled: false,
+  debugSendClipboardText: "",
+  debugSendFilePath: "",
+  debugSessionToolsRunKey: "",
   lastRemoteInputResult: emptyRemoteInputResult(),
   remoteInputResultCount: 0,
   remoteInputResultAppliedCount: 0,
@@ -305,6 +376,7 @@ const state = {
   streamSending: false,
   streamSendingLoopId: 0,
   streamSendPromise: null,
+  streamLastSentCaptureTs: 0,
   frameSeq: 0,
   messageSeq: 0,
   lastSessionMetricsReportSessionId: "",
@@ -344,6 +416,18 @@ const state = {
   nativeSenderPreviewStream: null,
   nativeSenderPreviewMode: "",
   nativeSenderPreviewVideoModeDisabled: false,
+  nativeSenderInteractiveRestoreTimer: null,
+  nativeSenderInteractiveProfileActive: false,
+  nativeSenderInteractiveSessionId: "",
+  nativeSenderInteractiveProfileMode: "",
+  nativeSenderInteractiveSourceRectKey: "",
+  nativeSenderInteractiveSourceRectUpdatedAt: 0,
+  nativeSenderFullscreenProfileActive: false,
+  nativeSenderFullscreenSessionId: "",
+  nativeSenderZoomDetailUpgradeTimer: null,
+  nativeSenderZoomStillUpgradeTimer: null,
+  nativeSenderZoomDetailSessionId: "",
+  lastAndroidViewportInteraction: null,
   agentZeroFramesSince: 0,
   agentRecoveryAttempts: 0,
   agentLastRecoveryAt: 0,
@@ -422,7 +506,16 @@ const uiSubscribers = new Set()
 let inputUiRenderTimer = null
 let lastInputUiRenderAtMs = 0
 let lastInputMoveLogAtMs = 0
+let lastInputMoveResultPushAtMs = 0
+let lastFrameStreamUiRenderAtMs = 0
 let inputMoveSuppressedCount = 0
+let hostMouseMoveApplyInFlight = false
+let hostMouseMoveApplyPromise = null
+let hostMouseMoveDrainTimer = null
+let hostMouseMovePendingMsg = null
+let lastHostMouseMoveApplyAtMs = 0
+let hostDiscreteInputQueueTail = Promise.resolve()
+let hostDiscreteInputQueueDepth = 0
 let localPreviewSamplerTimer = null
 let localPreviewLastTotalFrames = -1
 let localPreviewLastSampleAtMs = 0
@@ -559,6 +652,624 @@ async function copyText(value, successLabel) {
     appendLog(`复制${successLabel}失败: ${error?.message || "unknown error"}`)
     render()
     return false
+  }
+}
+
+function updateClipboardStatus(message) {
+  state.clipboardStatus = message
+  appendLog(message)
+}
+
+function updateFileTransferStatus(message) {
+  state.fileTransferStatus = message
+  appendLog(message)
+}
+
+function currentSessionToolSessionId(label = "工具") {
+  const sessionId = `${state.sessionId || ""}`.trim()
+  if (!sessionId) {
+    appendLog(`${label}需要先建立远程会话`)
+    return ""
+  }
+  return sessionId
+}
+
+function sessionToolMessageMatchesCurrentSession(msg, label = "工具") {
+  const messageSessionId = `${msg?.session_id || msg?.payload?.session_id || ""}`.trim()
+  if (!state.sessionId || !messageSessionId || messageSessionId !== state.sessionId) {
+    appendLog(`忽略非当前会话${label}消息`)
+    return false
+  }
+  return true
+}
+
+function randomTransferId(prefix) {
+  const id = typeof crypto?.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  return `${prefix}-${id}`
+}
+
+function sanitizeRemoteFileName(name) {
+  const cleaned = `${name || ""}`
+    .trim()
+    .replace(/[\\/:*?"<>|\n\r\t]/g, "_")
+    .slice(0, 120)
+  return cleaned || "remote-file.bin"
+}
+
+function formatBytes(size) {
+  const value = Number(size) || 0
+  if (value < 1024) {
+    return `${value} B`
+  }
+  const kb = value / 1024
+  if (kb < 1024) {
+    return `${kb.toFixed(1)} KB`
+  }
+  return `${(kb / 1024).toFixed(1)} MB`
+}
+
+function uint8ArrayToBase64(bytes) {
+  let binary = ""
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index])
+  }
+  return btoa(binary)
+}
+
+function base64ToUint8Array(base64) {
+  const binary = atob(`${base64 || ""}`)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return bytes
+}
+
+function normalizeSha256(value) {
+  const normalized = `${value || ""}`.trim().toLowerCase()
+  return /^[a-f0-9]{64}$/.test(normalized) ? normalized : ""
+}
+
+async function sha256HexOfBytes(bytes) {
+  if (!window.crypto?.subtle?.digest) {
+    throw new Error("当前桌面环境不支持 SHA-256 校验")
+  }
+  const digest = await window.crypto.subtle.digest("SHA-256", bytes)
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+async function readDesktopClipboardText() {
+  if (isTauri()) {
+    return `${await invoke("desktop_clipboard_read_text") || ""}`
+  }
+  if (!navigator.clipboard?.readText) {
+    throw new Error("当前桌面环境不支持读取剪贴板")
+  }
+  return `${await navigator.clipboard.readText() || ""}`
+}
+
+async function writeDesktopClipboardText(text) {
+  if (isTauri()) {
+    await invoke("desktop_clipboard_write_text", { text })
+    return
+  }
+  if (!navigator.clipboard?.writeText) {
+    throw new Error("当前桌面环境不支持写入剪贴板")
+  }
+  await navigator.clipboard.writeText(text)
+}
+
+function concatUint8Chunks(chunks, totalSize) {
+  const bytes = new Uint8Array(totalSize)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
+}
+
+function downloadIncomingFileInBrowser(transfer, chunks, totalSize) {
+  const blob = new Blob(chunks, { type: transfer.mime || "application/octet-stream" })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = transfer.name
+  anchor.style.display = "none"
+  document.body.appendChild(anchor)
+  anchor.click()
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url)
+    anchor.remove()
+  }, 1000)
+  return {
+    name: transfer.name,
+    path: "",
+    bytes: totalSize,
+  }
+}
+
+async function sendClipboardToRemote() {
+  const sessionId = currentSessionToolSessionId("剪贴板")
+  if (!sessionId) {
+    updateClipboardStatus("剪贴板：请先建立会话")
+    render()
+    return false
+  }
+  try {
+    const text = await readDesktopClipboardText()
+    return sendClipboardTextToRemote(text, { emptyMessage: "剪贴板：本机剪贴板为空" })
+  } catch (error) {
+    updateClipboardStatus(`剪贴板：读取失败 ${error?.message || "unknown"}`)
+    render()
+    return false
+  }
+}
+
+function sendClipboardTextToRemote(text, options = {}) {
+  const sessionId = currentSessionToolSessionId("剪贴板")
+  if (!sessionId) {
+    updateClipboardStatus("剪贴板：请先建立会话")
+    render()
+    return false
+  }
+  const value = `${text || ""}`
+  if (!value) {
+    updateClipboardStatus(options.emptyMessage || "剪贴板：待发送文本为空")
+    render()
+    return false
+  }
+  const sent = sendEnvelope("clipboard.text", {
+    clipboard_id: randomTransferId("clip"),
+    text: value,
+    source_platform: `${state.shellPlatform || "macos"}`,
+    created_at: Date.now(),
+  }, sessionId, { log: false })
+  updateClipboardStatus(sent ? `剪贴板：已发送 ${value.length} 字符` : "剪贴板：发送失败")
+  render()
+  return sent
+}
+
+async function handleIncomingClipboardText(msg) {
+  if (!sessionToolMessageMatchesCurrentSession(msg, "剪贴板")) {
+    return
+  }
+  const clipboardId = `${msg.payload?.clipboard_id || ""}`.trim()
+  const text = `${msg.payload?.text || ""}`
+  if (!text) {
+    updateClipboardStatus("剪贴板：收到空内容，已忽略")
+    sendClipboardResultToRemote(clipboardId, false, 0, "clipboard text is empty")
+    return
+  }
+  try {
+    await writeDesktopClipboardText(text)
+    updateClipboardStatus(`剪贴板：已接收 ${text.length} 字符并写入本机`)
+    sendClipboardResultToRemote(clipboardId, true, text.length)
+  } catch (error) {
+    const detail = error?.message || "unknown"
+    updateClipboardStatus(`剪贴板：接收成功但写入失败 ${detail}`)
+    sendClipboardResultToRemote(clipboardId, false, text.length, detail)
+  }
+}
+
+function sendClipboardResultToRemote(clipboardId, applied, chars = 0, errorDetail = "") {
+  const sessionId = currentSessionToolSessionId("剪贴板")
+  const cleanClipboardId = `${clipboardId || ""}`.trim()
+  if (!sessionId || !cleanClipboardId) {
+    return false
+  }
+  // 作者: long；共享剪贴板不能只证明消息被 relay 转发，接收端必须回传本机剪贴板写入结果，发送端才能区分“已送达”和“已应用”。
+  return sendEnvelope("clipboard.result", {
+    clipboard_id: cleanClipboardId,
+    applied: Boolean(applied),
+    chars: Math.max(0, Number(chars) || 0),
+    error_detail: applied ? "" : (`${errorDetail || "clipboard apply failed"}`).slice(0, 512),
+    created_at: Date.now(),
+  }, sessionId, { log: false })
+}
+
+function handleIncomingClipboardResult(msg) {
+  if (!sessionToolMessageMatchesCurrentSession(msg, "剪贴板")) {
+    return
+  }
+  const payload = msg.payload || {}
+  const applied = Boolean(payload.applied)
+  const chars = Math.max(0, Number(payload.chars || 0) || 0)
+  const detail = `${payload.error_detail || ""}`.trim()
+  updateClipboardStatus(
+    applied
+      ? `剪贴板：对端已写入 ${chars} 字符`
+      : `剪贴板：对端写入失败 ${detail || "unknown"}`,
+  )
+}
+
+async function sendFileBytesToRemote({ name, mime, bytes }) {
+  const sessionId = currentSessionToolSessionId("文件")
+  if (!sessionId || !(bytes instanceof Uint8Array)) {
+    updateFileTransferStatus("文件：请先建立会话")
+    render()
+    return false
+  }
+  if (bytes.length > SESSION_FILE_MAX_BYTES) {
+    updateFileTransferStatus("文件：超过 64MB，未发送")
+    render()
+    return false
+  }
+  try {
+    const totalChunks = Math.max(1, Math.ceil(bytes.length / SESSION_FILE_CHUNK_RAW_BYTES))
+    const fileId = randomTransferId("file")
+    const safeName = sanitizeRemoteFileName(name)
+    const resolvedMime = `${mime || "application/octet-stream"}`
+    const sha256 = await sha256HexOfBytes(bytes)
+    let sent = sendEnvelope("file.transfer.start", {
+      file_id: fileId,
+      name: safeName,
+      mime: resolvedMime,
+      size: bytes.length,
+      total_chunks: totalChunks,
+      sha256,
+    }, sessionId, { log: false })
+    if (sent) {
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+        const start = chunkIndex * SESSION_FILE_CHUNK_RAW_BYTES
+        const end = Math.min(start + SESSION_FILE_CHUNK_RAW_BYTES, bytes.length)
+        sent = sendEnvelope("file.transfer.chunk", {
+          file_id: fileId,
+          chunk_index: chunkIndex,
+          total_chunks: totalChunks,
+          data_base64: uint8ArrayToBase64(bytes.slice(start, end)),
+        }, sessionId, { log: false })
+        if (!sent) {
+          break
+        }
+      }
+    }
+    if (sent) {
+      sent = sendEnvelope("file.transfer.complete", {
+        file_id: fileId,
+        name: safeName,
+        mime: resolvedMime,
+        size: bytes.length,
+        total_chunks: totalChunks,
+        sha256,
+      }, sessionId, { log: false })
+    }
+    updateFileTransferStatus(sent ? `文件：已发送 ${safeName} (${formatBytes(bytes.length)})` : "文件：发送中断")
+    render()
+    return sent
+  } catch (error) {
+    updateFileTransferStatus(`文件：发送失败 ${error?.message || "unknown"}`)
+    render()
+    return false
+  }
+}
+
+async function sendFileToRemote(file) {
+  if (!file) {
+    updateFileTransferStatus("文件：请先选择文件")
+    render()
+    return false
+  }
+  try {
+    updateFileTransferStatus(`文件：正在读取 ${file.name}`)
+    render()
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    return sendFileBytesToRemote({
+      name: file.name,
+      mime: file.type || "application/octet-stream",
+      bytes,
+    })
+  } catch (error) {
+    updateFileTransferStatus(`文件：发送失败 ${error?.message || "unknown"}`)
+    render()
+    return false
+  }
+}
+
+async function runDesktopDebugSessionTools() {
+  if (!state.debugToolsEnabled || !isAgentSession()) {
+    return
+  }
+  const sessionId = `${state.sessionId || ""}`.trim()
+  if (!sessionId) {
+    return
+  }
+  const clipboardText = `${state.debugSendClipboardText || ""}`
+  const filePath = `${state.debugSendFilePath || ""}`.trim()
+  const runKey = `${sessionId}|${clipboardText}|${filePath}`
+  if (state.debugSessionToolsRunKey === runKey) {
+    return
+  }
+  state.debugSessionToolsRunKey = runKey
+
+  // 作者: long；真机端到端验证需要从 Mac 受控端主动发工具消息，调试入口只在显式环境变量开启时运行，避免普通会话误传本机文件或剪贴板。
+  if (clipboardText) {
+    sendClipboardTextToRemote(clipboardText)
+  }
+
+  if (!filePath) {
+    return
+  }
+  if (!isTauri()) {
+    updateFileTransferStatus("文件：调试发送需要 Tauri 桌面运行时")
+    render()
+    return
+  }
+  try {
+    updateFileTransferStatus(`文件：调试读取 ${filePath}`)
+    render()
+    const payload = await invoke("desktop_debug_read_file", { path: filePath })
+    const bytes = base64ToUint8Array(payload?.data_base64 || payload?.dataBase64 || "")
+    await sendFileBytesToRemote({
+      name: payload?.name || "remote-file.bin",
+      mime: payload?.mime || "application/octet-stream",
+      bytes,
+    })
+  } catch (error) {
+    updateFileTransferStatus(`文件：调试发送失败 ${error?.message || "unknown"}`)
+    render()
+  }
+}
+
+function handleIncomingFileTransferStart(msg) {
+  if (!sessionToolMessageMatchesCurrentSession(msg, "文件")) {
+    return
+  }
+  const payload = msg.payload || {}
+  const fileId = `${payload.file_id || ""}`.trim()
+  const name = sanitizeRemoteFileName(payload.name)
+  const totalChunks = Number(payload.total_chunks || 0)
+  const size = Number(payload.size || 0)
+  if (!fileId || !name || totalChunks <= 0 || totalChunks > 512 || size > SESSION_FILE_MAX_BYTES) {
+    updateFileTransferStatus("文件：收到无效文件请求")
+    sendFileTransferResultToRemote({
+      fileId,
+      applied: false,
+      name,
+      bytes: Math.max(0, size || 0),
+      sha256: normalizeSha256(payload.sha256),
+      errorDetail: "invalid file transfer start payload",
+    })
+    return
+  }
+  state.incomingFileTransfers.set(fileId, {
+    fileId,
+    name,
+    mime: `${payload.mime || "application/octet-stream"}`,
+    size,
+    totalChunks,
+    sha256: normalizeSha256(payload.sha256),
+    chunks: new Map(),
+  })
+  updateFileTransferStatus(`文件：开始接收 ${name}，共 ${totalChunks} 块`)
+}
+
+function handleIncomingFileTransferChunk(msg) {
+  if (!sessionToolMessageMatchesCurrentSession(msg, "文件")) {
+    return
+  }
+  const payload = msg.payload || {}
+  const fileId = `${payload.file_id || ""}`.trim()
+  const transfer = state.incomingFileTransfers.get(fileId)
+  if (!transfer) {
+    updateFileTransferStatus("文件：收到未知分块，已忽略")
+    sendFileTransferResultToRemote({
+      fileId,
+      applied: false,
+      errorDetail: "file chunk arrived before transfer start",
+    })
+    return
+  }
+  const chunkIndex = Number(payload.chunk_index)
+  const totalChunks = Number(payload.total_chunks)
+  if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= transfer.totalChunks || totalChunks !== transfer.totalChunks) {
+    updateFileTransferStatus("文件：收到无效分块，已忽略")
+    sendFileTransferResultToRemote({
+      fileId,
+      applied: false,
+      name: transfer.name,
+      bytes: transfer.size,
+      sha256: transfer.sha256,
+      errorDetail: "invalid file transfer chunk payload",
+    })
+    return
+  }
+  try {
+    transfer.chunks.set(chunkIndex, base64ToUint8Array(payload.data_base64))
+    updateFileTransferStatus(`文件：接收 ${transfer.name} ${transfer.chunks.size}/${transfer.totalChunks}`)
+  } catch (error) {
+    const detail = error?.message || "unknown"
+    updateFileTransferStatus(`文件：分块解码失败 ${detail}`)
+    sendFileTransferResultToRemote({
+      fileId,
+      applied: false,
+      name: transfer.name,
+      bytes: transfer.size,
+      sha256: transfer.sha256,
+      errorDetail: detail,
+    })
+  }
+}
+
+async function handleIncomingFileTransferComplete(msg) {
+  if (!sessionToolMessageMatchesCurrentSession(msg, "文件")) {
+    return
+  }
+  const payload = msg.payload || {}
+  const fileId = `${payload.file_id || ""}`.trim()
+  const transfer = state.incomingFileTransfers.get(fileId)
+  if (!transfer) {
+    updateFileTransferStatus("文件：完成消息没有对应文件")
+    sendFileTransferResultToRemote({
+      fileId,
+      applied: false,
+      errorDetail: "file complete arrived before transfer start",
+    })
+    return
+  }
+  if (transfer.chunks.size !== transfer.totalChunks) {
+    updateFileTransferStatus(`文件：${transfer.name} 分块未收齐 ${transfer.chunks.size}/${transfer.totalChunks}`)
+    sendFileTransferResultToRemote({
+      fileId,
+      applied: false,
+      name: transfer.name,
+      bytes: transfer.size,
+      sha256: transfer.sha256,
+      errorDetail: `missing chunks ${transfer.chunks.size}/${transfer.totalChunks}`,
+    })
+    return
+  }
+  const chunks = []
+  let totalSize = 0
+  for (let index = 0; index < transfer.totalChunks; index += 1) {
+    const chunk = transfer.chunks.get(index)
+    if (!chunk) {
+      updateFileTransferStatus(`文件：${transfer.name} 缺少第 ${index + 1} 块`)
+      sendFileTransferResultToRemote({
+        fileId,
+        applied: false,
+        name: transfer.name,
+        bytes: transfer.size,
+        sha256: transfer.sha256,
+        errorDetail: `missing chunk ${index + 1}`,
+      })
+      return
+    }
+    totalSize += chunk.byteLength
+    if (totalSize > SESSION_FILE_MAX_BYTES) {
+      state.incomingFileTransfers.delete(fileId)
+      updateFileTransferStatus("文件：超过 64MB，已丢弃")
+      sendFileTransferResultToRemote({
+        fileId,
+        applied: false,
+        name: transfer.name,
+        bytes: totalSize,
+        sha256: transfer.sha256,
+        errorDetail: "file exceeds 64MB",
+      })
+      return
+    }
+    chunks.push(chunk)
+  }
+  if (transfer.size >= 0 && totalSize !== transfer.size) {
+    state.incomingFileTransfers.delete(fileId)
+    updateFileTransferStatus(`文件：${transfer.name} 大小不匹配，已丢弃`)
+    sendFileTransferResultToRemote({
+      fileId,
+      applied: false,
+      name: transfer.name,
+      bytes: totalSize,
+      sha256: transfer.sha256,
+      errorDetail: `size mismatch expected=${transfer.size} actual=${totalSize}`,
+    })
+    return
+  }
+  try {
+    const allBytes = concatUint8Chunks(chunks, totalSize)
+    const expectedSha256 = normalizeSha256(payload.sha256) || transfer.sha256
+    if (expectedSha256) {
+      const actualSha256 = await sha256HexOfBytes(allBytes)
+      if (actualSha256 !== expectedSha256) {
+        state.incomingFileTransfers.delete(fileId)
+        updateFileTransferStatus(`文件：${transfer.name} 哈希不匹配，已丢弃`)
+        appendLog(`文件哈希不匹配：expected=${expectedSha256} actual=${actualSha256}`)
+        sendFileTransferResultToRemote({
+          fileId,
+          applied: false,
+          name: transfer.name,
+          bytes: totalSize,
+          sha256: actualSha256,
+          errorDetail: "sha256 mismatch",
+        })
+        return
+      }
+    }
+    const saved = isTauri()
+      ? await invoke("desktop_save_session_file", {
+        name: transfer.name,
+        dataBase64: uint8ArrayToBase64(allBytes),
+      })
+      : downloadIncomingFileInBrowser(transfer, chunks, totalSize)
+    state.incomingFileTransfers.delete(fileId)
+    const savedPath = `${saved?.path || ""}`.trim()
+    const savedName = `${saved?.name || transfer.name}`.trim() || transfer.name
+    updateFileTransferStatus(
+      savedPath
+        ? `文件：已保存 ${savedName} (${formatBytes(totalSize)})`
+        : `文件：已接收 ${savedName} (${formatBytes(totalSize)})`,
+    )
+    if (savedPath) {
+      appendLog(`文件保存路径：${savedPath}`)
+    }
+    sendFileTransferResultToRemote({
+      fileId,
+      applied: true,
+      name: savedName,
+      bytes: totalSize,
+      sha256: expectedSha256 || transfer.sha256,
+      location: savedPath,
+    })
+  } catch (error) {
+    state.incomingFileTransfers.delete(fileId)
+    const detail = error?.message || "unknown"
+    updateFileTransferStatus(`文件：保存失败 ${detail}`)
+    sendFileTransferResultToRemote({
+      fileId,
+      applied: false,
+      name: transfer.name,
+      bytes: totalSize,
+      sha256: transfer.sha256,
+      errorDetail: detail,
+    })
+  }
+}
+
+function sendFileTransferResultToRemote({
+  fileId,
+  applied,
+  name = "",
+  bytes = 0,
+  sha256 = "",
+  location = "",
+  errorDetail = "",
+} = {}) {
+  const sessionId = currentSessionToolSessionId("文件")
+  const cleanFileId = `${fileId || ""}`.trim()
+  if (!sessionId || !cleanFileId) {
+    return false
+  }
+  // 作者: long；文件传输的完成消息只表示发送端分块发完，result 才表示接收端已完成校验并保存到本机。
+  return sendEnvelope("file.transfer.result", {
+    file_id: cleanFileId,
+    applied: Boolean(applied),
+    name: sanitizeRemoteFileName(name),
+    bytes: Math.max(0, Number(bytes) || 0),
+    sha256: normalizeSha256(sha256),
+    location: `${location || ""}`.slice(0, 512),
+    error_detail: applied ? "" : (`${errorDetail || "file receive failed"}`).slice(0, 512),
+    created_at: Date.now(),
+  }, sessionId, { log: false })
+}
+
+function handleIncomingFileTransferResult(msg) {
+  if (!sessionToolMessageMatchesCurrentSession(msg, "文件")) {
+    return
+  }
+  const payload = msg.payload || {}
+  const applied = Boolean(payload.applied)
+  const name = sanitizeRemoteFileName(payload.name)
+  const bytes = Math.max(0, Number(payload.bytes || 0) || 0)
+  const location = `${payload.location || ""}`.trim()
+  const detail = `${payload.error_detail || ""}`.trim()
+  updateFileTransferStatus(
+    applied
+      ? `文件：对端已保存 ${name} (${formatBytes(bytes)})`
+      : `文件：对端保存失败 ${detail || "unknown"}`,
+  )
+  if (applied && location) {
+    appendLog(`文件：对端保存位置 ${location}`)
   }
 }
 
@@ -2146,7 +2857,7 @@ function currentSessionControllerProfile() {
   return `${state.sessionInfo?.webrtc?.controller_profile || "standard"}`.trim().toLowerCase() || "standard"
 }
 
-function currentSessionMediaCaps() {
+function currentSessionMediaCaps(options = {}) {
   const controllerProfile = currentSessionControllerProfile()
   if (controllerProfile === "emulator") {
     return {
@@ -2159,6 +2870,46 @@ function currentSessionMediaCaps() {
     }
   }
   if (controllerProfile === "android_phone") {
+    if (options.androidPhoneZoomMotion) {
+      return {
+        source: "android_phone_zoom_motion",
+        maxWidth: ANDROID_PHONE_ZOOM_MOTION_MAX_WIDTH,
+        maxHeight: ANDROID_PHONE_ZOOM_MOTION_MAX_HEIGHT,
+        maxFps: ANDROID_PHONE_ZOOM_MOTION_MAX_FPS,
+        maxBitrate: ANDROID_PHONE_ZOOM_MOTION_MAX_BITRATE,
+        maxScaleResolutionDownBy: ANDROID_PHONE_SESSION_MAX_SCALE_DOWN_BY,
+      }
+    }
+    if (options.allowAndroidZoomStill) {
+      return {
+        source: "android_phone_zoom_still",
+        maxWidth: ANDROID_PHONE_ZOOM_STILL_MAX_WIDTH,
+        maxHeight: ANDROID_PHONE_ZOOM_STILL_MAX_HEIGHT,
+        maxFps: ANDROID_PHONE_ZOOM_STILL_MAX_FPS,
+        maxBitrate: ANDROID_PHONE_ZOOM_STILL_MAX_BITRATE,
+        maxScaleResolutionDownBy: ANDROID_PHONE_SESSION_MAX_SCALE_DOWN_BY,
+      }
+    }
+    if (options.allowAndroidZoomDetail) {
+      return {
+        source: "android_phone_zoom_detail",
+        maxWidth: ANDROID_PHONE_ZOOM_DETAIL_MAX_WIDTH,
+        maxHeight: ANDROID_PHONE_ZOOM_DETAIL_MAX_HEIGHT,
+        maxFps: ANDROID_PHONE_ZOOM_DETAIL_MAX_FPS,
+        maxBitrate: ANDROID_PHONE_ZOOM_DETAIL_MAX_BITRATE,
+        maxScaleResolutionDownBy: ANDROID_PHONE_SESSION_MAX_SCALE_DOWN_BY,
+      }
+    }
+    if (options.allowAndroidFullscreenDetail) {
+      return {
+        source: "android_phone_fullscreen_detail",
+        maxWidth: ANDROID_PHONE_FULLSCREEN_MAX_WIDTH,
+        maxHeight: ANDROID_PHONE_FULLSCREEN_MAX_HEIGHT,
+        maxFps: ANDROID_PHONE_FULLSCREEN_MAX_FPS,
+        maxBitrate: ANDROID_PHONE_FULLSCREEN_MAX_BITRATE,
+        maxScaleResolutionDownBy: ANDROID_PHONE_SESSION_MAX_SCALE_DOWN_BY,
+      }
+    }
     return {
       source: "android_phone",
       maxWidth: ANDROID_PHONE_SESSION_MAX_WIDTH,
@@ -2171,11 +2922,11 @@ function currentSessionMediaCaps() {
   return null
 }
 
-function buildEffectiveAdaptiveProfile(profile) {
+function buildEffectiveAdaptiveProfile(profile, options = {}) {
   if (!profile) {
     return profile
   }
-  const caps = currentSessionMediaCaps()
+  const caps = currentSessionMediaCaps(options)
   if (!caps) {
     return profile
   }
@@ -2183,7 +2934,7 @@ function buildEffectiveAdaptiveProfile(profile) {
     ...profile,
     maxWidth: Math.max(160, Math.min(profile.maxWidth, caps.maxWidth)),
     maxHeight: Math.max(90, Math.min(profile.maxHeight, caps.maxHeight)),
-    maxFps: Math.max(8, Math.min(profile.maxFps, caps.maxFps)),
+    maxFps: Math.max(1, Math.min(profile.maxFps, caps.maxFps)),
     maxBitrate: Math.max(450000, Math.min(profile.maxBitrate, caps.maxBitrate)),
     scaleResolutionDownBy: Math.max(1, Math.min(profile.scaleResolutionDownBy || 1, caps.maxScaleResolutionDownBy || 1)),
     cappedBy: caps.source,
@@ -2225,7 +2976,7 @@ function resolveInitialAdaptiveProfileIndex() {
   if (currentSessionControllerProfile() === "emulator") {
     return EMULATOR_SESSION_PROFILE_INDEX
   }
-  // long: Android 真机控制 Mac 时以 720p/26fps 均衡档起步，给 24fps 肉眼流畅线预留抖动余量，再由自适应逻辑按实测 FPS/RTT 做保护。
+  // long: Android 真机全屏和手势放大依赖足够的源分辨率，默认从清晰档起步；真机链路会把上限收在 1000p 以内，兼顾放大清晰度和软件编码帧率。
   if (currentSessionControllerProfile() === "android_phone") {
     return ANDROID_PHONE_SESSION_PROFILE_INDEX
   }
@@ -2236,7 +2987,7 @@ function minAdaptiveProfileIndexForCurrentSession() {
   if (currentSessionControllerProfile() === "emulator") {
     return EMULATOR_SESSION_MIN_PROFILE_INDEX
   }
-  // long: Android 真机路线的最低画质守在 720p 均衡档，避免启动预热样本把 Mac 画面降到 480p 后长时间不清晰。
+  // long: Android 真机路线最低也守在清晰档的手机上限内，避免退回 720p 后缩放发糊，同时用帧率/码率指标暴露真实性能。
   if (currentSessionControllerProfile() === "android_phone") {
     return ANDROID_PHONE_SESSION_PROFILE_INDEX
   }
@@ -2676,6 +3427,9 @@ function applyBootstrapContext(context) {
   state.autoConnect = context.auto_connect !== false
   state.autoRegister = context.auto_register !== false
   state.autoHeartbeat = context.auto_heartbeat !== false
+  state.debugToolsEnabled = context.debug_tools_enabled === true
+  state.debugSendClipboardText = `${context.debug_send_clipboard_text || ""}`
+  state.debugSendFilePath = `${context.debug_send_file_path || ""}`
 
   if (!hasExplicitWsUrlOverride || !isValidRelayWsUrl(state.wsUrl)) {
     if (isValidRelayWsUrl(state.defaultWsUrl)) {
@@ -3802,21 +4556,34 @@ async function applyNativeSenderCaptureConfig(sessionId, options = {}) {
   if (!isTauri()) {
     return
   }
-  const profile = currentEffectiveAgentAdaptiveProfile()
+  const profile = buildEffectiveAdaptiveProfile(options.profile || currentEffectiveAgentAdaptiveProfile(), {
+    allowAndroidFullscreenDetail: Boolean(options.allowAndroidFullscreenDetail),
+    allowAndroidZoomDetail: Boolean(options.allowAndroidZoomDetail),
+    allowAndroidZoomStill: Boolean(options.allowAndroidZoomStill),
+    androidPhoneZoomMotion: Boolean(options.androidPhoneZoomMotion),
+  })
   const patch = {
     maxWidth: profile.maxWidth,
     maxHeight: profile.maxHeight,
     maxFps: Math.max(1, Math.min(profile.maxFps, CAPTURE_DIRECT_TRACK_MAX_FPS)),
+    // 作者: long；WebRTC/H.264 native sender 是当前主链路，受控端直接取 raw BGRA 做 H.264 编码；legacy JPEG 只保留为首帧失败后的独立兜底流。
     codec: NATIVE_CAPTURE_RAW_BGRA_CODEC,
+    ...androidPhoneCaptureSourceRectPatch(options),
   }
   try {
     syncCaptureStatus(await invoke("capture_update_config", { patch }))
+    if (currentSessionControllerProfile() === "android_phone") {
+      // 作者: long；切换交互/全屏/高清档后，下一帧必须按新采集尺寸发送，避免兜底流继续复用上一档 capture_ts。
+      state.streamLastSentCaptureTs = 0
+    }
     traceLog("native.capture.sender_config.applied", {
       session_id: `${sessionId || state.sessionId || "-"}`,
       max_width: patch.maxWidth,
       max_height: patch.maxHeight,
       max_fps: patch.maxFps,
       codec: patch.codec,
+      source_rect: `${patch.sourceRectXPpm},${patch.sourceRectYPpm},${patch.sourceRectWidthPpm},${patch.sourceRectHeightPpm}`,
+      reason: options.reason || "-",
     }, { console: false })
   } catch (error) {
     const detail = error?.message || "unknown"
@@ -3829,6 +4596,638 @@ async function applyNativeSenderCaptureConfig(sessionId, options = {}) {
       appendLog(`原生 sender 采集配置下发失败: ${detail}`)
     }
   }
+}
+
+function buildAndroidPhoneInteractiveNativeProfile() {
+  const clearProfile = buildEffectiveAdaptiveProfile(AGENT_ADAPTIVE_PROFILES[ANDROID_PHONE_SESSION_PROFILE_INDEX])
+  return {
+    ...clearProfile,
+    id: "android_phone_interactive",
+    label: "真机交互流畅",
+    maxWidth: Math.min(clearProfile.maxWidth, ANDROID_PHONE_INTERACTIVE_MAX_WIDTH),
+    maxHeight: Math.min(clearProfile.maxHeight, ANDROID_PHONE_INTERACTIVE_MAX_HEIGHT),
+    maxFps: Math.min(clearProfile.maxFps, ANDROID_PHONE_INTERACTIVE_MAX_FPS),
+  }
+}
+
+function buildAndroidPhoneFullscreenNativeProfile() {
+  const clearProfile = buildEffectiveAdaptiveProfile(AGENT_ADAPTIVE_PROFILES[ANDROID_PHONE_SESSION_PROFILE_INDEX], {
+    allowAndroidFullscreenDetail: true,
+  })
+  return {
+    ...clearProfile,
+    id: "android_phone_fullscreen",
+    label: "真机全屏高清",
+    maxWidth: Math.min(clearProfile.maxWidth, ANDROID_PHONE_FULLSCREEN_MAX_WIDTH),
+    maxHeight: Math.min(clearProfile.maxHeight, ANDROID_PHONE_FULLSCREEN_MAX_HEIGHT),
+    maxFps: Math.min(clearProfile.maxFps, ANDROID_PHONE_FULLSCREEN_MAX_FPS),
+    maxBitrate: Math.min(clearProfile.maxBitrate, ANDROID_PHONE_FULLSCREEN_MAX_BITRATE),
+    scaleResolutionDownBy: 1,
+  }
+}
+
+function buildAndroidPhonePinchPreviewNativeProfile() {
+  const clearProfile = AGENT_ADAPTIVE_PROFILES[ANDROID_PHONE_SESSION_PROFILE_INDEX]
+  return {
+    ...clearProfile,
+    id: "android_phone_pinch_preview",
+    label: "真机缩放轻量预览",
+    maxWidth: ANDROID_PHONE_PINCH_PREVIEW_MAX_WIDTH,
+    maxHeight: ANDROID_PHONE_PINCH_PREVIEW_MAX_HEIGHT,
+    maxFps: ANDROID_PHONE_PINCH_PREVIEW_MAX_FPS,
+    maxBitrate: ANDROID_PHONE_PINCH_PREVIEW_MAX_BITRATE,
+    scaleResolutionDownBy: 1,
+  }
+}
+
+function buildAndroidPhoneZoomMotionNativeProfile() {
+  const clearProfile = AGENT_ADAPTIVE_PROFILES[ANDROID_PHONE_SESSION_PROFILE_INDEX]
+  return {
+    ...clearProfile,
+    id: "android_phone_zoom_motion",
+    label: "真机局部跟手",
+    maxWidth: ANDROID_PHONE_ZOOM_MOTION_MAX_WIDTH,
+    maxHeight: ANDROID_PHONE_ZOOM_MOTION_MAX_HEIGHT,
+    maxFps: ANDROID_PHONE_ZOOM_MOTION_MAX_FPS,
+    maxBitrate: ANDROID_PHONE_ZOOM_MOTION_MAX_BITRATE,
+    scaleResolutionDownBy: 1,
+  }
+}
+
+function buildAndroidPhoneZoomDetailNativeProfile() {
+  const clearProfile = AGENT_ADAPTIVE_PROFILES[ANDROID_PHONE_SESSION_PROFILE_INDEX]
+  return {
+    ...clearProfile,
+    id: "android_phone_zoom_detail",
+    label: "真机局部高清",
+    maxWidth: ANDROID_PHONE_ZOOM_DETAIL_MAX_WIDTH,
+    maxHeight: ANDROID_PHONE_ZOOM_DETAIL_MAX_HEIGHT,
+    maxFps: ANDROID_PHONE_ZOOM_DETAIL_MAX_FPS,
+    maxBitrate: ANDROID_PHONE_ZOOM_DETAIL_MAX_BITRATE,
+    scaleResolutionDownBy: 1,
+  }
+}
+
+function buildAndroidPhoneZoomStillNativeProfile() {
+  const clearProfile = AGENT_ADAPTIVE_PROFILES[ANDROID_PHONE_SESSION_PROFILE_INDEX]
+  return {
+    ...clearProfile,
+    id: "android_phone_zoom_still",
+    label: "真机局部静止高清",
+    maxWidth: ANDROID_PHONE_ZOOM_STILL_MAX_WIDTH,
+    maxHeight: ANDROID_PHONE_ZOOM_STILL_MAX_HEIGHT,
+    maxFps: ANDROID_PHONE_ZOOM_STILL_MAX_FPS,
+    maxBitrate: ANDROID_PHONE_ZOOM_STILL_MAX_BITRATE,
+    scaleResolutionDownBy: 1,
+  }
+}
+
+function clearNativeSenderInteractiveRestoreTimer() {
+  if (state.nativeSenderInteractiveRestoreTimer) {
+    window.clearTimeout(state.nativeSenderInteractiveRestoreTimer)
+    state.nativeSenderInteractiveRestoreTimer = null
+  }
+}
+
+function clearNativeSenderZoomDetailUpgradeTimer() {
+  if (state.nativeSenderZoomDetailUpgradeTimer) {
+    window.clearTimeout(state.nativeSenderZoomDetailUpgradeTimer)
+    state.nativeSenderZoomDetailUpgradeTimer = null
+  }
+}
+
+function clearNativeSenderZoomStillUpgradeTimer() {
+  if (state.nativeSenderZoomStillUpgradeTimer) {
+    window.clearTimeout(state.nativeSenderZoomStillUpgradeTimer)
+    state.nativeSenderZoomStillUpgradeTimer = null
+  }
+}
+
+function resetNativeSenderInteractiveProfileState() {
+  clearNativeSenderInteractiveRestoreTimer()
+  clearNativeSenderZoomDetailUpgradeTimer()
+  clearNativeSenderZoomStillUpgradeTimer()
+  state.nativeSenderInteractiveProfileActive = false
+  state.nativeSenderInteractiveSessionId = ""
+  state.nativeSenderInteractiveProfileMode = ""
+  state.nativeSenderInteractiveSourceRectKey = ""
+  state.nativeSenderInteractiveSourceRectUpdatedAt = 0
+  state.nativeSenderFullscreenProfileActive = false
+  state.nativeSenderFullscreenSessionId = ""
+  state.nativeSenderZoomDetailSessionId = ""
+  state.lastAndroidViewportInteraction = null
+}
+
+function shouldUseNativeSenderInteractiveProfileForInput(msg) {
+  if (!isTauri() || !isAgentSession() || currentSessionControllerProfile() !== "android_phone") {
+    return false
+  }
+  const legacyFrameStreamActive = Boolean(state.streamTimer)
+  if (!nativeSenderOwnershipEnabledForSession(state.sessionId) && !legacyFrameStreamActive) {
+    return false
+  }
+  return msg?.type === "input.mouse.move"
+    || msg?.type === "input.mouse.button"
+    || msg?.type === "input.wheel.scroll"
+    || msg?.type === "session.viewport.interaction"
+}
+
+function viewportInteractionRestoreDelayMs(phase, interaction) {
+  if (`${phase || ""}`.trim().toLowerCase() !== "end") {
+    return NATIVE_SENDER_INTERACTIVE_RESTORE_DELAY_MS
+  }
+  const normalizedInteraction = `${interaction || ""}`.trim().toLowerCase()
+  if (normalizedInteraction === "pinch") {
+    return NATIVE_SENDER_PINCH_RESTORE_DELAY_MS
+  }
+  if (normalizedInteraction === "pan") {
+    return NATIVE_SENDER_PAN_RESTORE_DELAY_MS
+  }
+  return NATIVE_SENDER_VIEWPORT_INTERACTION_RESTORE_DELAY_MS
+}
+
+function androidPhoneIdleNativeProfileForSession(sessionId = state.sessionId) {
+  const activeSessionId = `${sessionId || ""}`.trim()
+  if (
+    state.nativeSenderFullscreenProfileActive
+    && activeSessionId
+    && state.nativeSenderFullscreenSessionId === activeSessionId
+  ) {
+    return {
+      profile: buildAndroidPhoneFullscreenNativeProfile(),
+      allowAndroidFullscreenDetail: true,
+      reason: "android_phone_fullscreen_idle_restore",
+    }
+  }
+  return {
+    profile: AGENT_ADAPTIVE_PROFILES[ANDROID_PHONE_SESSION_PROFILE_INDEX],
+    reason: "android_phone_interaction_idle_restore",
+  }
+}
+
+function shouldUseAndroidPhoneZoomDetailAfterViewport(msg) {
+  if (msg?.type !== "session.viewport.interaction") {
+    return false
+  }
+  const payload = msg.payload && typeof msg.payload === "object" ? msg.payload : {}
+  const phase = `${payload.phase || ""}`.trim().toLowerCase()
+  const interaction = `${payload.interaction || ""}`.trim().toLowerCase()
+  const scale = Number(payload.scale || 0)
+  return phase === "end"
+    && interaction === "pinch"
+    && Number.isFinite(scale)
+    && scale >= ANDROID_PHONE_ZOOM_DETAIL_MIN_SCALE
+}
+
+function shouldRestoreAndroidPhoneFullViewport(msg) {
+  if (msg?.type !== "session.viewport.interaction") {
+    return false
+  }
+  const payload = msg.payload && typeof msg.payload === "object" ? msg.payload : {}
+  const phase = `${payload.phase || ""}`.trim().toLowerCase()
+  const interaction = `${payload.interaction || ""}`.trim().toLowerCase()
+  const scale = Number(payload.scale || 0)
+  const viewportRegion = parseAndroidViewportRegion(payload)
+  const isFullRegion = Boolean(viewportRegion)
+    && viewportRegion.viewport_x <= 0.000001
+    && viewportRegion.viewport_y <= 0.000001
+    && viewportRegion.viewport_width >= 0.999999
+    && viewportRegion.viewport_height >= 0.999999
+  return phase === "end"
+    && interaction === "pinch"
+    && Number.isFinite(scale)
+    && scale < ANDROID_PHONE_ZOOM_DETAIL_MIN_SCALE
+    && isFullRegion
+}
+
+function shouldKeepAndroidPhoneZoomRegionForSession(activeSessionId) {
+  const normalizedSessionId = `${activeSessionId || ""}`.trim()
+  const interaction = state.lastAndroidViewportInteraction
+  if (
+    currentSessionControllerProfile() !== "android_phone"
+    || !normalizedSessionId
+    || !interaction
+    || interaction.session_id !== normalizedSessionId
+    || !interaction.viewport_region
+  ) {
+    return false
+  }
+  const scale = Number(interaction.scale || 0)
+  if (!Number.isFinite(scale) || scale < ANDROID_PHONE_ZOOM_DETAIL_MIN_SCALE) {
+    return false
+  }
+  const phase = `${interaction.phase || ""}`.trim().toLowerCase()
+  const normalizedInteraction = `${interaction.interaction || ""}`.trim().toLowerCase()
+  if (normalizedInteraction === "pinch" && phase !== "end") {
+    // 作者: long；两指开合过程中频繁重配 source_rect 会打断 JPEG 采集节奏，先保持整屏低延迟帧，停手后再切局部高清。
+    return false
+  }
+  // 作者: long；缩放后的局部高清是用户主动选择的阅读区域，不能靠固定秒数自动退回整屏；只有缩回 1x、退出全屏或会话结束才清掉。
+  return state.nativeSenderZoomDetailSessionId === normalizedSessionId
+}
+
+function normalizedPayloadNumber(payload, key) {
+  const value = Number(payload?.[key])
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    return null
+  }
+  return value
+}
+
+function parseAndroidViewportRegion(payload) {
+  const viewportX = normalizedPayloadNumber(payload, "viewport_x")
+  const viewportY = normalizedPayloadNumber(payload, "viewport_y")
+  const viewportWidth = normalizedPayloadNumber(payload, "viewport_width")
+  const viewportHeight = normalizedPayloadNumber(payload, "viewport_height")
+  const focusX = normalizedPayloadNumber(payload, "focus_x")
+  const focusY = normalizedPayloadNumber(payload, "focus_y")
+  const hasRegion = viewportX !== null || viewportY !== null || viewportWidth !== null || viewportHeight !== null
+  if (!hasRegion) {
+    return null
+  }
+  if (
+    viewportX === null
+    || viewportY === null
+    || viewportWidth === null
+    || viewportHeight === null
+    || viewportWidth <= 0
+    || viewportHeight <= 0
+    || viewportX + viewportWidth > 1.000001
+    || viewportY + viewportHeight > 1.000001
+  ) {
+    return null
+  }
+  return {
+    viewport_x: viewportX,
+    viewport_y: viewportY,
+    viewport_width: viewportWidth,
+    viewport_height: viewportHeight,
+    focus_x: focusX,
+    focus_y: focusY,
+  }
+}
+
+function fullSourceRectPatch() {
+  return {
+    sourceRectXPpm: 0,
+    sourceRectYPpm: 0,
+    sourceRectWidthPpm: ANDROID_PHONE_SOURCE_RECT_UNITS,
+    sourceRectHeightPpm: ANDROID_PHONE_SOURCE_RECT_UNITS,
+  }
+}
+
+function sourceRectPatchFromRegion(region) {
+  if (!region) {
+    return fullSourceRectPatch()
+  }
+  const requestedX = Math.round(region.viewport_x * ANDROID_PHONE_SOURCE_RECT_UNITS)
+  const requestedY = Math.round(region.viewport_y * ANDROID_PHONE_SOURCE_RECT_UNITS)
+  const requestedWidth = Math.round(region.viewport_width * ANDROID_PHONE_SOURCE_RECT_UNITS)
+  const requestedHeight = Math.round(region.viewport_height * ANDROID_PHONE_SOURCE_RECT_UNITS)
+  const safeWidth = Math.max(
+    ANDROID_PHONE_MIN_SOURCE_RECT_PPM,
+    Math.min(ANDROID_PHONE_SOURCE_RECT_UNITS, requestedWidth),
+  )
+  const safeHeight = Math.max(
+    ANDROID_PHONE_MIN_SOURCE_RECT_PPM,
+    Math.min(ANDROID_PHONE_SOURCE_RECT_UNITS, requestedHeight),
+  )
+  const centerX = Math.max(
+    0,
+    Math.min(ANDROID_PHONE_SOURCE_RECT_UNITS, requestedX + requestedWidth / 2),
+  )
+  const centerY = Math.max(
+    0,
+    Math.min(ANDROID_PHONE_SOURCE_RECT_UNITS, requestedY + requestedHeight / 2),
+  )
+  // 作者: long；Android 最大缩放可能短时间内连续上报极小可视区域，桌面端二次保底裁剪尺寸，避免采集源被递归压小后拖垮 JPEG 解码或触发真机闪退。
+  const x = Math.round(Math.max(0, Math.min(ANDROID_PHONE_SOURCE_RECT_UNITS - safeWidth, centerX - safeWidth / 2)))
+  const y = Math.round(Math.max(0, Math.min(ANDROID_PHONE_SOURCE_RECT_UNITS - safeHeight, centerY - safeHeight / 2)))
+  return {
+    sourceRectXPpm: x,
+    sourceRectYPpm: y,
+    sourceRectWidthPpm: safeWidth,
+    sourceRectHeightPpm: safeHeight,
+  }
+}
+
+function sourceRectPatchKey(patch) {
+  return [
+    patch.sourceRectXPpm,
+    patch.sourceRectYPpm,
+    patch.sourceRectWidthPpm,
+    patch.sourceRectHeightPpm,
+  ].join(",")
+}
+
+function sourceRectPatchChangedEnough(previousKey, nextPatch) {
+  if (!previousKey) {
+    return true
+  }
+  const previous = previousKey.split(",").map((value) => Number(value))
+  if (previous.length !== 4 || previous.some((value) => !Number.isFinite(value))) {
+    return true
+  }
+  const next = [
+    nextPatch.sourceRectXPpm,
+    nextPatch.sourceRectYPpm,
+    nextPatch.sourceRectWidthPpm,
+    nextPatch.sourceRectHeightPpm,
+  ]
+  return next.some((value, index) => Math.abs(value - previous[index]) >= ANDROID_PHONE_ZOOM_REGION_SOURCE_RECT_UPDATE_THRESHOLD_PPM)
+}
+
+function androidPhoneCaptureSourceRectPatch(options = {}) {
+  if (
+    currentSessionControllerProfile() !== "android_phone" ||
+    (!options.allowAndroidZoomDetail && !options.allowAndroidZoomStill)
+  ) {
+    return fullSourceRectPatch()
+  }
+  const activeSessionId = `${options.sessionId || state.sessionId || ""}`.trim()
+  const interaction = state.lastAndroidViewportInteraction
+  if (
+    !activeSessionId
+    || !interaction
+    || interaction.session_id !== activeSessionId
+    || !interaction.viewport_region
+  ) {
+    return fullSourceRectPatch()
+  }
+  // 作者: long；缩放后的高清档必须按手机当前可视区域裁剪源桌面，否则只是把整屏 JPEG 继续放大，文字不会出现新的真实细节。
+  return sourceRectPatchFromRegion(interaction.viewport_region)
+}
+
+function currentAndroidFrameSourceRectMetadata() {
+  const config = state.captureStatus?.config || {}
+  const x = Number(config.source_rect_x_ppm ?? config.sourceRectXPpm ?? 0)
+  const y = Number(config.source_rect_y_ppm ?? config.sourceRectYPpm ?? 0)
+  const width = Number(config.source_rect_width_ppm ?? config.sourceRectWidthPpm ?? ANDROID_PHONE_SOURCE_RECT_UNITS)
+  const height = Number(config.source_rect_height_ppm ?? config.sourceRectHeightPpm ?? ANDROID_PHONE_SOURCE_RECT_UNITS)
+  if (
+    currentSessionControllerProfile() !== "android_phone"
+    || !Number.isFinite(x)
+    || !Number.isFinite(y)
+    || !Number.isFinite(width)
+    || !Number.isFinite(height)
+    || width <= 0
+    || height <= 0
+  ) {
+    return null
+  }
+  return {
+    source_rect_x: x / ANDROID_PHONE_SOURCE_RECT_UNITS,
+    source_rect_y: y / ANDROID_PHONE_SOURCE_RECT_UNITS,
+    source_rect_width: width / ANDROID_PHONE_SOURCE_RECT_UNITS,
+    source_rect_height: height / ANDROID_PHONE_SOURCE_RECT_UNITS,
+    full_frame_width: currentCaptureSource()?.width || 0,
+    full_frame_height: currentCaptureSource()?.height || 0,
+  }
+}
+
+function scheduleAndroidPhoneZoomStillUpgrade(activeSessionId, reason = "android_phone_pinch_zoom_still") {
+  clearNativeSenderZoomStillUpgradeTimer()
+  const interactionToken = Number(state.lastAndroidViewportInteraction?.updated_at || 0)
+  state.nativeSenderZoomStillUpgradeTimer = window.setTimeout(() => {
+    state.nativeSenderZoomStillUpgradeTimer = null
+    if (
+      state.sessionId !== activeSessionId
+      || state.nativeSenderZoomDetailSessionId !== activeSessionId
+      || Number(state.lastAndroidViewportInteraction?.updated_at || 0) !== interactionToken
+    ) {
+      return
+    }
+    // 作者: long；用户停住后才升到 960 局部帧读取文字；一旦期间有新的鼠标/手势输入，前面的 token 会变化并取消这次高清升档。
+    void applyNativeSenderCaptureConfig(activeSessionId, {
+      profile: buildAndroidPhoneZoomStillNativeProfile(),
+      allowAndroidZoomDetail: true,
+      allowAndroidZoomStill: true,
+      reason,
+      log: false,
+    })
+  }, ANDROID_PHONE_ZOOM_STILL_UPGRADE_DELAY_MS)
+}
+
+function scheduleAndroidPhoneZoomDetailUpgrade(activeSessionId, reason = "android_phone_pinch_zoom_detail") {
+  clearNativeSenderZoomDetailUpgradeTimer()
+  clearNativeSenderZoomStillUpgradeTimer()
+  state.nativeSenderZoomDetailSessionId = activeSessionId
+  state.nativeSenderZoomDetailUpgradeTimer = window.setTimeout(() => {
+    state.nativeSenderZoomDetailUpgradeTimer = null
+    if (
+      state.sessionId !== activeSessionId
+      || state.nativeSenderZoomDetailSessionId !== activeSessionId
+    ) {
+      return
+    }
+    // 作者: long；最大缩放后用户更容易继续移动视角，当前 legacy JPEG 链路先保持 512px 局部跟手档；800px detail 会和 Android 全屏窗口提交叠加，v5 真机已出现 BLASTSyncEngine 预警。
+    void applyNativeSenderCaptureConfig(activeSessionId, {
+      profile: buildAndroidPhoneZoomMotionNativeProfile(),
+      allowAndroidZoomDetail: true,
+      androidPhoneZoomMotion: true,
+      reason,
+      log: false,
+    })
+  }, ANDROID_PHONE_ZOOM_DETAIL_UPGRADE_DELAY_MS)
+}
+
+function handleAndroidPhoneFullscreenViewportInteraction(msg) {
+  if (msg?.type !== "session.viewport.interaction") {
+    return false
+  }
+  const payload = msg.payload && typeof msg.payload === "object" ? msg.payload : {}
+  const interaction = `${payload.interaction || ""}`.trim().toLowerCase()
+  if (interaction !== "fullscreen") {
+    return false
+  }
+  const activeSessionId = `${msg?.session_id || state.sessionId || ""}`.trim()
+  if (!activeSessionId) {
+    return true
+  }
+  const phase = `${payload.phase || ""}`.trim().toLowerCase()
+  clearNativeSenderInteractiveRestoreTimer()
+  clearNativeSenderZoomDetailUpgradeTimer()
+  clearNativeSenderZoomStillUpgradeTimer()
+  if (phase === "start" || phase === "update") {
+    state.nativeSenderFullscreenProfileActive = true
+    state.nativeSenderFullscreenSessionId = activeSessionId
+    // 作者: long；全屏查看文字时不能继续沿用普通会话的 800px 上限，否则手机横屏仍是在放大整页低清帧；这里单独放开到接近桌面源尺寸，输入时仍由交互档临时降载。
+    void applyNativeSenderCaptureConfig(activeSessionId, {
+      profile: buildAndroidPhoneFullscreenNativeProfile(),
+      allowAndroidFullscreenDetail: true,
+      reason: "android_phone_fullscreen",
+      log: false,
+    })
+    return true
+  }
+  if (phase === "end") {
+    state.nativeSenderFullscreenProfileActive = false
+    state.nativeSenderFullscreenSessionId = ""
+    state.nativeSenderZoomDetailSessionId = ""
+    void applyNativeSenderCaptureConfig(activeSessionId, {
+      profile: AGENT_ADAPTIVE_PROFILES[ANDROID_PHONE_SESSION_PROFILE_INDEX],
+      reason: "android_phone_fullscreen_exit",
+      log: false,
+    })
+    return true
+  }
+  return true
+}
+
+function scheduleNativeSenderInteractiveProfileForInput(msg, options = {}) {
+  if (!shouldUseNativeSenderInteractiveProfileForInput(msg)) {
+    return
+  }
+  if (handleAndroidPhoneFullscreenViewportInteraction(msg)) {
+    return
+  }
+  const activeSessionId = `${msg?.session_id || state.sessionId || ""}`.trim()
+  if (!activeSessionId) {
+    return
+  }
+  const restoreDelayMs = Math.max(120, Number(options.restoreDelayMs) || NATIVE_SENDER_INTERACTIVE_RESTORE_DELAY_MS)
+  const shouldRestoreToZoomDetail = shouldUseAndroidPhoneZoomDetailAfterViewport(msg)
+  const shouldRestoreFullViewport = shouldRestoreAndroidPhoneFullViewport(msg)
+  const shouldKeepZoomRegion = shouldRestoreToZoomDetail || shouldKeepAndroidPhoneZoomRegionForSession(activeSessionId)
+  const payload = msg.payload && typeof msg.payload === "object" ? msg.payload : {}
+  const phase = `${payload.phase || ""}`.trim().toLowerCase()
+  const interaction = `${payload.interaction || ""}`.trim().toLowerCase()
+
+  clearNativeSenderInteractiveRestoreTimer()
+  clearNativeSenderZoomDetailUpgradeTimer()
+  clearNativeSenderZoomStillUpgradeTimer()
+  if (msg?.type === "session.viewport.interaction" && interaction === "pinch" && phase !== "end") {
+    state.nativeSenderInteractiveProfileActive = true
+    state.nativeSenderInteractiveSessionId = activeSessionId
+    state.nativeSenderInteractiveProfileMode = "pinch_preview"
+    state.nativeSenderInteractiveSourceRectKey = ""
+    state.nativeSenderInteractiveSourceRectUpdatedAt = Date.now()
+    // 作者: long；双指开合时 Android 主要显示本地矩阵动画，整屏 JPEG 多数会被门控丢弃；Mac 只保留极轻量预览，减少无用编码/信令对手势帧的干扰。
+    void applyNativeSenderCaptureConfig(activeSessionId, {
+      profile: buildAndroidPhonePinchPreviewNativeProfile(),
+      reason: "android_phone_pinch_preview_light",
+      log: false,
+    })
+    return
+  }
+  if (shouldRestoreFullViewport) {
+    state.nativeSenderInteractiveProfileActive = false
+    state.nativeSenderInteractiveSessionId = ""
+    state.nativeSenderInteractiveProfileMode = ""
+    state.nativeSenderInteractiveSourceRectKey = ""
+    state.nativeSenderInteractiveSourceRectUpdatedAt = 0
+    state.nativeSenderZoomDetailSessionId = ""
+    const idleProfile = androidPhoneIdleNativeProfileForSession(activeSessionId)
+    // 作者: long；Android 已经缩回完整桌面视口时，立即恢复整屏采集，避免前一个 pinch 的延迟高清任务把 source_rect 又抢回局部。
+    void applyNativeSenderCaptureConfig(activeSessionId, {
+      profile: idleProfile.profile,
+      reason: "android_phone_zoom_full_viewport_restore",
+      log: false,
+    })
+    return
+  }
+  if (!shouldRestoreToZoomDetail && !shouldKeepZoomRegion) {
+    state.nativeSenderZoomDetailSessionId = ""
+  }
+  if (shouldRestoreToZoomDetail) {
+    state.nativeSenderInteractiveProfileActive = false
+    state.nativeSenderInteractiveSessionId = ""
+    state.nativeSenderInteractiveProfileMode = ""
+    state.nativeSenderInteractiveSourceRectKey = ""
+    state.nativeSenderInteractiveSourceRectUpdatedAt = 0
+    // 作者: long；pinch 松手后先用轻量 source_rect 预览替换本地放大的整屏旧帧，再延迟升局部高清，避免大 JPEG 抢在手势收尾时造成顿挫。
+    void applyNativeSenderCaptureConfig(activeSessionId, {
+      profile: buildAndroidPhoneZoomMotionNativeProfile(),
+      allowAndroidZoomDetail: true,
+      androidPhoneZoomMotion: true,
+      reason: "android_phone_pinch_zoom_preview",
+      log: false,
+    })
+    scheduleAndroidPhoneZoomDetailUpgrade(activeSessionId, "android_phone_pinch_zoom_detail")
+    return
+  }
+  const desiredProfileMode = shouldKeepZoomRegion ? "zoom_region" : "interactive"
+  const desiredSourceRectPatch = shouldKeepZoomRegion
+    ? androidPhoneCaptureSourceRectPatch({ sessionId: activeSessionId, allowAndroidZoomDetail: true })
+    : fullSourceRectPatch()
+  const desiredSourceRectKey = sourceRectPatchKey(desiredSourceRectPatch)
+  const sourceRectChangedEnough = shouldKeepZoomRegion
+    && sourceRectPatchChangedEnough(state.nativeSenderInteractiveSourceRectKey, desiredSourceRectPatch)
+  const shouldForceFinalPanSourceRectUpdate = shouldKeepZoomRegion
+    && msg?.type === "session.viewport.interaction"
+    && interaction === "pan"
+    && phase === "end"
+    && sourceRectChangedEnough
+  const sourceRectUpdateDue = shouldKeepZoomRegion
+    && state.nativeSenderInteractiveProfileActive
+    && state.nativeSenderInteractiveSessionId === activeSessionId
+    && state.nativeSenderInteractiveProfileMode === desiredProfileMode
+    && (
+      shouldForceFinalPanSourceRectUpdate
+      || Date.now() - Number(state.nativeSenderInteractiveSourceRectUpdatedAt || 0) >= ANDROID_PHONE_ZOOM_REGION_SOURCE_RECT_UPDATE_MIN_MS
+    )
+    && sourceRectChangedEnough
+  if (
+    !state.nativeSenderInteractiveProfileActive
+    || state.nativeSenderInteractiveSessionId !== activeSessionId
+    || state.nativeSenderInteractiveProfileMode !== desiredProfileMode
+    || sourceRectUpdateDue
+  ) {
+    state.nativeSenderInteractiveProfileActive = true
+    state.nativeSenderInteractiveSessionId = activeSessionId
+    state.nativeSenderInteractiveProfileMode = desiredProfileMode
+    state.nativeSenderInteractiveSourceRectKey = desiredSourceRectKey
+    state.nativeSenderInteractiveSourceRectUpdatedAt = Date.now()
+    const interactionProfile = shouldKeepZoomRegion
+      ? buildAndroidPhoneZoomMotionNativeProfile()
+      : buildAndroidPhoneInteractiveNativeProfile()
+    void applyNativeSenderCaptureConfig(activeSessionId, {
+      // 作者: long；用户已经放大到局部后，鼠标移动仍要保留可读文字；可视区域明显变化时节流刷新裁剪源，避免双指移动后继续看上一块旧局部。
+      profile: interactionProfile,
+      allowAndroidZoomDetail: shouldKeepZoomRegion,
+      androidPhoneZoomMotion: shouldKeepZoomRegion,
+      reason: shouldKeepZoomRegion
+        ? (sourceRectUpdateDue
+          ? (shouldForceFinalPanSourceRectUpdate ? "android_phone_zoom_region_source_rect_final" : "android_phone_zoom_region_source_rect_update")
+          : "android_phone_zoom_region_interaction")
+        : "android_phone_interaction",
+      log: false,
+    })
+  }
+
+  state.nativeSenderInteractiveRestoreTimer = window.setTimeout(() => {
+    state.nativeSenderInteractiveRestoreTimer = null
+    if (!state.nativeSenderInteractiveProfileActive || state.nativeSenderInteractiveSessionId !== activeSessionId) {
+      return
+    }
+    state.nativeSenderInteractiveProfileActive = false
+    state.nativeSenderInteractiveSessionId = ""
+    state.nativeSenderInteractiveProfileMode = ""
+    state.nativeSenderInteractiveSourceRectKey = ""
+    state.nativeSenderInteractiveSourceRectUpdatedAt = 0
+    if (shouldRestoreToZoomDetail || shouldKeepZoomRegion) {
+      // 作者: long；放大后继续平移或移动鼠标时，先保留低成本局部源预览，停稳后再升高清，避免画面在低清整屏和重局部帧之间来回抖。
+      void applyNativeSenderCaptureConfig(activeSessionId, {
+        profile: buildAndroidPhoneZoomMotionNativeProfile(),
+        allowAndroidZoomDetail: true,
+        androidPhoneZoomMotion: true,
+        reason: shouldRestoreToZoomDetail ? "android_phone_pinch_zoom_preview" : "android_phone_zoom_region_preview",
+        log: false,
+      })
+      scheduleAndroidPhoneZoomDetailUpgrade(
+        activeSessionId,
+        shouldRestoreToZoomDetail ? "android_phone_pinch_zoom_detail" : "android_phone_zoom_region_restore",
+      )
+      return
+    }
+    const idleProfile = androidPhoneIdleNativeProfileForSession(activeSessionId)
+    void applyNativeSenderCaptureConfig(activeSessionId, {
+      profile: idleProfile.profile,
+      allowAndroidFullscreenDetail: Boolean(idleProfile.allowAndroidFullscreenDetail),
+      reason: idleProfile.reason,
+      log: false,
+    })
+  }, restoreDelayMs)
 }
 
 function nativeSenderCaptureSourceMissing(status = state.nativeSenderStatus) {
@@ -4008,7 +5407,9 @@ async function bridgeInputToHost(msg) {
 
     state.hostBridgeError = ""
     if (result?.applied) {
-      appendLog(`host bridge 已应用输入 [${executor}/${statusCode}]: ${state.hostBridgeStatus.last_input_summary}`)
+      if (msg.type !== "input.mouse.move") {
+        appendLog(`host bridge 已应用输入 [${executor}/${statusCode}]: ${state.hostBridgeStatus.last_input_summary}`)
+      }
       return true
     }
 
@@ -4029,6 +5430,147 @@ async function bridgeInputToHost(msg) {
     sendInputResultPush(msg, bridgeResult)
     scheduleLiveE2EProofReport(bridgeResult?.applied ? "live_agent_input_applied" : "live_agent_input_result")
   }
+}
+
+function scheduleHostMouseMoveDrain(delayMs = 0) {
+  if (hostMouseMoveDrainTimer || hostMouseMoveApplyInFlight || hostDiscreteInputQueueDepth > 0) {
+    return
+  }
+  hostMouseMoveDrainTimer = window.setTimeout(() => {
+    hostMouseMoveDrainTimer = null
+    if (hostDiscreteInputQueueDepth > 0) {
+      return
+    }
+    void drainHostMouseMoveQueue()
+  }, Math.max(0, Number(delayMs) || 0))
+}
+
+function currentHostMouseMoveThrottleMs(msg = hostMouseMovePendingMsg) {
+  if (!isTauri() || !isAgentSession() || currentSessionControllerProfile() !== "android_phone") {
+    return REMOTE_POINTER_MOVE_THROTTLE_MS
+  }
+  if (msg?.type !== "input.mouse.move") {
+    return REMOTE_POINTER_MOVE_THROTTLE_MS
+  }
+  const messageSessionId = `${msg.session_id || ""}`.trim()
+  const interaction = state.lastAndroidViewportInteraction
+  if (!messageSessionId || !interaction || interaction.session_id !== messageSessionId) {
+    return REMOTE_POINTER_MOVE_THROTTLE_MS
+  }
+  const updatedAt = Number(interaction.updated_at || 0)
+  if (!updatedAt || Date.now() - updatedAt > REMOTE_ZOOM_PAN_MOUSE_MOVE_RECENT_MS) {
+    return REMOTE_POINTER_MOVE_THROTTLE_MS
+  }
+  const scale = Number(interaction.scale || 0)
+  const viewportRegion = interaction.viewport_region
+  const isZoomRegion = Boolean(viewportRegion)
+    && (
+      viewportRegion.viewport_width < 0.999999
+      || viewportRegion.viewport_height < 0.999999
+      || viewportRegion.viewport_x > 0.000001
+      || viewportRegion.viewport_y > 0.000001
+    )
+  const normalizedInteraction = `${interaction.interaction || ""}`.trim().toLowerCase()
+  const isZoomPan = normalizedInteraction === "pan"
+    && (isZoomRegion || (Number.isFinite(scale) && scale >= ANDROID_PHONE_ZOOM_DETAIL_MIN_SCALE))
+  if (!isZoomPan) {
+    return REMOTE_POINTER_MOVE_THROTTLE_MS
+  }
+  return REMOTE_ZOOM_PAN_MOUSE_MOVE_THROTTLE_MS
+}
+
+function queueHostMouseMove(msg) {
+  if (!isTauri() || !isAgentSession()) {
+    return false
+  }
+  hostMouseMovePendingMsg = msg
+  scheduleHostMouseMoveDrain(0)
+  return true
+}
+
+async function applyQueuedHostMouseMove(msg) {
+  hostMouseMoveApplyInFlight = true
+  lastHostMouseMoveApplyAtMs = Date.now()
+  // 作者: long；鼠标移动和按下/抬起共用同一个系统输入执行器，记录当前 promise，后续按钮/键盘事件才能等最后一个 move 真正落地后再执行。
+  const applyPromise = bridgeInputToHost(msg)
+  hostMouseMoveApplyPromise = applyPromise
+  try {
+    return await applyPromise
+  } finally {
+    if (hostMouseMoveApplyPromise === applyPromise) {
+      hostMouseMoveApplyPromise = null
+    }
+    hostMouseMoveApplyInFlight = false
+    if (hostMouseMovePendingMsg) {
+      scheduleHostMouseMoveDrain(0)
+    }
+  }
+}
+
+async function drainHostMouseMoveQueue() {
+  if (hostMouseMoveApplyInFlight || hostDiscreteInputQueueDepth > 0 || !hostMouseMovePendingMsg) {
+    return false
+  }
+  const now = Date.now()
+  const elapsedMs = now - lastHostMouseMoveApplyAtMs
+  const throttleMs = currentHostMouseMoveThrottleMs(hostMouseMovePendingMsg)
+  if (lastHostMouseMoveApplyAtMs > 0 && elapsedMs < throttleMs) {
+    scheduleHostMouseMoveDrain(throttleMs - elapsedMs)
+    return false
+  }
+  const msg = hostMouseMovePendingMsg
+  hostMouseMovePendingMsg = null
+  // 作者: long；Android 真机会在一次滑动里发出大量 move；节流窗口从本次原生输入开始计时，避免每次 CGEvent 耗时后再额外等待。
+  return applyQueuedHostMouseMove(msg)
+}
+
+async function flushQueuedHostMouseMove() {
+  if (hostMouseMoveDrainTimer) {
+    window.clearTimeout(hostMouseMoveDrainTimer)
+    hostMouseMoveDrainTimer = null
+  }
+  if (hostMouseMoveApplyInFlight && hostMouseMoveApplyPromise) {
+    // 作者: long；按钮、键盘和滚轮是离散动作，必须排在最后一个鼠标 move 后面，否则拖拽结束或点击可能落在上一帧坐标。
+    await hostMouseMoveApplyPromise
+  }
+  if (!hostMouseMovePendingMsg) {
+    return false
+  }
+  const msg = hostMouseMovePendingMsg
+  hostMouseMovePendingMsg = null
+  // 作者: long；鼠标按下、抬起和滚轮前先补最后一个移动点，避免按钮事件落在用户手指上一帧的位置。
+  return applyQueuedHostMouseMove(msg)
+}
+
+function enqueueHostDiscreteInput(msg) {
+  if (!isTauri() || !isAgentSession()) {
+    return false
+  }
+  hostDiscreteInputQueueDepth += 1
+  // 作者: long；按钮、键盘和滚轮必须按 relay 到达顺序串行落地；队列空闲前暂停后台 move drain，避免 down/up 等离散动作被后续移动事件插队。
+  const queuedTask = hostDiscreteInputQueueTail
+    .catch((error) => {
+      appendLog(`host bridge 输入队列恢复: ${error?.message || "unknown error"}`)
+    })
+    .then(async () => {
+      try {
+        await flushQueuedHostMouseMove()
+        await bridgeInputToHost(msg)
+      } finally {
+        scheduleInputUiRender()
+      }
+    })
+    .catch((error) => {
+      appendLog(`host bridge 输入队列失败: ${error?.message || "unknown error"}`)
+    })
+    .finally(() => {
+      hostDiscreteInputQueueDepth = Math.max(0, hostDiscreteInputQueueDepth - 1)
+      if (hostDiscreteInputQueueDepth === 0 && hostMouseMovePendingMsg) {
+        scheduleHostMouseMoveDrain(0)
+      }
+    })
+  hostDiscreteInputQueueTail = queuedTask
+  return true
 }
 
 function sendInputResultPush(msg, bridgeResult = null) {
@@ -4056,6 +5598,13 @@ function sendInputResultPush(msg, bridgeResult = null) {
     status.message_type || msg?.type,
     status.summary || (msg ? formatInputMessage(msg) : ""),
   )
+  if (msg?.type === "input.mouse.move" && Boolean(status.applied) && !status.error_code) {
+    const now = Date.now()
+    if (now - lastInputMoveResultPushAtMs < INPUT_MOVE_RESULT_PUSH_THROTTLE_MS) {
+      return true
+    }
+    lastInputMoveResultPushAtMs = now
+  }
   return sendEnvelope("input.result.push", {
     input_type: status.message_type || msg?.type || "",
     input_category: inputCategory || "",
@@ -8564,6 +10113,7 @@ function stopFrameStream(silent = false) {
   }
   state.streamLoopId += 1
   state.streamStarting = false
+  state.streamLastSentCaptureTs = 0
   if (!state.streamSending) {
     state.streamSending = false
     state.streamSendingLoopId = 0
@@ -8602,6 +10152,37 @@ function fitCaptureSize(width, height) {
     width: Math.max(1, Math.round(width * scale)),
     height: Math.max(1, Math.round(height * scale)),
   }
+}
+
+function legacyFrameStreamIntervalMs() {
+  if (currentSessionControllerProfile() !== "android_phone") {
+    return CAPTURE_FRAME_INTERVAL_MS
+  }
+  const config = state.captureStatus?.config || {}
+  const maxWidth = Number(config.max_width || config.maxWidth || 0)
+  const maxHeight = Number(config.max_height || config.maxHeight || 0)
+  const maxFps = Math.max(1, Number(config.max_fps || config.maxFps || 0) || 10)
+  const sourceRectWidthPpm = Number(config.source_rect_width_ppm ?? config.sourceRectWidthPpm ?? ANDROID_PHONE_SOURCE_RECT_UNITS)
+  const sourceRectHeightPpm = Number(config.source_rect_height_ppm ?? config.sourceRectHeightPpm ?? ANDROID_PHONE_SOURCE_RECT_UNITS)
+  const isFullSourceRect = sourceRectWidthPpm >= ANDROID_PHONE_SOURCE_RECT_UNITS - 1
+    && sourceRectHeightPpm >= ANDROID_PHONE_SOURCE_RECT_UNITS - 1
+  const fpsIntervalMs = Math.ceil(1000 / maxFps)
+  let targetIntervalMs = ANDROID_PHONE_LEGACY_CLEAR_INTERVAL_MS
+  if (maxWidth <= ANDROID_PHONE_PINCH_PREVIEW_MAX_WIDTH && maxHeight <= ANDROID_PHONE_PINCH_PREVIEW_MAX_HEIGHT) {
+    targetIntervalMs = ANDROID_PHONE_LEGACY_PINCH_PREVIEW_INTERVAL_MS
+  } else if (maxWidth <= ANDROID_PHONE_INTERACTIVE_MAX_WIDTH && maxHeight <= ANDROID_PHONE_INTERACTIVE_MAX_HEIGHT) {
+    targetIntervalMs = ANDROID_PHONE_LEGACY_INTERACTIVE_INTERVAL_MS
+  } else if (isFullSourceRect && maxWidth === ANDROID_PHONE_FULLSCREEN_MAX_WIDTH && maxHeight === ANDROID_PHONE_FULLSCREEN_MAX_HEIGHT) {
+    targetIntervalMs = ANDROID_PHONE_LEGACY_FULLSCREEN_HD_INTERVAL_MS
+  } else if (isFullSourceRect && maxWidth <= ANDROID_PHONE_SESSION_MAX_WIDTH && maxHeight <= ANDROID_PHONE_SESSION_MAX_HEIGHT) {
+    targetIntervalMs = ANDROID_PHONE_LEGACY_FULLSCREEN_INTERVAL_MS
+  } else if (maxWidth >= ANDROID_PHONE_ZOOM_STILL_MAX_WIDTH && maxHeight >= ANDROID_PHONE_ZOOM_STILL_MAX_HEIGHT) {
+    targetIntervalMs = ANDROID_PHONE_LEGACY_ZOOM_STILL_INTERVAL_MS
+  } else if (maxWidth <= ANDROID_PHONE_ZOOM_DETAIL_MAX_WIDTH && maxHeight <= ANDROID_PHONE_ZOOM_DETAIL_MAX_HEIGHT) {
+    targetIntervalMs = ANDROID_PHONE_LEGACY_ZOOM_DETAIL_INTERVAL_MS
+  }
+  // 作者: long；JPEG 兜底仍是临时视频链路：移动/缩放中用小图高频刷新，停手后用大图低频保清晰，避免 1000p 解码和 Base64 信令把真机拖到个位数 FPS。
+  return Math.max(ANDROID_PHONE_LEGACY_INTERACTIVE_INTERVAL_MS, Math.max(fpsIntervalMs, targetIntervalMs))
 }
 
 async function waitForVideoReady(video) {
@@ -8996,11 +10577,86 @@ function buildFramePayload() {
 }
 
 async function sendFrame(options = {}) {
-  if (options.log !== false) {
-    appendLog("旧版 PNG 帧推送链路已下线，媒体传输将由 WebRTC 轨道接管")
+  const context = buildFrameSendContext(options)
+  if (!frameSendContextCurrent(context)) {
+    return false
   }
-  render()
-  return false
+
+  let framePayload = null
+  if (isTauri()) {
+    try {
+      const frame = await invoke("capture_take_frame")
+      const mimeType = `${frame?.mime_type || ""}`.trim().toLowerCase()
+      const contentB64 = `${frame?.content_b64 || ""}`
+      if (!contentB64) {
+        throw new Error("capture frame payload missing")
+      }
+      if (mimeType === NATIVE_CAPTURE_RAW_BGRA_MIME) {
+        const rendered = renderRawBgraPreviewDataUrl(
+          decodeBase64ToBytes(contentB64),
+          Number(frame?.frame_width || 0),
+          Number(frame?.frame_height || 0),
+          state.nativeSenderPreviewCanvas,
+        )
+        state.nativeSenderPreviewCanvas = rendered.canvas
+        framePayload = {
+          frame_id: `${frame?.frame_id || `frame-${Date.now()}`}`,
+          mime_type: "image/png",
+          content_b64: rendered.dataUrl.split(",")[1],
+          capture_ts: Number(frame?.capture_ts || Date.now()),
+          frame_width: Number(frame?.frame_width || 0),
+          frame_height: Number(frame?.frame_height || 0),
+        }
+      } else if (mimeType.startsWith("image/")) {
+        framePayload = {
+          frame_id: `${frame?.frame_id || `frame-${Date.now()}`}`,
+          mime_type: mimeType,
+          content_b64: contentB64,
+          capture_ts: Number(frame?.capture_ts || Date.now()),
+          frame_width: Number(frame?.frame_width || 0),
+          frame_height: Number(frame?.frame_height || 0),
+        }
+      } else {
+        throw new Error(`legacy frame mime not supported: ${mimeType || "-"}`)
+      }
+    } catch (error) {
+      state.captureError = error?.message || "截取兜底帧失败"
+      if (options.log !== false) {
+        appendLog(`兜底帧发送失败: ${state.captureError}`)
+      }
+      render()
+      return false
+    }
+  } else {
+    framePayload = buildFramePayload()
+  }
+  if (!framePayload || !frameSendContextCurrent(context)) {
+    return false
+  }
+  const sourceRectMeta = currentAndroidFrameSourceRectMetadata()
+  if (sourceRectMeta) {
+    framePayload = {
+      ...framePayload,
+      ...sourceRectMeta,
+    }
+  }
+  const captureTs = Number(framePayload.capture_ts || 0)
+  if (options.skipDuplicateCaptureTs && captureTs > 0 && state.streamLastSentCaptureTs === captureTs) {
+    return true
+  }
+  const sent = sendEnvelope("screen.frame.push", framePayload, context.sessionId, { log: false })
+  if (sent && captureTs > 0) {
+    state.streamLastSentCaptureTs = captureTs
+  }
+  if (sent && options.log !== false) {
+    appendLog(`已发送兜底画面 ${framePayload.frame_width || 0}x${framePayload.frame_height || 0}`)
+  }
+  const now = Date.now()
+  if (now - lastFrameStreamUiRenderAtMs >= FRAME_STREAM_UI_RENDER_THROTTLE_MS) {
+    lastFrameStreamUiRenderAtMs = now
+    render()
+  }
+  return sent
 }
 
 async function startFrameStream(options = {}) {
@@ -9027,15 +10683,16 @@ async function startFrameStream(options = {}) {
   const loopId = state.streamLoopId + 1
   state.streamLoopId = loopId
 
-  const sendNextFrame = async () => {
-    state.streamSending = true
-    state.streamSendingLoopId = loopId
-    const sendPromise = sendFrame({
-      log: false,
-      requestCapture: false,
-      loopId,
-      sessionId: state.sessionId,
-    })
+    const sendNextFrame = async () => {
+      state.streamSending = true
+      state.streamSendingLoopId = loopId
+      const sendPromise = sendFrame({
+        log: false,
+        requestCapture: false,
+        loopId,
+        sessionId: state.sessionId,
+        skipDuplicateCaptureTs: true,
+      })
     state.streamSendPromise = sendPromise
     try {
       return await sendPromise
@@ -9092,6 +10749,7 @@ async function startFrameStream(options = {}) {
         return
       }
 
+      const startedAt = performance.now()
       const nextSent = await sendNextFrame()
       if (!nextSent || state.streamLoopId !== loopId) {
         stopFrameStream(true)
@@ -9102,15 +10760,19 @@ async function startFrameStream(options = {}) {
       if (state.streamLoopId !== loopId) {
         return
       }
+      const targetIntervalMs = legacyFrameStreamIntervalMs()
+      const elapsedMs = Math.max(0, performance.now() - startedAt)
+      // 作者: long；JPEG 兜底流必须维持“最新一帧”节拍：发送慢时下一帧立即追上，发送快时才补足间隔，避免缩放后每帧都额外多等 42-50ms。
+      const nextDelayMs = Math.max(0, Math.round(targetIntervalMs - elapsedMs))
       state.streamTimer = window.setTimeout(() => {
         void tick()
-      }, CAPTURE_FRAME_INTERVAL_MS)
+      }, nextDelayMs)
     }
 
     state.streamStarting = false
     state.streamTimer = window.setTimeout(() => {
       void tick()
-    }, CAPTURE_FRAME_INTERVAL_MS)
+    }, legacyFrameStreamIntervalMs())
     appendLog(isTauri() ? "开始连续推送桌面原生屏幕帧" : "开始连续推送真实屏幕帧")
     render()
     return true
@@ -9200,6 +10862,7 @@ async function connect(options = {}) {
   await stopCaptureStream(true)
   closePeerConnection(true)
   void stopNativeSenderControlPlane("connect_reset")
+  resetNativeSenderInteractiveProfileState()
   if (connectAttempt !== state.connectAttemptSeq) {
     return
   }
@@ -9330,6 +10993,7 @@ async function connect(options = {}) {
     await stopCaptureStream(true)
     closePeerConnection(true)
     void stopNativeSenderControlPlane("ws_closed")
+    resetNativeSenderInteractiveProfileState()
     state.connectionKey = ""
     void syncHostSession(null, { log: false }).finally(() => render())
     appendLog("WebSocket 已关闭")
@@ -9414,6 +11078,7 @@ async function handleMessage(msg) {
         emitBridgeModeSummary("session_replaced", { endedAt: Date.now() })
       }
       state.sessionId = nextSessionId
+      resetNativeSenderInteractiveProfileState()
       resetCanvasFallbackDecisionForSession(state.sessionId)
       state.lastSessionMetricsReportSessionId = ""
       state.lastSessionMetricsReportKey = ""
@@ -9458,6 +11123,13 @@ async function handleMessage(msg) {
         if (nativeCaptureReady) {
           await applyNativeSenderCaptureConfig(state.sessionId, { log: true })
         }
+        if (nativeCaptureReady && currentSessionControllerProfile() === "android_phone" && ANDROID_PHONE_LEGACY_FRAME_STREAM_ONLY) {
+          appendLog("Android 真机当前采用 JPEG 帧流兜底，暂不启动 H.264 native sender")
+          await stopNativeSenderControlPlane("android_phone_legacy_frame_stream_only")
+          void startFrameStream({ log: false, requestCapture: false })
+          void runDesktopDebugSessionTools()
+          return
+        }
         const nativeStarted = nativeCaptureReady
           ? await startNativeSenderControlPlane(state.sessionId, { dryRun: false })
           : false
@@ -9465,10 +11137,20 @@ async function handleMessage(msg) {
           if (!nativeCaptureReady) {
             appendLog("原生 sender 启动前采集源未就绪，回退 JS 会话协商链路")
           }
+          if (currentSessionControllerProfile() === "android_phone") {
+            // 作者: long；native sender 是真机主链路，但启动阶段如果 Rust/WebRTC owner 没起来，仍要保留 legacy 可见画面，避免验证时直接黑屏失去输入 proof。
+            appendLog("Android 真机 native sender 未接管，启用 JPEG 帧流兜底")
+            void startFrameStream({ log: false, requestCapture: false })
+          }
           void beginAgentWebRtcOffer(state.sessionId)
         } else {
           appendLog("受控端会话采用 Rust 原生 WebRTC sender 主导信令")
+          if (currentSessionControllerProfile() === "android_phone") {
+            // 作者: long；H.264 owner 正常启动后不再主动开启 JPEG 兜底流，否则兜底会把共享 capture config 切回 JPEG，主链路又退化成“JPEG 解码后再 H.264 编码”。
+            stopFrameStream(true)
+          }
         }
+        void runDesktopDebugSessionTools()
         return
       }
       stopFrameStream(true)
@@ -9493,6 +11175,7 @@ async function handleMessage(msg) {
       }
       releaseRemoteViewportPointer()
       releaseRemoteViewportKeys()
+      resetNativeSenderInteractiveProfileState()
       state.sessionId = ""
       resetCanvasFallbackDecisionForSession("")
       state.sessionInfo = null
@@ -9513,6 +11196,10 @@ async function handleMessage(msg) {
       state.localFrameMeta = null
       state.lastAck = ""
       state.lastInput = ""
+      state.incomingFileTransfers.clear()
+      state.clipboardStatus = "剪贴板：等待会话"
+      state.fileTransferStatus = "文件：等待会话"
+      state.debugSessionToolsRunKey = ""
       resetRemoteInputResultStats()
       stopFrameStream(true)
       await stopCaptureStream(true)
@@ -9522,6 +11209,62 @@ async function handleMessage(msg) {
       void syncHostSession(null, { log: false }).finally(() => render())
       appendLog(`会话结束: ${payload.reason || "unknown"}`)
       break
+    case "clipboard.text":
+      await handleIncomingClipboardText(msg)
+      break
+    case "clipboard.result":
+      handleIncomingClipboardResult(msg)
+      break
+    case "file.transfer.start":
+      handleIncomingFileTransferStart(msg)
+      break
+    case "file.transfer.chunk":
+      handleIncomingFileTransferChunk(msg)
+      break
+    case "file.transfer.complete":
+      await handleIncomingFileTransferComplete(msg)
+      break
+    case "file.transfer.result":
+      handleIncomingFileTransferResult(msg)
+      break
+    case "session.viewport.interaction": {
+      const interactionSessionId = `${msg.session_id || payload.session_id || ""}`.trim()
+      if (!interactionSessionId || interactionSessionId !== state.sessionId) {
+        appendLog("忽略非当前会话视图交互提示")
+        break
+      }
+      const phase = `${payload.phase || "update"}`.trim().toLowerCase()
+      const interaction = `${payload.interaction || "-"}`.trim().toLowerCase()
+      const viewportRegion = parseAndroidViewportRegion(payload)
+      state.lastAndroidViewportInteraction = {
+        session_id: interactionSessionId,
+        phase,
+        interaction,
+        scale: Number(payload.scale || 0) || 0,
+        viewport_region: viewportRegion,
+        updated_at: Date.now(),
+      }
+      traceLog("session.viewport.interaction.received", {
+        session_id: interactionSessionId,
+        phase,
+        interaction,
+        scale: Number(payload.scale || 0) || 0,
+        viewport_x: viewportRegion?.viewport_x ?? -1,
+        viewport_y: viewportRegion?.viewport_y ?? -1,
+        viewport_width: viewportRegion?.viewport_width ?? -1,
+        viewport_height: viewportRegion?.viewport_height ?? -1,
+        focus_x: viewportRegion?.focus_x ?? -1,
+        focus_y: viewportRegion?.focus_y ?? -1,
+      }, { console: false })
+      scheduleNativeSenderInteractiveProfileForInput({
+        ...msg,
+        type: "session.viewport.interaction",
+        session_id: interactionSessionId,
+      }, {
+        restoreDelayMs: viewportInteractionRestoreDelayMs(phase, interaction),
+      })
+      break
+    }
     case "webrtc.offer": {
       const signalSessionId = typeof msg.session_id === "string" ? msg.session_id.trim() : ""
       if (!signalSessionId || signalSessionId !== state.sessionId) {
@@ -9717,8 +11460,12 @@ async function handleMessage(msg) {
       } else {
         appendLog(`收到输入: ${state.lastInput}`)
       }
+      scheduleNativeSenderInteractiveProfileForInput({
+        ...msg,
+        session_id: messageSessionId,
+      })
       if (isAgentSession()) {
-        void bridgeInputToHost({
+        const hostInputMessage = {
           ...msg,
           session_id: messageSessionId,
           from: {
@@ -9726,7 +11473,13 @@ async function handleMessage(msg) {
             device_id: senderDeviceId,
             role: senderRole,
           },
-        }).finally(() => scheduleInputUiRender())
+        }
+        if (msg.type === "input.mouse.move") {
+          queueHostMouseMove(hostInputMessage)
+          scheduleInputUiRender()
+        } else {
+          enqueueHostDiscreteInput(hostInputMessage)
+        }
       } else {
         scheduleInputUiRender()
       }
@@ -10001,6 +11754,50 @@ function sendKeyboardSample() {
   }, state.sessionId, { logLine: "发送 KeyA up" })
 }
 
+function sendRemoteKeyboardKey(keyCode, action, modifiers = [], options = {}) {
+  if (!canSendInput()) {
+    if (options.log !== false) {
+      appendLog("当前不是控制端会话，不能发送键盘事件")
+    }
+    render()
+    return false
+  }
+  const normalizedKey = `${keyCode || ""}`.trim()
+  const normalizedAction = `${action || ""}`.trim()
+  if (!REMOTE_KEY_CODES.has(normalizedKey) || !["down", "up"].includes(normalizedAction)) {
+    appendLog(`远程键盘事件无效：${normalizedKey || "-"} ${normalizedAction || "-"}`)
+    render()
+    return false
+  }
+  const normalizedModifiers = [...new Set((Array.isArray(modifiers) ? modifiers : [])
+    .map((modifier) => `${modifier || ""}`.trim())
+    .filter((modifier) => REMOTE_MODIFIER_CODES.has(modifier)))]
+  return sendEnvelope("input.keyboard.key", {
+    key_code: normalizedKey,
+    action: normalizedAction,
+    modifiers: normalizedModifiers,
+    input_category: options.inputCategory || "keyboard",
+  }, state.sessionId, {
+    log: options.log !== false,
+    logLine: options.logLine || `发送 ${normalizedKey} ${normalizedAction}${normalizedModifiers.length ? ` ${normalizedModifiers.join("+")}` : ""}`,
+  })
+}
+
+function sendRemoteCtrlAltDel() {
+  // 作者: long；会话工具栏的组合键必须走同一条远程输入链路，目标端原生执行器会在 Delete down/up 两侧压住并释放 Ctrl/Alt。
+  const modifiers = ["ControlLeft", "AltLeft"]
+  const downSent = sendRemoteKeyboardKey("Delete", "down", modifiers, {
+    logLine: "发送 Ctrl+Alt+Del down",
+  })
+  const upSent = sendRemoteKeyboardKey("Delete", "up", modifiers, {
+    logLine: "发送 Ctrl+Alt+Del up",
+  })
+  if (downSent || upSent) {
+    scheduleLiveE2EProofReport("live_controller_ctrl_alt_del", { force: true })
+  }
+  return downSent && upSent
+}
+
 function sendScrollSample() {
   if (!canSendInput()) {
     appendLog("当前不是控制端会话，不能发送滚轮事件")
@@ -10157,9 +11954,6 @@ function normalizeRemoteModifierCode(code) {
   const normalized = `${code || ""}`.trim()
   if (REMOTE_MODIFIER_CODES.has(normalized)) {
     return normalized
-  }
-  if (normalized === "MetaRight") {
-    return "MetaLeft"
   }
   return ""
 }
@@ -11001,15 +12795,49 @@ function DesktopReactApp() {
           >
             {sessionPrimaryLabel}
           </button>
-          <button className="session-tool-btn" disabled={!sessionActive}>Ctrl+Alt+Del</button>
-          <button className="session-tool-btn" disabled={!sessionActive}>剪贴板</button>
-          <button className="session-tool-btn" disabled={!sessionActive}>文件</button>
+          <button
+            className="session-tool-btn"
+            disabled={!sessionActive}
+            onClick={() => sendRemoteCtrlAltDel()}
+          >
+            Ctrl+Alt+Del
+          </button>
+          <button
+            className="session-tool-btn"
+            disabled={!sessionActive}
+            onClick={() => void sendClipboardToRemote()}
+          >
+            剪贴板
+          </button>
+          <button
+            className="session-tool-btn"
+            disabled={!sessionActive}
+            onClick={() => document.getElementById("sessionFileInput")?.click()}
+          >
+            文件
+          </button>
           <button className="session-tool-btn" disabled={!sessionActive}>截图</button>
           <button className="session-tool-btn" disabled={!sessionActive}>视图</button>
+          <input
+            id="sessionFileInput"
+            type="file"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) {
+                void sendFileToRemote(file)
+              } else {
+                updateFileTransferStatus("文件：已取消选择")
+              }
+              event.target.value = ""
+            }}
+          />
           <div className="session-toolbar-spacer" />
           <span className="metric-inline">{transportModeLabel}</span>
           {showCandidateMetric ? <span className="metric-inline">{`${liveCandidatePath || "-"} / ${liveCandidateTier || "-"}`}</span> : null}
           <span className="metric-inline">{firstFrameMs >= 0 ? `${firstFrameMs} ms 首帧` : "等待首帧"}</span>
+          <span className="metric-inline">{state.clipboardStatus}</span>
+          <span className="metric-inline">{state.fileTransferStatus}</span>
         </section>
 
         <section className="session-canvas">

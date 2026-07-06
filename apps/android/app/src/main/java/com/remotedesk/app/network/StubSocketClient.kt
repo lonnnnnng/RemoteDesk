@@ -19,11 +19,14 @@ class StubSocketClient(
 ) {
   companion object {
     private const val TAG = "RemoteDeskWs"
+    private const val NOISY_LOG_INTERVAL_MS = 1000L
     private val LOG_TIME_FORMAT = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
   }
 
   private val client = OkHttpClient()
   private var socket: WebSocket? = null
+  private val noisyLogCounts = mutableMapOf<String, Int>()
+  private val noisyLogLastAtMs = mutableMapOf<String, Long>()
 
   fun connect(url: String) {
     logInfo("connect url=$url")
@@ -42,7 +45,7 @@ class StubSocketClient(
         if (this@StubSocketClient.socket !== webSocket) {
           return
         }
-        logInfo("recv ${summarizeEnvelope(text)}")
+        logEnvelope("recv", text)
         onMessage(text)
       }
 
@@ -71,7 +74,7 @@ class StubSocketClient(
   fun send(text: String): Boolean {
     val result = socket?.send(text) ?: false
     if (result) {
-      logInfo("send ${summarizeEnvelope(text)}")
+      logEnvelope("send", text)
     } else {
       logWarn("send failed (socket not ready) ${summarizeEnvelope(text)}")
     }
@@ -97,6 +100,44 @@ class StubSocketClient(
     } catch (_: Exception) {
       "type=unknown bytes=${text.length}"
     }
+  }
+
+  private fun logEnvelope(direction: String, text: String) {
+    val noisyKey = classifyNoisyEnvelope(text)
+    if (noisyKey != null) {
+      logNoisyEnvelopeSummary(direction, noisyKey, text.length)
+      return
+    }
+    logInfo("$direction ${summarizeEnvelope(text)}")
+  }
+
+  private fun classifyNoisyEnvelope(text: String): String? {
+    return when {
+      text.contains("\"type\":\"screen.frame.push\"") || text.contains("\"type\": \"screen.frame.push\"") ->
+        "screen.frame.push"
+      text.contains("\"type\":\"input.mouse.move\"") || text.contains("\"type\": \"input.mouse.move\"") ->
+        "input.mouse.move"
+      text.contains("\"echo_type\":\"input.mouse.move\"") || text.contains("\"echo_type\": \"input.mouse.move\"") ->
+        "input.ack.mouse.move"
+      text.contains("\"input_type\":\"input.mouse.move\"") || text.contains("\"input_type\": \"input.mouse.move\"") ->
+        "input.result.mouse.move"
+      else -> null
+    }
+  }
+
+  private fun logNoisyEnvelopeSummary(direction: String, noisyKey: String, bytes: Int) {
+    val bucket = "$direction:$noisyKey"
+    val now = System.currentTimeMillis()
+    val nextCount = (noisyLogCounts[bucket] ?: 0) + 1
+    noisyLogCounts[bucket] = nextCount
+    val lastAtMs = noisyLogLastAtMs[bucket] ?: 0L
+    if (now - lastAtMs < NOISY_LOG_INTERVAL_MS) {
+      return
+    }
+    noisyLogLastAtMs[bucket] = now
+    noisyLogCounts[bucket] = 0
+    // 作者: long；远控画面帧和鼠标移动是热路径，逐条 JSON 解析和 logcat 输出会反向拖慢真机渲染，只保留每秒聚合证据。
+    logInfo("$direction noisy=$noisyKey count=$nextCount bytes_last=$bytes")
   }
 
   private fun nowLogTime(): String = synchronized(LOG_TIME_FORMAT) { LOG_TIME_FORMAT.format(Date()) }

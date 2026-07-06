@@ -517,6 +517,7 @@ fn parse_modifiers(payload: &Value) -> Result<Vec<String>, String> {
                 | "AltLeft"
                 | "AltRight"
                 | "MetaLeft"
+                | "MetaRight"
         ) {
             return Err(format!("unsupported keyboard modifier: {modifier}"));
         }

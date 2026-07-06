@@ -144,6 +144,404 @@ func TestWSFlowRelayAndHTTPVisibility(t *testing.T) {
 
 	sendEnvelope(t, controller, protocol.Envelope{
 		Version:   "1.0",
+		MessageID: "clipboard-1",
+		Type:      "clipboard.text",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-clipboard-1",
+		From:      protocol.From{DeviceID: "controller-01", Role: "controller"},
+		Payload: map[string]any{
+			"clipboard_id":    "clip-1",
+			"text":            "hello from controller",
+			"source_platform": "android",
+			"created_at":      float64(time.Now().UnixMilli()),
+		},
+	})
+	forwardedClipboard := readEnvelopeOfType(t, agent, "clipboard.text")
+	if forwardedClipboard.Type != "clipboard.text" {
+		t.Fatalf("expected forwarded clipboard.text, got %s", forwardedClipboard.Type)
+	}
+	clipboardAck := readEnvelopeOfType(t, controller, "input.ack")
+	if clipboardAck.Type != "input.ack" {
+		t.Fatalf("expected clipboard input.ack, got %s", clipboardAck.Type)
+	}
+
+	sendEnvelope(t, agent, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "clipboard-result-1",
+		Type:      "clipboard.result",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-clipboard-result-1",
+		From:      protocol.From{DeviceID: "agent-01", Role: "agent"},
+		Payload: map[string]any{
+			"clipboard_id": "clip-1",
+			"applied":      true,
+			"chars":        float64(21),
+		},
+	})
+	if forwardedClipboardResult := readEnvelopeOfType(t, controller, "clipboard.result"); forwardedClipboardResult.Type != "clipboard.result" {
+		t.Fatalf("expected clipboard.result, got %s", forwardedClipboardResult.Type)
+	}
+	if clipboardResultAck := readEnvelopeOfType(t, agent, "input.ack"); clipboardResultAck.Type != "input.ack" {
+		t.Fatalf("expected clipboard result input.ack, got %s", clipboardResultAck.Type)
+	}
+
+	sendEnvelope(t, controller, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "viewport-interaction-1",
+		Type:      "session.viewport.interaction",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-viewport-interaction-1",
+		From:      protocol.From{DeviceID: "controller-01", Role: "controller"},
+		Payload: map[string]any{
+			"phase":           "update",
+			"interaction":     "pinch",
+			"scale":           float64(1.8),
+			"viewport_x":      float64(0.12),
+			"viewport_y":      float64(0.18),
+			"viewport_width":  float64(0.5),
+			"viewport_height": float64(0.42),
+			"focus_x":         float64(0.34),
+			"focus_y":         float64(0.39),
+			"created_at":      float64(time.Now().UnixMilli()),
+		},
+	})
+	forwardedViewportInteraction := readEnvelopeOfType(t, agent, "session.viewport.interaction")
+	if forwardedViewportInteraction.Type != "session.viewport.interaction" {
+		t.Fatalf("expected forwarded session.viewport.interaction, got %s", forwardedViewportInteraction.Type)
+	}
+	if width, _ := asNumber(forwardedViewportInteraction.Payload["viewport_width"]); width != 0.5 {
+		t.Fatalf("expected forwarded viewport_width 0.5, got %v", forwardedViewportInteraction.Payload["viewport_width"])
+	}
+	viewportInteractionAck := readEnvelopeOfType(t, controller, "input.ack")
+	if viewportInteractionAck.Type != "input.ack" {
+		t.Fatalf("expected viewport interaction input.ack, got %s", viewportInteractionAck.Type)
+	}
+
+	sendEnvelope(t, controller, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "viewport-fullscreen-1",
+		Type:      "session.viewport.interaction",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-viewport-fullscreen-1",
+		From:      protocol.From{DeviceID: "controller-01", Role: "controller"},
+		Payload: map[string]any{
+			"phase":       "start",
+			"interaction": "fullscreen",
+			"scale":       float64(1.0),
+			"created_at":  float64(time.Now().UnixMilli()),
+		},
+	})
+	forwardedFullscreenInteraction := readEnvelopeOfType(t, agent, "session.viewport.interaction")
+	if forwardedFullscreenInteraction.Type != "session.viewport.interaction" {
+		t.Fatalf("expected forwarded fullscreen session.viewport.interaction, got %s", forwardedFullscreenInteraction.Type)
+	}
+	fullscreenInteractionAck := readEnvelopeOfType(t, controller, "input.ack")
+	if fullscreenInteractionAck.Type != "input.ack" {
+		t.Fatalf("expected fullscreen viewport interaction input.ack, got %s", fullscreenInteractionAck.Type)
+	}
+
+	sendEnvelope(t, agent, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "screen-frame-1",
+		Type:      "screen.frame.push",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-screen-frame-1",
+		From:      protocol.From{DeviceID: "agent-01", Role: "agent"},
+		Payload: map[string]any{
+			"frame_id":           "frame-1",
+			"mime_type":          "image/png",
+			"content_b64":        "iVBORw0KGgo=",
+			"capture_ts":         float64(time.Now().UnixMilli()),
+			"frame_width":        float64(320),
+			"frame_height":       float64(200),
+			"source_rect_x":      float64(0.1),
+			"source_rect_y":      float64(0.2),
+			"source_rect_width":  float64(0.5),
+			"source_rect_height": float64(0.4),
+		},
+	})
+	forwardedFrame := readEnvelopeOfType(t, controller, "screen.frame.push")
+	if forwardedFrame.Type != "screen.frame.push" {
+		t.Fatalf("expected forwarded screen.frame.push, got %s", forwardedFrame.Type)
+	}
+	if width, _ := asNumber(forwardedFrame.Payload["source_rect_width"]); width != 0.5 {
+		t.Fatalf("expected forwarded source_rect_width 0.5, got %v", forwardedFrame.Payload["source_rect_width"])
+	}
+	frameAck := readEnvelopeOfType(t, agent, "input.ack")
+	if frameAck.Type != "input.ack" {
+		t.Fatalf("expected screen frame input.ack, got %s", frameAck.Type)
+	}
+
+	sendEnvelope(t, controller, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "file-start-1",
+		Type:      "file.transfer.start",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-file-start-1",
+		From:      protocol.From{DeviceID: "controller-01", Role: "controller"},
+		Payload: map[string]any{
+			"file_id":      "file-1",
+			"name":         "proof.txt",
+			"mime":         "text/plain",
+			"size":         float64(5),
+			"total_chunks": float64(1),
+			"sha256":       "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+		},
+	})
+	if forwardedStart := readEnvelopeOfType(t, agent, "file.transfer.start"); forwardedStart.Type != "file.transfer.start" {
+		t.Fatalf("expected file.transfer.start, got %s", forwardedStart.Type)
+	}
+	if startAck := readEnvelopeOfType(t, controller, "input.ack"); startAck.Type != "input.ack" {
+		t.Fatalf("expected file start input.ack, got %s", startAck.Type)
+	}
+
+	sendEnvelope(t, controller, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "file-chunk-1",
+		Type:      "file.transfer.chunk",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-file-chunk-1",
+		From:      protocol.From{DeviceID: "controller-01", Role: "controller"},
+		Payload: map[string]any{
+			"file_id":      "file-1",
+			"chunk_index":  float64(0),
+			"total_chunks": float64(1),
+			"data_base64":  "aGVsbG8=",
+		},
+	})
+	if forwardedChunk := readEnvelopeOfType(t, agent, "file.transfer.chunk"); forwardedChunk.Type != "file.transfer.chunk" {
+		t.Fatalf("expected file.transfer.chunk, got %s", forwardedChunk.Type)
+	}
+	if chunkAck := readEnvelopeOfType(t, controller, "input.ack"); chunkAck.Type != "input.ack" {
+		t.Fatalf("expected file chunk input.ack, got %s", chunkAck.Type)
+	}
+
+	sendEnvelope(t, controller, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "file-complete-1",
+		Type:      "file.transfer.complete",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-file-complete-1",
+		From:      protocol.From{DeviceID: "controller-01", Role: "controller"},
+		Payload: map[string]any{
+			"file_id":      "file-1",
+			"name":         "proof.txt",
+			"mime":         "text/plain",
+			"size":         float64(5),
+			"total_chunks": float64(1),
+			"sha256":       "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+		},
+	})
+	if forwardedComplete := readEnvelopeOfType(t, agent, "file.transfer.complete"); forwardedComplete.Type != "file.transfer.complete" {
+		t.Fatalf("expected file.transfer.complete, got %s", forwardedComplete.Type)
+	}
+	if completeAck := readEnvelopeOfType(t, controller, "input.ack"); completeAck.Type != "input.ack" {
+		t.Fatalf("expected file complete input.ack, got %s", completeAck.Type)
+	}
+
+	sendEnvelope(t, agent, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "file-result-1",
+		Type:      "file.transfer.result",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-file-result-1",
+		From:      protocol.From{DeviceID: "agent-01", Role: "agent"},
+		Payload: map[string]any{
+			"file_id":  "file-1",
+			"applied":  true,
+			"name":     "proof.txt",
+			"bytes":    float64(5),
+			"sha256":   "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+			"location": "~/Downloads/RemoteDesk/proof.txt",
+		},
+	})
+	if forwardedFileResult := readEnvelopeOfType(t, controller, "file.transfer.result"); forwardedFileResult.Type != "file.transfer.result" {
+		t.Fatalf("expected file.transfer.result, got %s", forwardedFileResult.Type)
+	}
+	if fileResultAck := readEnvelopeOfType(t, agent, "input.ack"); fileResultAck.Type != "input.ack" {
+		t.Fatalf("expected file result input.ack, got %s", fileResultAck.Type)
+	}
+
+	sendEnvelope(t, controller, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "file-chunk-invalid",
+		Type:      "file.transfer.chunk",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-file-chunk-invalid",
+		From:      protocol.From{DeviceID: "controller-01", Role: "controller"},
+		Payload: map[string]any{
+			"file_id":      "file-1",
+			"chunk_index":  float64(0),
+			"total_chunks": float64(0),
+			"data_base64":  "aGVsbG8=",
+		},
+	})
+	invalidFileChunk := readEnvelopeOfType(t, controller, "error.rsp")
+	if invalidFileChunk.Type != "error.rsp" {
+		t.Fatalf("expected invalid file chunk error.rsp, got %s", invalidFileChunk.Type)
+	}
+	if code := asInt(t, invalidFileChunk.Payload["code"]); code != 4001 {
+		t.Fatalf("expected SESSION_TOOL_INVALID_PAYLOAD code 4001, got %d", code)
+	}
+
+	sendEnvelope(t, controller, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "file-complete-invalid-sha",
+		Type:      "file.transfer.complete",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-file-complete-invalid-sha",
+		From:      protocol.From{DeviceID: "controller-01", Role: "controller"},
+		Payload: map[string]any{
+			"file_id":      "file-1",
+			"name":         "proof.txt",
+			"mime":         "text/plain",
+			"size":         float64(5),
+			"total_chunks": float64(1),
+			"sha256":       "not-a-sha256",
+		},
+	})
+	invalidFileHash := readEnvelopeOfType(t, controller, "error.rsp")
+	if invalidFileHash.Type != "error.rsp" {
+		t.Fatalf("expected invalid file hash error.rsp, got %s", invalidFileHash.Type)
+	}
+	if code := asInt(t, invalidFileHash.Payload["code"]); code != 4001 {
+		t.Fatalf("expected SESSION_TOOL_INVALID_PAYLOAD code 4001, got %d", code)
+	}
+
+	sendEnvelope(t, agent, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "file-result-invalid",
+		Type:      "file.transfer.result",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-file-result-invalid",
+		From:      protocol.From{DeviceID: "agent-01", Role: "agent"},
+		Payload: map[string]any{
+			"file_id": "file-1",
+			"applied": "yes",
+		},
+	})
+	invalidFileResult := readEnvelopeOfType(t, agent, "error.rsp")
+	if invalidFileResult.Type != "error.rsp" {
+		t.Fatalf("expected invalid file result error.rsp, got %s", invalidFileResult.Type)
+	}
+	if code := asInt(t, invalidFileResult.Payload["code"]); code != 4001 {
+		t.Fatalf("expected SESSION_TOOL_INVALID_PAYLOAD code 4001, got %d", code)
+	}
+
+	sendEnvelope(t, controller, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "viewport-interaction-invalid",
+		Type:      "session.viewport.interaction",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-viewport-interaction-invalid",
+		From:      protocol.From{DeviceID: "controller-01", Role: "controller"},
+		Payload: map[string]any{
+			"phase":       "bad-phase",
+			"interaction": "pinch",
+			"scale":       float64(1.2),
+		},
+	})
+	invalidViewportInteraction := readEnvelopeOfType(t, controller, "error.rsp")
+	if invalidViewportInteraction.Type != "error.rsp" {
+		t.Fatalf("expected invalid viewport interaction error.rsp, got %s", invalidViewportInteraction.Type)
+	}
+	if code := asInt(t, invalidViewportInteraction.Payload["code"]); code != 4001 {
+		t.Fatalf("expected invalid viewport interaction code 4001, got %d", code)
+	}
+
+	sendEnvelope(t, controller, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "viewport-region-invalid",
+		Type:      "session.viewport.interaction",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-viewport-region-invalid",
+		From:      protocol.From{DeviceID: "controller-01", Role: "controller"},
+		Payload: map[string]any{
+			"phase":           "update",
+			"interaction":     "pinch",
+			"scale":           float64(1.6),
+			"viewport_x":      float64(0.8),
+			"viewport_y":      float64(0.2),
+			"viewport_width":  float64(0.4),
+			"viewport_height": float64(0.3),
+		},
+	})
+	invalidViewportRegion := readEnvelopeOfType(t, controller, "error.rsp")
+	if invalidViewportRegion.Type != "error.rsp" {
+		t.Fatalf("expected invalid viewport region error.rsp, got %s", invalidViewportRegion.Type)
+	}
+	if code := asInt(t, invalidViewportRegion.Payload["code"]); code != 4001 {
+		t.Fatalf("expected invalid viewport region code 4001, got %d", code)
+	}
+
+	sendEnvelope(t, agent, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "screen-frame-invalid",
+		Type:      "screen.frame.push",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-screen-frame-invalid",
+		From:      protocol.From{DeviceID: "agent-01", Role: "agent"},
+		Payload: map[string]any{
+			"frame_id":     "frame-bad",
+			"mime_type":    "application/octet-stream",
+			"content_b64":  "iVBORw0KGgo=",
+			"frame_width":  float64(320),
+			"frame_height": float64(200),
+		},
+	})
+	invalidScreenFrame := readEnvelopeOfType(t, agent, "error.rsp")
+	if invalidScreenFrame.Type != "error.rsp" {
+		t.Fatalf("expected invalid screen frame error.rsp, got %s", invalidScreenFrame.Type)
+	}
+	if code := asInt(t, invalidScreenFrame.Payload["code"]); code != 4001 {
+		t.Fatalf("expected invalid screen frame code 4001, got %d", code)
+	}
+
+	sendEnvelope(t, agent, protocol.Envelope{
+		Version:   "1.0",
+		MessageID: "screen-frame-source-rect-invalid",
+		Type:      "screen.frame.push",
+		Timestamp: time.Now().UnixMilli(),
+		SessionID: sessionID,
+		TraceID:   "trace-screen-frame-source-rect-invalid",
+		From:      protocol.From{DeviceID: "agent-01", Role: "agent"},
+		Payload: map[string]any{
+			"frame_id":           "frame-bad-source-rect",
+			"mime_type":          "image/jpeg",
+			"content_b64":        "iVBORw0KGgo=",
+			"frame_width":        float64(320),
+			"frame_height":       float64(200),
+			"source_rect_x":      float64(0.9),
+			"source_rect_y":      float64(0.1),
+			"source_rect_width":  float64(0.2),
+			"source_rect_height": float64(0.4),
+		},
+	})
+	invalidScreenFrameSourceRect := readEnvelopeOfType(t, agent, "error.rsp")
+	if invalidScreenFrameSourceRect.Type != "error.rsp" {
+		t.Fatalf("expected invalid screen frame source rect error.rsp, got %s", invalidScreenFrameSourceRect.Type)
+	}
+	if code := asInt(t, invalidScreenFrameSourceRect.Payload["code"]); code != 4001 {
+		t.Fatalf("expected invalid screen frame source rect code 4001, got %d", code)
+	}
+
+	sendEnvelope(t, controller, protocol.Envelope{
+		Version:   "1.0",
 		MessageID: "offer-1",
 		Type:      "webrtc.offer",
 		Timestamp: time.Now().UnixMilli(),

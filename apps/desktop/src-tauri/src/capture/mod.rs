@@ -75,12 +75,16 @@ pub struct CapturePermissionState {
 
 pub type CaptureCapabilities = platform::DesktopCaptureCapabilities;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CaptureConfig {
     pub max_width: u32,
     pub max_height: u32,
     pub max_fps: u16,
     pub codec: String,
+    pub source_rect_x_ppm: u32,
+    pub source_rect_y_ppm: u32,
+    pub source_rect_width_ppm: u32,
+    pub source_rect_height_ppm: u32,
 }
 
 impl Default for CaptureConfig {
@@ -90,6 +94,10 @@ impl Default for CaptureConfig {
             max_height: DEFAULT_CAPTURE_MAX_HEIGHT,
             max_fps: DEFAULT_CAPTURE_MAX_FPS,
             codec: DEFAULT_CAPTURE_CODEC.to_string(),
+            source_rect_x_ppm: 0,
+            source_rect_y_ppm: 0,
+            source_rect_width_ppm: 1_000_000,
+            source_rect_height_ppm: 1_000_000,
         }
     }
 }
@@ -121,6 +129,24 @@ impl CaptureConfig {
             }
             self.codec = codec.to_string();
         }
+        let next_source_rect_x_ppm = patch.source_rect_x_ppm.unwrap_or(self.source_rect_x_ppm);
+        let next_source_rect_y_ppm = patch.source_rect_y_ppm.unwrap_or(self.source_rect_y_ppm);
+        let next_source_rect_width_ppm = patch
+            .source_rect_width_ppm
+            .unwrap_or(self.source_rect_width_ppm);
+        let next_source_rect_height_ppm = patch
+            .source_rect_height_ppm
+            .unwrap_or(self.source_rect_height_ppm);
+        validate_source_rect_ppm(
+            next_source_rect_x_ppm,
+            next_source_rect_y_ppm,
+            next_source_rect_width_ppm,
+            next_source_rect_height_ppm,
+        )?;
+        self.source_rect_x_ppm = next_source_rect_x_ppm;
+        self.source_rect_y_ppm = next_source_rect_y_ppm;
+        self.source_rect_width_ppm = next_source_rect_width_ppm;
+        self.source_rect_height_ppm = next_source_rect_height_ppm;
 
         Ok(())
     }
@@ -137,6 +163,14 @@ pub struct CaptureConfigPatch {
     pub max_fps: Option<u16>,
     #[serde(default)]
     pub codec: Option<String>,
+    #[serde(default)]
+    pub source_rect_x_ppm: Option<u32>,
+    #[serde(default)]
+    pub source_rect_y_ppm: Option<u32>,
+    #[serde(default)]
+    pub source_rect_width_ppm: Option<u32>,
+    #[serde(default)]
+    pub source_rect_height_ppm: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -628,25 +662,39 @@ pub fn capture_resume() -> Result<CaptureStatus, String> {
 }
 
 pub fn capture_update_config(patch: CaptureConfigPatch) -> Result<CaptureStatus, String> {
-    let mut state = capture_runtime_state()
-        .lock()
-        .map_err(|_| "capture runtime state poisoned".to_string())?;
+    let (status, config_changed) = {
+        let mut state = capture_runtime_state()
+            .lock()
+            .map_err(|_| "capture runtime state poisoned".to_string())?;
+        let previous_config = state.config.clone();
 
-    state.config.apply_patch(&patch)?;
-    trace_capture(
-        "config.updated",
-        format!(
-            "max_width={} max_height={} max_fps={} codec={}",
-            state.config.max_width,
-            state.config.max_height,
-            state.config.max_fps,
-            state.config.codec
-        ),
-    );
-    clear_error(&mut state);
-    state.last_transition_at = now_ms();
+        state.config.apply_patch(&patch)?;
+        let config_changed = state.config != previous_config;
+        trace_capture(
+            "config.updated",
+            format!(
+                "max_width={} max_height={} max_fps={} codec={} source_rect_ppm={},{},{},{}",
+                state.config.max_width,
+                state.config.max_height,
+                state.config.max_fps,
+                state.config.codec,
+                state.config.source_rect_x_ppm,
+                state.config.source_rect_y_ppm,
+                state.config.source_rect_width_ppm,
+                state.config.source_rect_height_ppm,
+            ),
+        );
+        clear_error(&mut state);
+        state.last_transition_at = now_ms();
 
-    Ok(snapshot_status(&state))
+        (snapshot_status(&state), config_changed)
+    };
+
+    if config_changed {
+        clear_latest_cached_frame();
+    }
+
+    Ok(status)
 }
 
 fn capture_runtime_state() -> &'static Mutex<CaptureRuntimeState> {
@@ -674,6 +722,35 @@ fn latest_cached_frame() -> Option<CaptureFrameSnapshot> {
         .and_then(|state| state.latest_frame.clone())
 }
 
+fn clear_latest_cached_frame() {
+    if let Ok(mut state) = capture_frame_worker_state().lock() {
+        // 作者: long；远控交互会在低延迟档和清晰档之间切换，清掉旧帧能让下一次兜底推帧立刻按新尺寸重采，避免手机端继续显示上一档发虚画面。
+        state.latest_frame = None;
+    }
+}
+
+fn validate_source_rect_ppm(
+    x_ppm: u32,
+    y_ppm: u32,
+    width_ppm: u32,
+    height_ppm: u32,
+) -> Result<(), String> {
+    const SOURCE_RECT_UNITS: u32 = 1_000_000;
+    if width_ppm == 0 || height_ppm == 0 {
+        return Err("capture config source rect size must be greater than 0".to_string());
+    }
+    if x_ppm > SOURCE_RECT_UNITS
+        || y_ppm > SOURCE_RECT_UNITS
+        || width_ppm > SOURCE_RECT_UNITS
+        || height_ppm > SOURCE_RECT_UNITS
+        || x_ppm.saturating_add(width_ppm) > SOURCE_RECT_UNITS
+        || y_ppm.saturating_add(height_ppm) > SOURCE_RECT_UNITS
+    {
+        return Err("capture config source rect must stay within [0,1]".to_string());
+    }
+    Ok(())
+}
+
 fn start_capture_worker() -> Result<(), String> {
     stop_capture_worker();
 
@@ -682,6 +759,10 @@ fn start_capture_worker() -> Result<(), String> {
         .name("rd-capture-worker".to_string())
         .spawn(move || {
             let mut sampled_frame_count: u64 = 0;
+            let mut capture_elapsed_sum_ms: u64 = 0;
+            let mut capture_elapsed_max_ms: u64 = 0;
+            let mut capture_loop_overrun_count: u64 = 0;
+            let mut previous_capture_ts: u64 = 0;
             loop {
                 if stop_rx.try_recv().is_ok() {
                     break;
@@ -699,6 +780,13 @@ fn start_capture_worker() -> Result<(), String> {
                 match platform::capture_take_frame(&source, &config) {
                     Ok(frame) => {
                         let capture_ts = now_ms();
+                        let capture_elapsed_ms = capture_ts.saturating_sub(loop_started_at);
+                        let interval_ms = capture_frame_interval(&config).as_millis() as u64;
+                        let capture_gap_ms = if previous_capture_ts > 0 {
+                            capture_ts.saturating_sub(previous_capture_ts)
+                        } else {
+                            0
+                        };
                         let cached_frame = CaptureFrameSnapshot {
                             encoded_bytes: Arc::from(frame.encoded_bytes.into_boxed_slice()),
                             mime_type: frame.mime_type,
@@ -716,12 +804,31 @@ fn start_capture_worker() -> Result<(), String> {
                             state.last_transition_at = capture_ts;
                         }
                         sampled_frame_count = sampled_frame_count.saturating_add(1);
-                        if sampled_frame_count % 120 == 0 {
+                        capture_elapsed_sum_ms =
+                            capture_elapsed_sum_ms.saturating_add(capture_elapsed_ms);
+                        capture_elapsed_max_ms = capture_elapsed_max_ms.max(capture_elapsed_ms);
+                        if capture_elapsed_ms >= interval_ms {
+                            capture_loop_overrun_count =
+                                capture_loop_overrun_count.saturating_add(1);
+                        }
+                        previous_capture_ts = capture_ts;
+                        if sampled_frame_count % 30 == 0 {
+                            let avg_elapsed_ms =
+                                capture_elapsed_sum_ms / sampled_frame_count.max(1);
                             trace_capture(
                                 "worker.frame_sampled",
                                 format!(
-                                    "frames={} size={}x{} ts={}",
-                                    sampled_frame_count, frame.width, frame.height, capture_ts
+                                    "frames={} size={}x{} ts={} avg_capture_ms={} max_capture_ms={} last_capture_ms={} target_interval_ms={} last_gap_ms={} overruns={}",
+                                    sampled_frame_count,
+                                    frame.width,
+                                    frame.height,
+                                    capture_ts,
+                                    avg_elapsed_ms,
+                                    capture_elapsed_max_ms,
+                                    capture_elapsed_ms,
+                                    interval_ms,
+                                    capture_gap_ms,
+                                    capture_loop_overrun_count,
                                 ),
                             );
                         }
@@ -1193,6 +1300,10 @@ mod tests {
                 max_height: Some(1080),
                 max_fps: Some(12),
                 codec: Some("jpeg-frame-stream".to_string()),
+                source_rect_x_ppm: Some(100_000),
+                source_rect_y_ppm: Some(200_000),
+                source_rect_width_ppm: Some(500_000),
+                source_rect_height_ppm: Some(400_000),
             })
             .expect("config patch should apply");
 
@@ -1200,6 +1311,24 @@ mod tests {
         assert_eq!(config.max_height, 1080);
         assert_eq!(config.max_fps, 12);
         assert_eq!(config.codec, "jpeg-frame-stream");
+        assert_eq!(config.source_rect_x_ppm, 100_000);
+        assert_eq!(config.source_rect_y_ppm, 200_000);
+        assert_eq!(config.source_rect_width_ppm, 500_000);
+        assert_eq!(config.source_rect_height_ppm, 400_000);
+    }
+
+    #[test]
+    fn capture_config_patch_rejects_out_of_bounds_source_rect() {
+        let mut config = CaptureConfig::default();
+        let error = config
+            .apply_patch(&CaptureConfigPatch {
+                source_rect_x_ppm: Some(800_000),
+                source_rect_width_ppm: Some(300_000),
+                ..CaptureConfigPatch::default()
+            })
+            .expect_err("source rect outside the desktop should be rejected");
+
+        assert_eq!(error, "capture config source rect must stay within [0,1]");
     }
 
     #[test]
