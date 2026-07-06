@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const DEFAULT_CAPTURE_MAX_WIDTH: u32 = 1280;
 const DEFAULT_CAPTURE_MAX_HEIGHT: u32 = 720;
 const DEFAULT_CAPTURE_MAX_FPS: u16 = 24;
+const DEFAULT_CAPTURE_MAX_BITRATE: u32 = 8_000_000;
 const DEFAULT_CAPTURE_CODEC: &str = "jpeg-frame-stream";
 const CAPTURE_STREAM_BOUNDARY: &str = "rdframe";
 const CAPTURE_STREAM_PATH: &str = "/capture.mjpeg";
@@ -80,6 +81,7 @@ pub struct CaptureConfig {
     pub max_width: u32,
     pub max_height: u32,
     pub max_fps: u16,
+    pub max_bitrate: u32,
     pub codec: String,
     pub source_rect_x_ppm: u32,
     pub source_rect_y_ppm: u32,
@@ -93,6 +95,7 @@ impl Default for CaptureConfig {
             max_width: DEFAULT_CAPTURE_MAX_WIDTH,
             max_height: DEFAULT_CAPTURE_MAX_HEIGHT,
             max_fps: DEFAULT_CAPTURE_MAX_FPS,
+            max_bitrate: DEFAULT_CAPTURE_MAX_BITRATE,
             codec: DEFAULT_CAPTURE_CODEC.to_string(),
             source_rect_x_ppm: 0,
             source_rect_y_ppm: 0,
@@ -121,6 +124,12 @@ impl CaptureConfig {
                 return Err("capture config max_fps must be greater than 0".to_string());
             }
             self.max_fps = max_fps;
+        }
+        if let Some(max_bitrate) = patch.max_bitrate {
+            if max_bitrate == 0 {
+                return Err("capture config max_bitrate must be greater than 0".to_string());
+            }
+            self.max_bitrate = max_bitrate;
         }
         if let Some(codec) = patch.codec.as_ref() {
             let codec = codec.trim();
@@ -161,6 +170,8 @@ pub struct CaptureConfigPatch {
     pub max_height: Option<u32>,
     #[serde(default)]
     pub max_fps: Option<u16>,
+    #[serde(default)]
+    pub max_bitrate: Option<u32>,
     #[serde(default)]
     pub codec: Option<String>,
     #[serde(default)]
@@ -673,10 +684,11 @@ pub fn capture_update_config(patch: CaptureConfigPatch) -> Result<CaptureStatus,
         trace_capture(
             "config.updated",
             format!(
-                "max_width={} max_height={} max_fps={} codec={} source_rect_ppm={},{},{},{}",
+                "max_width={} max_height={} max_fps={} max_bitrate={} codec={} source_rect_ppm={},{},{},{}",
                 state.config.max_width,
                 state.config.max_height,
                 state.config.max_fps,
+                state.config.max_bitrate,
                 state.config.codec,
                 state.config.source_rect_x_ppm,
                 state.config.source_rect_y_ppm,
@@ -1289,6 +1301,16 @@ mod tests {
             .expect_err("zero width should be rejected");
 
         assert_eq!(error, "capture config max_width must be greater than 0");
+
+        let mut config = CaptureConfig::default();
+        let error = config
+            .apply_patch(&CaptureConfigPatch {
+                max_bitrate: Some(0),
+                ..CaptureConfigPatch::default()
+            })
+            .expect_err("zero bitrate should be rejected");
+
+        assert_eq!(error, "capture config max_bitrate must be greater than 0");
     }
 
     #[test]
@@ -1299,6 +1321,7 @@ mod tests {
                 max_width: Some(1920),
                 max_height: Some(1080),
                 max_fps: Some(12),
+                max_bitrate: Some(14_000_000),
                 codec: Some("jpeg-frame-stream".to_string()),
                 source_rect_x_ppm: Some(100_000),
                 source_rect_y_ppm: Some(200_000),
@@ -1310,6 +1333,7 @@ mod tests {
         assert_eq!(config.max_width, 1920);
         assert_eq!(config.max_height, 1080);
         assert_eq!(config.max_fps, 12);
+        assert_eq!(config.max_bitrate, 14_000_000);
         assert_eq!(config.codec, "jpeg-frame-stream");
         assert_eq!(config.source_rect_x_ppm, 100_000);
         assert_eq!(config.source_rect_y_ppm, 200_000);
@@ -1335,6 +1359,7 @@ mod tests {
     fn capture_config_default_uses_interactive_fps() {
         let config = CaptureConfig::default();
         assert_eq!(config.max_fps, 24);
+        assert_eq!(config.max_bitrate, 8_000_000);
     }
 
     #[test]

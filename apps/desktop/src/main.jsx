@@ -251,10 +251,10 @@ const ANDROID_PHONE_SESSION_MAX_SCALE_DOWN_BY = 1.0
 const ANDROID_PHONE_INTERACTIVE_MAX_WIDTH = 384
 const ANDROID_PHONE_INTERACTIVE_MAX_HEIGHT = 250
 const ANDROID_PHONE_INTERACTIVE_MAX_FPS = 30
-// 作者: long；WebRTC/H.264 主链路不再受 legacy JPEG 的 800px 档限制，全屏查看先给足真实像素，再由输入态临时降档保证跟手。
-const ANDROID_PHONE_FULLSCREEN_MAX_WIDTH = CAPTURE_MAX_WIDTH
-const ANDROID_PHONE_FULLSCREEN_MAX_HEIGHT = CAPTURE_MAX_HEIGHT
-const ANDROID_PHONE_FULLSCREEN_MAX_FPS = 24
+// 作者: long；MTK 软件 AVC 在 1664x1072 会掉到十几帧，全屏高清守在 1280x832 这个可持续档，避免从“糊”修成“卡”。
+const ANDROID_PHONE_FULLSCREEN_MAX_WIDTH = 1280
+const ANDROID_PHONE_FULLSCREEN_MAX_HEIGHT = 832
+const ANDROID_PHONE_FULLSCREEN_MAX_FPS = 20
 const ANDROID_PHONE_FULLSCREEN_MAX_BITRATE = 18000000
 const ANDROID_PHONE_PINCH_PREVIEW_MAX_WIDTH = 320
 const ANDROID_PHONE_PINCH_PREVIEW_MAX_HEIGHT = 208
@@ -4567,6 +4567,7 @@ async function applyNativeSenderCaptureConfig(sessionId, options = {}) {
     maxWidth: profile.maxWidth,
     maxHeight: profile.maxHeight,
     maxFps: Math.max(1, Math.min(profile.maxFps, CAPTURE_DIRECT_TRACK_MAX_FPS)),
+    maxBitrate: profile.maxBitrate,
     // 作者: long；WebRTC/H.264 native sender 是当前主链路，受控端直接取 raw BGRA 做 H.264 编码；legacy JPEG 只保留为首帧失败后的独立兜底流。
     codec: NATIVE_CAPTURE_RAW_BGRA_CODEC,
     ...androidPhoneCaptureSourceRectPatch(options),
@@ -4582,6 +4583,7 @@ async function applyNativeSenderCaptureConfig(sessionId, options = {}) {
       max_width: patch.maxWidth,
       max_height: patch.maxHeight,
       max_fps: patch.maxFps,
+      max_bitrate: patch.maxBitrate,
       codec: patch.codec,
       source_rect: `${patch.sourceRectXPpm},${patch.sourceRectYPpm},${patch.sourceRectWidthPpm},${patch.sourceRectHeightPpm}`,
       reason: options.reason || "-",
@@ -4622,7 +4624,7 @@ function buildAndroidPhoneFullscreenNativeProfile() {
     maxWidth: Math.min(clearProfile.maxWidth, ANDROID_PHONE_FULLSCREEN_MAX_WIDTH),
     maxHeight: Math.min(clearProfile.maxHeight, ANDROID_PHONE_FULLSCREEN_MAX_HEIGHT),
     maxFps: Math.min(clearProfile.maxFps, ANDROID_PHONE_FULLSCREEN_MAX_FPS),
-    maxBitrate: Math.min(clearProfile.maxBitrate, ANDROID_PHONE_FULLSCREEN_MAX_BITRATE),
+    maxBitrate: ANDROID_PHONE_FULLSCREEN_MAX_BITRATE,
     scaleResolutionDownBy: 1,
   }
 }
@@ -6628,6 +6630,7 @@ async function applyNativeFallbackProfile(profile) {
         maxWidth: effectiveProfile.maxWidth,
         maxHeight: effectiveProfile.maxHeight,
         maxFps: effectiveProfile.maxFps,
+        maxBitrate: effectiveProfile.maxBitrate,
         codec: NATIVE_CAPTURE_FALLBACK_CODEC,
       },
     }))
@@ -8404,6 +8407,7 @@ async function ensureNativeFallbackCaptureConfig() {
         maxWidth: profile.maxWidth,
         maxHeight: profile.maxHeight,
         maxFps: Math.max(1, Math.min(NATIVE_CAPTURE_FALLBACK_MAX_FPS, profile.maxFps)),
+        maxBitrate: profile.maxBitrate,
         codec: NATIVE_CAPTURE_FALLBACK_CODEC,
       },
     }))

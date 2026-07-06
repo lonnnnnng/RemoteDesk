@@ -255,7 +255,9 @@ const NATIVE_SENDER_PROBE_SAMPLE_WINDOW_MS: u64 = 2000;
 const NATIVE_SENDER_INTRA_PERIOD_SECONDS: u32 = 4;
 const NATIVE_SENDER_FORCE_INTRA_INTERVAL_FRAMES: u64 = 156;
 const NATIVE_SENDER_ENCODER_THREADS: u16 = 4;
-const NATIVE_SENDER_H264_BITRATE_BPS: u32 = 8_000_000;
+const NATIVE_SENDER_H264_DEFAULT_BITRATE_BPS: u32 = 8_000_000;
+const NATIVE_SENDER_H264_MIN_BITRATE_BPS: u32 = 450_000;
+const NATIVE_SENDER_H264_MAX_BITRATE_BPS: u32 = 24_000_000;
 const NATIVE_SENDER_H264_NAL_LOG_LIMIT: u64 = 12;
 // 作者: long；SDP 必须贴合 OpenH264 实际 SPS 的 constraint bits，Level 显式抬到 4.0 才能覆盖手机全屏和桌面 Retina 输入面。
 const NATIVE_SENDER_H264_FMTP_LINE: &str =
@@ -555,9 +557,23 @@ fn normalize_signal_direction(direction: &str) -> &'static str {
     }
 }
 
-fn build_h264_encoder(target_fps: u16) -> Result<Encoder, String> {
+fn native_sender_h264_bitrate_bps(configured_bitrate_bps: u32) -> u32 {
+    // 作者: long；JS 档位以 bps 下发清晰度目标，Rust 编码器做最后边界保护，避免异常配置把远控全屏压回糊屏或拖垮软件编码线程。
+    let requested_bitrate_bps = if configured_bitrate_bps == 0 {
+        NATIVE_SENDER_H264_DEFAULT_BITRATE_BPS
+    } else {
+        configured_bitrate_bps
+    };
+    requested_bitrate_bps.clamp(
+        NATIVE_SENDER_H264_MIN_BITRATE_BPS,
+        NATIVE_SENDER_H264_MAX_BITRATE_BPS,
+    )
+}
+
+fn build_h264_encoder(target_fps: u16, target_bitrate_bps: u32) -> Result<Encoder, String> {
     let fps_u16 = target_fps.max(1);
     let fps = fps_u16 as f32;
+    let bitrate_bps = native_sender_h264_bitrate_bps(target_bitrate_bps);
     let intra_period_frames =
         u32::from(fps_u16.max(10)).saturating_mul(NATIVE_SENDER_INTRA_PERIOD_SECONDS);
     let intra_period = IntraFramePeriod::from_num_frames(intra_period_frames);
@@ -570,7 +586,7 @@ fn build_h264_encoder(target_fps: u16) -> Result<Encoder, String> {
         .level(Level::Level_4_0)
         // 作者: long；远控解码端可能在 ICE 连通后才真正创建 H.264 decoder，IDR 附近持续带 SPS/PPS 能让迟到的接收端不必等下一轮参数集。
         .sps_pps_strategy(SpsPpsStrategy::SpsPpsListing)
-        .bitrate(BitRate::from_bps(NATIVE_SENDER_H264_BITRATE_BPS))
+        .bitrate(BitRate::from_bps(bitrate_bps))
         .max_frame_rate(FrameRate::from_hz(fps))
         .intra_frame_period(intra_period)
         // 作者: long；真机远控的帧率低点集中在关键帧和高码率窗口，拉长周期关键帧并增加编码线程，为连续桌面画面留出稳定余量。
@@ -1391,7 +1407,7 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
             let mut sample_started_at = now_ms();
             let mut first_frame_logged = false;
             let mut h264_encoder: Option<Encoder> = None;
-            let mut h264_encoder_signature: Option<(u32, u32, u16)> = None;
+            let mut h264_encoder_signature: Option<(u32, u32, u16, u32)> = None;
             let mut published_frames = 0_u64;
             let mut last_publish_error_ts = 0_u64;
             let mut force_intra_counter = 0_u64;
@@ -1457,18 +1473,21 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
 
                         let maybe_track = shadow_video_track_for_session(session_for_thread.as_str());
                         if let Some(track) = maybe_track {
-                            let capture_fps = crate::capture::capture_status()
+                            let capture_config = crate::capture::capture_status()
                                 .ok()
-                                .map(|status| status.config.max_fps.max(1))
-                                .unwrap_or(24);
+                                .map(|status| status.config)
+                                .unwrap_or_default();
+                            let capture_fps = capture_config.max_fps.max(1);
+                            let capture_bitrate_bps =
+                                native_sender_h264_bitrate_bps(capture_config.max_bitrate);
                             loop_target_interval_ms =
                                 target_loop_interval_ms(u32::from(capture_fps));
                             let frame_duration_ms = loop_target_interval_ms.max(1);
                             let encoder_signature =
-                                (frame.frame_width, frame.frame_height, capture_fps);
+                                (frame.frame_width, frame.frame_height, capture_fps, capture_bitrate_bps);
                             if h264_encoder_signature != Some(encoder_signature) {
                                 h264_encoder = None;
-                                match build_h264_encoder(capture_fps) {
+                                match build_h264_encoder(capture_fps, capture_bitrate_bps) {
                                     Ok(encoder) => {
                                         h264_encoder = Some(encoder);
                                         h264_encoder_signature = Some(encoder_signature);
@@ -1482,7 +1501,7 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                                                 frame.frame_height,
                                                 capture_fps,
                                                 NATIVE_SENDER_ENCODER_THREADS,
-                                                NATIVE_SENDER_H264_BITRATE_BPS,
+                                                capture_bitrate_bps,
                                                 NATIVE_SENDER_INTRA_PERIOD_SECONDS,
                                                 NATIVE_SENDER_FORCE_INTRA_INTERVAL_FRAMES
                                             ),
@@ -2221,6 +2240,28 @@ mod tests {
     }
 
     #[test]
+    fn h264_bitrate_uses_capture_profile_with_bounds() {
+        const ANDROID_PHONE_FULLSCREEN_TEST_BITRATE_BPS: u32 = 18_000_000;
+
+        assert_eq!(
+            native_sender_h264_bitrate_bps(ANDROID_PHONE_FULLSCREEN_TEST_BITRATE_BPS),
+            ANDROID_PHONE_FULLSCREEN_TEST_BITRATE_BPS
+        );
+        assert_eq!(
+            native_sender_h264_bitrate_bps(0),
+            NATIVE_SENDER_H264_DEFAULT_BITRATE_BPS
+        );
+        assert_eq!(
+            native_sender_h264_bitrate_bps(1),
+            NATIVE_SENDER_H264_MIN_BITRATE_BPS
+        );
+        assert_eq!(
+            native_sender_h264_bitrate_bps(48_000_000),
+            NATIVE_SENDER_H264_MAX_BITRATE_BPS
+        );
+    }
+
+    #[test]
     fn h264_sample_info_extracts_sps_profile_level_id() {
         let sample = [
             0, 0, 0, 1, 0x67, 0x42, 0xe0, 0x28, 0xaa, 0xbb, 0, 0, 0, 1, 0x68, 0xcc, 0, 0, 0, 1,
@@ -2235,7 +2276,8 @@ mod tests {
 
     #[test]
     fn h264_encoder_reports_current_sps_profile_level_id() {
-        let mut encoder = build_h264_encoder(24).expect("h264 encoder should initialize");
+        let mut encoder = build_h264_encoder(24, NATIVE_SENDER_H264_DEFAULT_BITRATE_BPS)
+            .expect("h264 encoder should initialize");
         encoder.force_intra_frame();
         let rgb = vec![0_u8; 320 * 240 * 3];
         let source = RgbSliceU8::new(&rgb, (320, 240));

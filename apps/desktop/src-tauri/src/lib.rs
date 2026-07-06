@@ -978,6 +978,7 @@ pub fn run_desktop_self_test() -> DesktopSelfTestReport {
             max_width: Some(config.max_width),
             max_height: Some(config.max_height),
             max_fps: Some(config.max_fps),
+            max_bitrate: Some(config.max_bitrate),
             codec: Some(config.codec),
             source_rect_x_ppm: Some(config.source_rect_x_ppm),
             source_rect_y_ppm: Some(config.source_rect_y_ppm),
