@@ -9346,6 +9346,10 @@ private val REMOTE_DESK_MTK_DIRECT_H264_CODEC_NAMES = listOf(
   "OMX.google.avc.decoder",
   "OMX.google.h264.decoder",
 )
+private val REMOTE_DESK_MTK_DIRECT_HARDWARE_H264_CODEC_NAMES = listOf(
+  "c2.mtk.avc.decoder",
+  "OMX.MTK.VIDEO.DECODER.AVC",
+)
 private val REMOTE_DESK_MTK_PREFERRED_H264_COLOR_FORMATS = listOf(
   MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible,
   MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar,
@@ -9439,14 +9443,20 @@ private fun remoteDeskPreferredAvcColorFormats(codecName: String, sharedContext:
   val selected = if (sharedContext != null) {
     listOf(REMOTE_DESK_WEBRTC_AVC_COLOR_FORMATS.first())
   } else {
-    REMOTE_DESK_WEBRTC_AVC_COLOR_FORMATS
+    REMOTE_DESK_WEBRTC_AVC_COLOR_FORMATS.take(2)
   }
   Log.i(
     "RemoteDeskRtc",
-    "decoder_color_formats_selected codec_name=$codecName selected=${selected.joinToString(",")} source=webrtc_allowed_static output_mode=${if (sharedContext != null) "texture" else "byte_buffer"}",
+    "decoder_color_formats_selected codec_name=$codecName selected=${selected.joinToString(",")} source=webrtc_allowed_static_no_enumeration output_mode=${if (sharedContext != null) "texture" else "byte_buffer"}",
   )
   return selected
 }
+
+private fun remoteDeskDirectH264DecoderKey(
+  codecName: String,
+  colorFormat: Int,
+  sharedContext: EglBase.Context?,
+): String = "$codecName:$colorFormat:${if (sharedContext != null) "texture" else "byte_buffer"}"
 
 // 作者: long；反射构造失败时真实原因包在 InvocationTargetException 里，日志必须展开到内层异常，才能区分颜色格式拒绝和 codec 本身不可用。
 private fun remoteDeskDecoderCreateErrorMessage(error: Throwable): String {
@@ -9499,13 +9509,26 @@ private class RemoteDeskMtkSafeH264DecoderFactory(
       logCreateDecoder(codecInfo, "webrtc_software_h264")
       return RemoteDeskLoggingVideoDecoder("webrtc-software-h264", softwareDecoder)
     }
-    // 作者: long；WebRTC 纯软件 H.264 不可用时，才按固定软件 AVC 名称直建 AndroidVideoDecoder，避免全量 MediaCodec 枚举重新选到 MTK 硬解零帧路径。
-    val decoder = createDirectSoftwareAvcDecoder()
+    // 作者: long；WebRTC 纯软件 H.264 不可用时，先按固定 MTK 硬解名直建，避免全量 MediaCodec 枚举；SPS/PPS 连续后需要重新验证硬解是否仍然零帧。
+    val hardwareDecoder = createDirectHardwareAvcDecoder()
+    val softwareDecoder = createDirectSoftwareAvcDecoder()
+    val decoder = when {
+      hardwareDecoder != null && softwareDecoder != null -> VideoDecoderFallback(softwareDecoder, hardwareDecoder)
+      hardwareDecoder != null -> hardwareDecoder
+      else -> softwareDecoder
+    }
     if (decoder == null) {
       logCreateDecoder(codecInfo, "direct_software_avc_unavailable:${directDecoderError.ifBlank { "-" }}")
       return null
     }
-    logCreateDecoder(codecInfo, "direct_software_avc")
+    logCreateDecoder(
+      codecInfo,
+      when {
+        hardwareDecoder != null && softwareDecoder != null -> "direct_hardware_avc_with_software_fallback"
+        hardwareDecoder != null -> "direct_hardware_avc"
+        else -> "direct_software_avc"
+      },
+    )
     return decoder
   }
 
@@ -9556,12 +9579,35 @@ private class RemoteDeskMtkSafeH264DecoderFactory(
     }
   }
 
+  private fun createDirectHardwareAvcDecoder(): VideoDecoder? {
+    val directDecoderEglContext = eglContext
+    if (directDecoderEglContext == null) {
+      Log.w("RemoteDeskRtc", "decoder_direct_hardware_h264_unavailable reason=missing_egl_context")
+      return null
+    }
+    // 作者: long；MTK 机型不能在建链阶段枚举硬解，但按厂商固定名称直建可以验证真正解码路径，避免一直卡在软件 codec 服务初始化。
+    val decoders = REMOTE_DESK_MTK_DIRECT_HARDWARE_H264_CODEC_NAMES.mapNotNull { codecName ->
+      val colorFormat = remoteDeskPreferredAvcColorFormats(codecName, directDecoderEglContext).firstOrNull()
+        ?: return@mapNotNull null
+      createDirectAndroidVideoDecoder(codecName, colorFormat, directDecoderEglContext)
+    }
+    if (decoders.isEmpty()) {
+      return null
+    }
+    var decoder = decoders.last()
+    for (index in decoders.size - 2 downTo 0) {
+      decoder = VideoDecoderFallback(decoder, decoders[index])
+    }
+    return decoder
+  }
+
   private fun createDirectSoftwareAvcDecoder(): VideoDecoder? {
     // 作者: long；这台 MTK Android 14 设备在 WebRTC 的 MediaCodecVideoDecoderFactory 全量枚举阶段会卡住，
-    // 这里按系统软件 AVC 的稳定 codec 名直建 AndroidVideoDecoder，让 H.264 接收链路避开枚举死锁；有 EGL 时走 texture 输出，避免 byte-buffer 初始化拖死首帧。
+    // 这里按系统软件 AVC 的稳定 codec 名直建 AndroidVideoDecoder，让 H.264 接收链路避开枚举死锁；软件 AVC 强制走 byte-buffer，避免 surface 输出在 initDecode 阶段卡住首帧链路。
+    val directDecoderEglContext: EglBase.Context? = null
     val decoders = REMOTE_DESK_MTK_DIRECT_H264_CODEC_NAMES.flatMap { codecName ->
-      remoteDeskPreferredAvcColorFormats(codecName, eglContext).mapNotNull { colorFormat ->
-        createDirectAndroidVideoDecoder(codecName, colorFormat)
+      remoteDeskPreferredAvcColorFormats(codecName, directDecoderEglContext).mapNotNull { colorFormat ->
+        createDirectAndroidVideoDecoder(codecName, colorFormat, directDecoderEglContext)
       }
     }
     if (decoders.isEmpty()) {
@@ -9574,9 +9620,14 @@ private class RemoteDeskMtkSafeH264DecoderFactory(
     return decoder
   }
 
-  private fun createDirectAndroidVideoDecoder(codecName: String, colorFormat: Int): VideoDecoder? {
-    if (remoteDeskBlockedDirectH264Codecs.contains(codecName)) {
-      Log.w("RemoteDeskRtc", "decoder_direct_h264_skip_blocked codec_name=$codecName")
+  private fun createDirectAndroidVideoDecoder(
+    codecName: String,
+    colorFormat: Int,
+    decoderEglContext: EglBase.Context?,
+  ): VideoDecoder? {
+    val decoderKey = remoteDeskDirectH264DecoderKey(codecName, colorFormat, decoderEglContext)
+    if (remoteDeskBlockedDirectH264Codecs.contains(decoderKey)) {
+      Log.w("RemoteDeskRtc", "decoder_direct_h264_skip_blocked decoder_key=$decoderKey")
       return null
     }
     return try {
@@ -9601,20 +9652,20 @@ private class RemoteDeskMtkSafeH264DecoderFactory(
         codecName,
         h264Type,
         colorFormat,
-        eglContext,
+        decoderEglContext,
       ) as VideoDecoder
       directDecoderError = ""
       Log.i(
         "RemoteDeskRtc",
-        "decoder_direct_h264_created codec_name=$codecName color_format=$colorFormat output_mode=${if (eglContext != null) "texture" else "byte_buffer"} shared_context_available=${eglContext != null} reflection=true",
+        "decoder_direct_h264_created codec_name=$codecName color_format=$colorFormat output_mode=${if (decoderEglContext != null) "texture" else "byte_buffer"} renderer_context_available=${eglContext != null} shared_context_available=${decoderEglContext != null} reflection=true",
       )
-      RemoteDeskLoggingVideoDecoder(codecName, decoder)
+      RemoteDeskLoggingVideoDecoder("$codecName/$colorFormat", decoder, decoderKey)
     } catch (error: Throwable) {
       val reason = remoteDeskDecoderCreateErrorMessage(error)
-      directDecoderError = "$codecName:$colorFormat:$reason"
+      directDecoderError = "$decoderKey:$reason"
       Log.w(
         "RemoteDeskRtc",
-        "decoder_direct_h264_create_failed codec_name=$codecName color_format=$colorFormat reason=$reason",
+        "decoder_direct_h264_create_failed decoder_key=$decoderKey codec_name=$codecName color_format=$colorFormat reason=$reason",
       )
       null
     }
@@ -9636,6 +9687,7 @@ private class RemoteDeskMtkSafeH264DecoderFactory(
 private class RemoteDeskLoggingVideoDecoder(
   private val codecName: String,
   private val delegate: VideoDecoder,
+  private val directBlockKey: String? = null,
 ) : VideoDecoder {
   @Volatile private var initLogCount = 0
   @Volatile private var decodeLogCount = 0
@@ -9652,6 +9704,12 @@ private class RemoteDeskLoggingVideoDecoder(
   }
 
   override fun initDecode(settings: VideoDecoder.Settings, callback: VideoDecoder.Callback): VideoCodecStatus {
+    directBlockKey?.let { key ->
+      if (remoteDeskBlockedDirectH264Codecs.contains(key)) {
+        Log.w("RemoteDeskRtc", "decoder_init_skip_blocked decoder_key=$key codec_name=$codecName")
+        return VideoCodecStatus.FALLBACK_SOFTWARE
+      }
+    }
     val initCount = initLogCount + 1
     initLogCount = initCount
     Log.i(
@@ -9767,8 +9825,10 @@ private class RemoteDeskLoggingVideoDecoder(
       // 作者: long；MTK 真机上部分软件 AVC 名称会在 MediaCodec configure/start 阶段长时间卡住，
       // 这里同步返回 fallback 状态，让 WebRTC 继续试下一个 decoder，而不是把首帧链路堵死。
       if (operation == "initDecode" && timedOut) {
-        remoteDeskBlockedDirectH264Codecs.add(codecName)
-        Log.w("RemoteDeskRtc", "decoder_direct_h264_blocked codec_name=$codecName reason=init_timeout timeout_ms=$timeoutMs")
+        directBlockKey?.let { key ->
+          remoteDeskBlockedDirectH264Codecs.add(key)
+          Log.w("RemoteDeskRtc", "decoder_direct_h264_blocked decoder_key=$key codec_name=$codecName reason=init_timeout timeout_ms=$timeoutMs")
+        }
       }
       Log.w(
         "RemoteDeskRtc",
