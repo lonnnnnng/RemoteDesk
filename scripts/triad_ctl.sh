@@ -416,6 +416,24 @@ android_launch_target_device_id() {
   fi
 }
 
+wake_android_for_foreground_launch() {
+  # 作者: long；真机回归时设备常停在锁屏或通知栏，直接 am start 会让 Activity 立刻 pause，媒体链路看起来像解码零帧。
+  adb_cmd shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+  adb_cmd shell wm dismiss-keyguard >/dev/null 2>&1 || true
+  adb_cmd shell input keyevent 82 >/dev/null 2>&1 || true
+}
+
+wait_for_android_activity_foreground() {
+  local deadline=$((SECONDS + 12))
+  while (( SECONDS < deadline )); do
+    if adb_cmd shell dumpsys window 2>/dev/null | grep -E "mCurrentFocus=.*${RD_ANDROID_ACTIVITY%%/*}|mFocusedApp=.*${RD_ANDROID_ACTIVITY%%/*}" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 launch_android_app() {
   local ws_url
   local target_device_id
@@ -435,7 +453,13 @@ launch_android_app() {
     cmd+=(--ez rd_auto_proof_input true)
   fi
   log "launching android app ${RD_ANDROID_ACTIVITY} serial=${RD_ANDROID_SERIAL:-default} ws=${ws_url} target=${target_device_id:-manual}"
+  wake_android_for_foreground_launch
   adb_cmd "${cmd[@]}" >/dev/null
+  if wait_for_android_activity_foreground; then
+    log "android app is foreground"
+  else
+    warn "android app did not stay foreground after launch; media validation may be paused by lockscreen or launcher"
+  fi
 }
 
 screen_has_session() {

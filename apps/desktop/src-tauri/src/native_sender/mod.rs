@@ -1,6 +1,6 @@
 use openh264::encoder::{
-    BitRate, Complexity, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, Profile,
-    RateControlMode, SpsPpsStrategy, UsageType,
+    BitRate, Complexity, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, Level,
+    Profile, RateControlMode, SpsPpsStrategy, UsageType,
 };
 use openh264::formats::{BgraSliceU8, RgbSliceU8, YUVBuffer};
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,10 @@ use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::offer_answer_options::RTCOfferOptions;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
-use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
+use webrtc::rtp_transceiver::rtp_codec::{
+    RTCRtpCodecCapability, RTCRtpCodecParameters, RTPCodecType,
+};
+use webrtc::rtp_transceiver::RTCPFeedback;
 use webrtc::stats::StatsReportType;
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
 
@@ -254,9 +257,10 @@ const NATIVE_SENDER_FORCE_INTRA_INTERVAL_FRAMES: u64 = 156;
 const NATIVE_SENDER_ENCODER_THREADS: u16 = 4;
 const NATIVE_SENDER_H264_BITRATE_BPS: u32 = 8_000_000;
 const NATIVE_SENDER_H264_NAL_LOG_LIMIT: u64 = 12;
-// 作者: long；手机全屏和桌面 Retina 场景会进入 1080p 以上输入面，SDP 不能继续声明 Level 3.1，否则部分 Android 解码器会建链成功但不吐首帧。
+// 作者: long；SDP 必须贴合 OpenH264 实际 SPS 的 constraint bits，Level 显式抬到 4.0 才能覆盖手机全屏和桌面 Retina 输入面。
 const NATIVE_SENDER_H264_FMTP_LINE: &str =
-    "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e028";
+    "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42c028";
+const NATIVE_SENDER_H264_PAYLOAD_TYPE: u8 = 102;
 
 #[derive(Debug, Clone)]
 struct H264SampleInfo {
@@ -267,6 +271,42 @@ struct H264SampleInfo {
     has_pps: bool,
     has_idr: bool,
     added_annexb_start_code: bool,
+    sps_profile_level_id: Option<String>,
+}
+
+fn native_sender_h264_rtcp_feedback() -> Vec<RTCPFeedback> {
+    vec![
+        RTCPFeedback {
+            typ: "goog-remb".to_owned(),
+            parameter: "".to_owned(),
+        },
+        RTCPFeedback {
+            typ: "ccm".to_owned(),
+            parameter: "fir".to_owned(),
+        },
+        RTCPFeedback {
+            typ: "nack".to_owned(),
+            parameter: "".to_owned(),
+        },
+        RTCPFeedback {
+            typ: "nack".to_owned(),
+            parameter: "pli".to_owned(),
+        },
+    ]
+}
+
+fn native_sender_h264_codec_parameters() -> RTCRtpCodecParameters {
+    RTCRtpCodecParameters {
+        capability: RTCRtpCodecCapability {
+            mime_type: MIME_TYPE_H264.to_string(),
+            clock_rate: 90_000,
+            channels: 0,
+            sdp_fmtp_line: NATIVE_SENDER_H264_FMTP_LINE.to_string(),
+            rtcp_feedback: native_sender_h264_rtcp_feedback(),
+        },
+        payload_type: NATIVE_SENDER_H264_PAYLOAD_TYPE,
+        ..Default::default()
+    }
 }
 
 fn target_loop_interval_ms(capture_fps: u32) -> u64 {
@@ -527,6 +567,7 @@ fn build_h264_encoder(target_fps: u16) -> Result<Encoder, String> {
         // 作者: long；真机远控优先把软件编码耗时压低，低复杂度换取鼠标移动时的可见帧率；码率抬到 1000p 文本放大的可读区间，避免缩放后被压缩块拖糊。
         .complexity(Complexity::Low)
         .profile(Profile::Baseline)
+        .level(Level::Level_4_0)
         // 作者: long；远控解码端可能在 ICE 连通后才真正创建 H.264 decoder，IDR 附近持续带 SPS/PPS 能让迟到的接收端不必等下一轮参数集。
         .sps_pps_strategy(SpsPpsStrategy::SpsPpsListing)
         .bitrate(BitRate::from_bps(NATIVE_SENDER_H264_BITRATE_BPS))
@@ -578,11 +619,20 @@ fn append_h264_nal_as_annexb(dst: &mut Vec<u8>, nal: &[u8], added_start_code: &m
     }
 }
 
+fn h264_sps_profile_level_id(nal: &[u8]) -> Option<String> {
+    if nal.len() < 4 || (nal[0] & 0x1f) != 7 {
+        return None;
+    }
+    // 作者: long；SDP 的 profile-level-id 必须和 SPS 头部保持可解释的一致性，否则 Android 可能接收 RTP 但在 H.264 组帧层提前丢弃。
+    Some(format!("{:02x}{:02x}{:02x}", nal[1], nal[2], nal[3]))
+}
+
 fn describe_h264_annexb_sample(encoded: &[u8], added_annexb_start_code: bool) -> H264SampleInfo {
     let mut nal_types = Vec::new();
     let mut has_sps = false;
     let mut has_pps = false;
     let mut has_idr = false;
+    let mut sps_profile_level_id = None;
     let has_annexb_start_code = find_h264_start_code(encoded, 0).is_some();
 
     if has_annexb_start_code {
@@ -601,6 +651,9 @@ fn describe_h264_annexb_sample(encoded: &[u8], added_annexb_start_code: bool) ->
                 has_sps |= nal_type == 7;
                 has_pps |= nal_type == 8;
                 has_idr |= nal_type == 5;
+                if sps_profile_level_id.is_none() && nal_type == 7 {
+                    sps_profile_level_id = h264_sps_profile_level_id(&encoded[nal_start..nal_end]);
+                }
                 nal_types.push(nal_type);
             }
             search_from = next_start;
@@ -610,6 +663,9 @@ fn describe_h264_annexb_sample(encoded: &[u8], added_annexb_start_code: bool) ->
         has_sps = nal_type == 7;
         has_pps = nal_type == 8;
         has_idr = nal_type == 5;
+        if has_sps {
+            sps_profile_level_id = h264_sps_profile_level_id(encoded);
+        }
         nal_types.push(nal_type);
     }
 
@@ -629,6 +685,7 @@ fn describe_h264_annexb_sample(encoded: &[u8], added_annexb_start_code: bool) ->
         has_pps,
         has_idr,
         added_annexb_start_code,
+        sps_profile_level_id,
     }
 }
 
@@ -637,8 +694,8 @@ fn crop_bgra_even(
 ) -> Result<(Cow<'_, [u8]>, u32, u32), String> {
     let width = frame.frame_width;
     let height = frame.frame_height;
-    let target_width = width - (width % 2);
-    let target_height = height - (height % 2);
+    let target_width = h264_macroblock_aligned_dimension(width);
+    let target_height = h264_macroblock_aligned_dimension(height);
     if target_width == 0 || target_height == 0 {
         return Err(format!(
             "native sender bgra frame size too small for YUV420: {}x{}",
@@ -671,8 +728,8 @@ fn crop_bgra_even(
 }
 
 fn crop_rgb_even(rgb_bytes: &[u8], width: u32, height: u32) -> Result<(Vec<u8>, u32, u32), String> {
-    let target_width = width - (width % 2);
-    let target_height = height - (height % 2);
+    let target_width = h264_macroblock_aligned_dimension(width);
+    let target_height = h264_macroblock_aligned_dimension(height);
     if target_width == 0 || target_height == 0 {
         return Err(format!(
             "native sender rgb frame size too small for YUV420: {}x{}",
@@ -702,6 +759,11 @@ fn crop_rgb_even(rgb_bytes: &[u8], width: u32, height: u32) -> Result<(Vec<u8>, 
             .copy_from_slice(&rgb_bytes[src_offset..src_offset + dst_row_bytes]);
     }
     Ok((cropped, target_width, target_height))
+}
+
+fn h264_macroblock_aligned_dimension(value: u32) -> u32 {
+    // 作者: long；Redmi/MTK 的 AVC 初始化会在 1440x930 这类非 16 对齐尺寸上卡住，native sender 统一裁到宏块边界，优先保证 Android 能稳定创建 decoder。
+    value - (value % 16)
 }
 
 fn decode_jpeg_to_rgb(
@@ -943,9 +1005,10 @@ fn create_shadow_peer_connection(
     ice_servers: Vec<RTCIceServer>,
 ) -> Result<(Arc<RTCPeerConnection>, Arc<TrackLocalStaticSample>), String> {
     let mut media_engine = MediaEngine::default();
+    // 作者: long；native sender 只会产出 OpenH264 Annex-B 样本，offer 里混入 VP8/VP9 会让 Android 协商日志和真实 RTP codec 脱节。
     media_engine
-        .register_default_codecs()
-        .map_err(|error| format!("native sender register_default_codecs failed: {error}"))?;
+        .register_codec(native_sender_h264_codec_parameters(), RTPCodecType::Video)
+        .map_err(|error| format!("native sender register_h264_codec failed: {error}"))?;
     let api = APIBuilder::new().with_media_engine(media_engine).build();
     let config = RTCConfiguration {
         ice_servers,
@@ -1482,7 +1545,7 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                                                     trace_native_sender(
                                                         "encoder.sample_published",
                                                         format!(
-                                                            "session={} count={} frame={}x{} duration_ms={} mime={} frame_type={:?} nal_count={} nal_types={} annexb_start={} sps={} pps={} idr={} added_annexb_start={}",
+                                                            "session={} count={} frame={}x{} duration_ms={} mime={} frame_type={:?} nal_count={} nal_types={} annexb_start={} sps={} pps={} idr={} sps_profile_level_id={} added_annexb_start={}",
                                                             session_for_thread,
                                                             published_frames,
                                                             frame.frame_width,
@@ -1496,6 +1559,7 @@ fn start_native_sender_worker(session_id: String) -> Result<(), String> {
                                                             h264_info.has_sps,
                                                             h264_info.has_pps,
                                                             h264_info.has_idr,
+                                                            h264_info.sps_profile_level_id.as_deref().unwrap_or("-"),
                                                             h264_info.added_annexb_start_code
                                                         ),
                                                     );
@@ -2127,9 +2191,75 @@ mod tests {
     fn h264_fmtp_declares_android_fullscreen_safe_level() {
         assert!(NATIVE_SENDER_H264_FMTP_LINE.contains("level-asymmetry-allowed=1"));
         assert!(NATIVE_SENDER_H264_FMTP_LINE.contains("packetization-mode=1"));
-        assert!(
-            NATIVE_SENDER_H264_FMTP_LINE
-                .contains("profile-level-id=42e028")
+        assert!(NATIVE_SENDER_H264_FMTP_LINE.contains("profile-level-id=42c028"));
+    }
+
+    #[test]
+    fn h264_only_codec_parameters_match_native_sender_track() {
+        let codec = native_sender_h264_codec_parameters();
+        assert_eq!(codec.payload_type, NATIVE_SENDER_H264_PAYLOAD_TYPE);
+        assert_eq!(codec.capability.mime_type, MIME_TYPE_H264);
+        assert_eq!(codec.capability.clock_rate, 90_000);
+        assert_eq!(codec.capability.sdp_fmtp_line, NATIVE_SENDER_H264_FMTP_LINE);
+        assert!(codec
+            .capability
+            .rtcp_feedback
+            .iter()
+            .any(|feedback| feedback.typ == "nack" && feedback.parameter == "pli"));
+        assert!(codec
+            .capability
+            .rtcp_feedback
+            .iter()
+            .any(|feedback| feedback.typ == "ccm" && feedback.parameter == "fir"));
+    }
+
+    #[test]
+    fn h264_capture_dimensions_are_macroblock_aligned() {
+        assert_eq!(h264_macroblock_aligned_dimension(1440), 1440);
+        assert_eq!(h264_macroblock_aligned_dimension(931), 928);
+        assert_eq!(h264_macroblock_aligned_dimension(333), 320);
+    }
+
+    #[test]
+    fn h264_sample_info_extracts_sps_profile_level_id() {
+        let sample = [
+            0, 0, 0, 1, 0x67, 0x42, 0xe0, 0x28, 0xaa, 0xbb, 0, 0, 0, 1, 0x68, 0xcc, 0, 0, 0, 1,
+            0x65, 0xdd,
+        ];
+        let info = describe_h264_annexb_sample(&sample, false);
+        assert!(info.has_sps);
+        assert!(info.has_pps);
+        assert!(info.has_idr);
+        assert_eq!(info.sps_profile_level_id.as_deref(), Some("42e028"));
+    }
+
+    #[test]
+    fn h264_encoder_reports_current_sps_profile_level_id() {
+        let mut encoder = build_h264_encoder(24).expect("h264 encoder should initialize");
+        encoder.force_intra_frame();
+        let rgb = vec![0_u8; 320 * 240 * 3];
+        let source = RgbSliceU8::new(&rgb, (320, 240));
+        let yuv = YUVBuffer::from_rgb8_source(source);
+        let bitstream = encoder
+            .encode(&yuv)
+            .expect("h264 encoder should encode a synthetic frame");
+        let mut encoded = Vec::new();
+        let mut added_start_code = false;
+        for layer_index in 0..bitstream.num_layers() {
+            let Some(layer) = bitstream.layer(layer_index) else {
+                continue;
+            };
+            for nal_index in 0..layer.nal_count() {
+                if let Some(nal) = layer.nal_unit(nal_index) {
+                    append_h264_nal_as_annexb(&mut encoded, nal, &mut added_start_code);
+                }
+            }
+        }
+        let info = describe_h264_annexb_sample(&encoded, added_start_code);
+        eprintln!(
+            "h264_encoder_current_sps_profile_level_id={}",
+            info.sps_profile_level_id.as_deref().unwrap_or("-")
         );
+        assert_eq!(info.sps_profile_level_id.as_deref(), Some("42c028"));
     }
 }

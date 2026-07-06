@@ -1,6 +1,7 @@
 package com.remotedesk.app.ui
 
 import android.app.Dialog
+import android.app.KeyguardManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContentValues
@@ -696,8 +697,7 @@ class MainActivity : AppCompatActivity() {
     super.onCreate(savedInstanceState)
     binding = ActivityMainBinding.inflate(layoutInflater)
     setContentView(binding.root)
-    // 作者: long；远控会话需要持续观察画面和接收手势，Activity 亮屏锁放在窗口层，避免只有视频 View 可见时才生效导致真机测试中途锁屏。
-    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    configureRemoteDeskForegroundWindow()
 
     binding.deviceIdText.text = "本机设备 ID：$deviceId"
     setStatus("未连接")
@@ -896,6 +896,24 @@ class MainActivity : AppCompatActivity() {
     // 作者: long；中继按 device_id 合并在线状态，安卓端跨重启复用同一 ID，避免一次真机反复连接后被展示成多台设备。
     preferences.edit { putString(PREF_DEVICE_ID, nextDeviceId) }
     return nextDeviceId
+  }
+
+  private fun configureRemoteDeskForegroundWindow() {
+    // 作者: long；真机媒体回归必须让控制端 Activity 持续在前台，否则 WebRTC 会停在锁屏/Launcher 后台，表现成 H.264 零帧但根因不是编码链路。
+    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+      setShowWhenLocked(true)
+      setTurnScreenOn(true)
+      getSystemService(KeyguardManager::class.java)?.requestDismissKeyguard(this, null)
+    } else {
+      @Suppress("DEPRECATION")
+      window.addFlags(
+        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+          WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+          WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD,
+      )
+    }
+    Log.i(RTC_TAG, "activity_foreground_window_configured sdk=${Build.VERSION.SDK_INT}")
   }
 
   override fun onDestroy() {
@@ -1785,9 +1803,17 @@ class MainActivity : AppCompatActivity() {
       null
     }
     val framesPerSecond = inboundMembers?.let { readMemberDouble(it, "framesPerSecond") }
+    val packetsReceived = inboundMembers?.let { readMemberLong(it, "packetsReceived") }
     val framesDecoded = inboundMembers?.let { readMemberLong(it, "framesDecoded") }
+    val framesReceived = inboundMembers?.let { readMemberLong(it, "framesReceived") }
+    val keyFramesDecoded = inboundMembers?.let { readMemberLong(it, "keyFramesDecoded") }
     val framesDropped = inboundMembers?.let { readMemberLong(it, "framesDropped") }
     val packetsLost = inboundMembers?.let { readMemberLong(it, "packetsLost") }
+    val pliCount = inboundMembers?.let { readMemberLong(it, "pliCount") }
+    val firCount = inboundMembers?.let { readMemberLong(it, "firCount") }
+    val nackCount = inboundMembers?.let { readMemberLong(it, "nackCount") }
+    val codecId = inboundMembers?.let { readMemberString(it, "codecId") }
+    val decoderImplementation = inboundMembers?.let { readMemberString(it, "decoderImplementation") }
     val jitterMs = inboundMembers?.let { readMemberDouble(it, "jitter") }?.times(1000.0)
     if (framesDropped != null && framesDropped >= 0L) {
       var droppedSpike = 0L
@@ -1854,11 +1880,16 @@ class MainActivity : AppCompatActivity() {
 
     val summary = buildString {
       append("recv_kbps=${formatMetric(recvKbps)} ")
+      append("packets_received=${packetsReceived ?: "-"} ")
       append("fps_decoded=${formatMetric(framesPerSecond)} ")
+      append("frames_received=${framesReceived ?: "-"} ")
       append("frames_decoded=${framesDecoded ?: "-"} ")
+      append("keyframes_decoded=${keyFramesDecoded ?: "-"} ")
       append("frames_dropped=${framesDropped ?: "-"} ")
       append("frames_dropped_spike_max=$rtcFramesDroppedSpikeMax ")
       append("packets_lost=${packetsLost ?: "-"} ")
+      append("pli=${pliCount ?: "-"} fir=${firCount ?: "-"} nack=${nackCount ?: "-"} ")
+      append("codec_id=${codecId ?: "-"} decoder_impl=${decoderImplementation ?: "-"} ")
       append("jitter_ms=${formatMetric(jitterMs)} ")
       append("rtt_ms=${formatMetric(rttMs)} ")
       append("avail_in_kbps=${formatMetric(availableIncomingKbps)} ")
@@ -2780,6 +2811,7 @@ class MainActivity : AppCompatActivity() {
       appendLog("忽略缺少 SDP 的 webrtc.offer")
       return
     }
+    Log.i(RTC_TAG, "recv_offer_video_sdp session=$messageSessionId ${summarizeSdpVideoSection(sdp)}")
     if (rtcNegotiationOwner != RTC_NEGOTIATION_OWNER_CONTROLLER) {
       rtcNegotiationOwner = RTC_NEGOTIATION_OWNER_REMOTE
       Log.i(RTC_TAG, "negotiation_owner session=$messageSessionId owner=$rtcNegotiationOwner reason=remote_offer")
@@ -2801,11 +2833,14 @@ class MainActivity : AppCompatActivity() {
             appendLog("创建 webrtc.answer 失败：answer 为空")
             return@SimpleSdpObserver
           }
+          val normalizedAnswer = normalizeRemoteDeskH264AnswerSdp(answer.description, sdp)
           Log.i(
             RTC_TAG,
-            "create_answer_ok session=$messageSessionId sdp_len=${answer.description.length} has_video=${answer.description.contains("m=video")}",
+            "create_answer_ok session=$messageSessionId sdp_len=${normalizedAnswer.length} has_video=${normalizedAnswer.contains("m=video")}",
           )
+          Log.i(RTC_TAG, "create_answer_video_sdp session=$messageSessionId ${summarizeSdpVideoSection(normalizedAnswer)}")
           Log.i(RTC_TAG, "set_local_answer_start session=$messageSessionId")
+          val localAnswer = SessionDescription(SessionDescription.Type.ANSWER, normalizedAnswer)
           peerConnection.setLocalDescription(SimpleSdpObserver(
             onSetSuccess = {
               val localSdp = peerConnection.localDescription?.description.orEmpty()
@@ -2813,8 +2848,9 @@ class MainActivity : AppCompatActivity() {
                 RTC_TAG,
                 "set_local_answer_ok session=$messageSessionId sdp_len=${localSdp.length} candidate_lines=${countSdpCandidateLines(localSdp)} has_ufrag=${localSdp.contains("a=ice-ufrag:")} has_pwd=${localSdp.contains("a=ice-pwd:")} has_video=${localSdp.contains("m=video")}",
               )
+              Log.i(RTC_TAG, "set_local_answer_video_sdp session=$messageSessionId ${summarizeSdpVideoSection(localSdp)}")
               sendSocketMessage(
-                controller.webrtcAnswerMessage(messageSessionId, localSdp.ifBlank { answer.description }),
+                controller.webrtcAnswerMessage(messageSessionId, localSdp.ifBlank { normalizedAnswer }),
                 "发送 webrtc.answer",
               )
             },
@@ -2822,7 +2858,7 @@ class MainActivity : AppCompatActivity() {
               Log.e(RTC_TAG, "set_local_answer_failed session=$messageSessionId reason=$reason")
               appendLog("设置本地 answer 失败：$reason")
             },
-          ), answer)
+          ), localAnswer)
         }, onCreateFailure = { reason ->
           Log.e(RTC_TAG, "create_answer_failed session=$messageSessionId reason=$reason")
           appendLog("创建 webrtc.answer 失败：$reason")
@@ -2850,6 +2886,7 @@ class MainActivity : AppCompatActivity() {
       appendLog("忽略缺少 SDP 的 webrtc.answer")
       return
     }
+    Log.i(RTC_TAG, "recv_answer_video_sdp session=$messageSessionId ${summarizeSdpVideoSection(sdp)}")
     val answer = SessionDescription(SessionDescription.Type.ANSWER, sdp)
     rtcPeerConnection?.setRemoteDescription(SimpleSdpObserver(
       onSetSuccess = {
@@ -3658,6 +3695,87 @@ class MainActivity : AppCompatActivity() {
     return sdp.lineSequence().count { line ->
       line.startsWith("a=candidate:", ignoreCase = true)
     }
+  }
+
+  private fun summarizeSdpVideoSection(sdp: String): String {
+    if (sdp.isBlank()) {
+      return "-"
+    }
+    val lines = mutableListOf<String>()
+    var inVideo = false
+    for (rawLine in sdp.lineSequence()) {
+      val line = rawLine.trim()
+      if (line.startsWith("m=", ignoreCase = true)) {
+        inVideo = line.startsWith("m=video", ignoreCase = true)
+        if (inVideo) {
+          lines += line
+        }
+        continue
+      }
+      if (!inVideo) {
+        continue
+      }
+      val keepLine = line.startsWith("a=mid:", ignoreCase = true) ||
+        line.startsWith("a=rtpmap:", ignoreCase = true) ||
+        line.startsWith("a=fmtp:", ignoreCase = true) ||
+        line.startsWith("a=rtcp-fb:", ignoreCase = true) ||
+        line.startsWith("a=setup:", ignoreCase = true) ||
+        line.startsWith("a=sendrecv", ignoreCase = true) ||
+        line.startsWith("a=recvonly", ignoreCase = true) ||
+        line.startsWith("a=sendonly", ignoreCase = true) ||
+        line.startsWith("a=inactive", ignoreCase = true) ||
+        line.startsWith("a=msid:", ignoreCase = true) ||
+        line.startsWith("a=ssrc:", ignoreCase = true)
+      if (keepLine) {
+        lines += line
+      }
+    }
+    // 作者: long；H.264 fmtp 通常排在默认 VP8/VP9 行之后，截断会把最关键的 profile-level-id 隐掉，导致三端联调误判协商结果。
+    return lines.joinToString("|").take(4000).ifBlank { "-" }
+  }
+
+  private fun normalizeRemoteDeskH264AnswerSdp(answerSdp: String, offerSdp: String): String {
+    val offeredProfile = extractRemoteDeskH264ProfileLevelId(offerSdp)
+    if (offeredProfile.isNullOrBlank() || answerSdp.isBlank()) {
+      return answerSdp
+    }
+    var changed = false
+    val normalized = answerSdp.lineSequence().joinToString("\r\n") { rawLine ->
+      val line = rawLine.trimEnd('\r')
+      if (
+        line.startsWith("a=fmtp:", ignoreCase = true) &&
+        line.contains("profile-level-id=", ignoreCase = true) &&
+        line.contains("packetization-mode=1", ignoreCase = true)
+      ) {
+        changed = true
+        line.replace(Regex("profile-level-id=[0-9A-Fa-f]{6}"), "profile-level-id=$offeredProfile")
+      } else {
+        line
+      }
+    }
+    if (changed) {
+      // 作者: long；Mac native sender 的 SPS 是协商事实源，Android answer 必须回同一个 profile-level-id，避免 SDP 与真实码流再次分叉。
+      Log.i(RTC_TAG, "h264_answer_profile_normalized offered_profile=$offeredProfile")
+      return normalized
+    }
+    return answerSdp
+  }
+
+  private fun extractRemoteDeskH264ProfileLevelId(sdp: String): String? {
+    var inVideo = false
+    for (rawLine in sdp.lineSequence()) {
+      val line = rawLine.trim()
+      if (line.startsWith("m=", ignoreCase = true)) {
+        inVideo = line.startsWith("m=video", ignoreCase = true)
+        continue
+      }
+      if (!inVideo || !line.startsWith("a=fmtp:", ignoreCase = true)) {
+        continue
+      }
+      val match = Regex("profile-level-id=([0-9A-Fa-f]{6})").find(line) ?: continue
+      return match.groupValues[1].lowercase()
+    }
+    return null
   }
 
   private fun extractSdpIceCandidates(sdp: String): List<SdpIceCandidateLine> {
@@ -9473,8 +9591,130 @@ private fun remoteDeskDecoderCreateErrorMessage(error: Throwable): String {
   }
 }
 
-// 作者: long；Mac native sender 现在声明 Baseline Level 4.0，Android 仍保留旧 3.1/High Profile，保证新全屏 H.264 和旧会话 SDP 都能被匹配。
-private val REMOTE_DESK_H264_PROFILE_LEVEL_IDS = listOf("42e028", "42e01f", "640c1f")
+private fun createRemoteDeskLoggingMediaCodecWrapperFactory(
+  codecName: String,
+  decoderKey: String,
+  wrapperFactoryClass: Class<*>,
+  wrapperImplClass: Class<*>,
+): Any {
+  val wrapperConstructor = wrapperImplClass.getDeclaredConstructor()
+  wrapperConstructor.isAccessible = true
+  val delegateFactory = wrapperConstructor.newInstance()
+  val wrapperClass = Class.forName("org.webrtc.MediaCodecWrapper")
+  return java.lang.reflect.Proxy.newProxyInstance(
+    wrapperFactoryClass.classLoader,
+    arrayOf(wrapperFactoryClass),
+  ) { _, method, args ->
+    if (method.name != "createByCodecName") {
+      return@newProxyInstance invokeRemoteDeskMediaCodecDelegate(delegateFactory, method, args)
+    }
+    val requestedCodec = (args?.firstOrNull() as? String)?.ifBlank { codecName } ?: codecName
+    val startedAtMs = SystemClock.elapsedRealtime()
+    Log.i(
+      "RemoteDeskRtc",
+      "decoder_media_codec_create_start decoder_key=$decoderKey codec_name=$requestedCodec",
+    )
+    try {
+      val wrapper = invokeRemoteDeskMediaCodecDelegate(delegateFactory, method, args)
+      val elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
+      Log.i(
+        "RemoteDeskRtc",
+        "decoder_media_codec_create_done decoder_key=$decoderKey codec_name=$requestedCodec elapsed_ms=$elapsedMs",
+      )
+      createRemoteDeskLoggingMediaCodecWrapper(
+        delegate = wrapper ?: throw IllegalStateException("MediaCodecWrapperFactory returned null"),
+        wrapperClass = wrapperClass,
+        codecName = requestedCodec,
+        decoderKey = decoderKey,
+      )
+    } catch (error: Throwable) {
+      val cause = remoteDeskReflectionCause(error)
+      val elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
+      Log.w(
+        "RemoteDeskRtc",
+        "decoder_media_codec_create_failed decoder_key=$decoderKey codec_name=$requestedCodec elapsed_ms=$elapsedMs reason=${cause.message ?: cause.javaClass.simpleName}",
+        cause,
+      )
+      throw cause
+    }
+  }
+}
+
+private fun createRemoteDeskLoggingMediaCodecWrapper(
+  delegate: Any,
+  wrapperClass: Class<*>,
+  codecName: String,
+  decoderKey: String,
+): Any {
+  return java.lang.reflect.Proxy.newProxyInstance(
+    wrapperClass.classLoader,
+    arrayOf(wrapperClass),
+  ) { _, method, args ->
+    val operation = method.name
+    val shouldLog = operation in setOf("configure", "start", "stop", "release")
+    val startedAtMs = if (shouldLog) SystemClock.elapsedRealtime() else 0L
+    if (operation == "configure") {
+      val format = args?.getOrNull(0)?.toString().orEmpty()
+      val hasSurface = args?.getOrNull(1) != null
+      val flags = args?.getOrNull(3) ?: "-"
+      Log.i(
+        "RemoteDeskRtc",
+        "decoder_media_codec_configure_start decoder_key=$decoderKey codec_name=$codecName surface=$hasSurface flags=$flags format=$format",
+      )
+    } else if (shouldLog) {
+      Log.i(
+        "RemoteDeskRtc",
+        "decoder_media_codec_${operation}_start decoder_key=$decoderKey codec_name=$codecName",
+      )
+    }
+    try {
+      val result = invokeRemoteDeskMediaCodecDelegate(delegate, method, args)
+      if (shouldLog) {
+        val elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
+        Log.i(
+          "RemoteDeskRtc",
+          "decoder_media_codec_${operation}_done decoder_key=$decoderKey codec_name=$codecName elapsed_ms=$elapsedMs",
+        )
+      }
+      result
+    } catch (error: Throwable) {
+      val cause = remoteDeskReflectionCause(error)
+      if (shouldLog) {
+        val elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
+        Log.w(
+          "RemoteDeskRtc",
+          "decoder_media_codec_${operation}_failed decoder_key=$decoderKey codec_name=$codecName elapsed_ms=$elapsedMs reason=${cause.message ?: cause.javaClass.simpleName}",
+          cause,
+        )
+      }
+      throw cause
+    }
+  }
+}
+
+private fun invokeRemoteDeskMediaCodecDelegate(
+  delegate: Any,
+  method: java.lang.reflect.Method,
+  args: Array<Any?>?,
+): Any? {
+  val delegateMethod = delegate.javaClass.getMethod(method.name, *method.parameterTypes)
+  delegateMethod.isAccessible = true
+  return try {
+    delegateMethod.invoke(delegate, *(args ?: emptyArray()))
+  } catch (error: Throwable) {
+    throw remoteDeskReflectionCause(error)
+  }
+}
+
+private fun remoteDeskReflectionCause(error: Throwable): Throwable =
+  when (error) {
+    is java.lang.reflect.InvocationTargetException -> error.targetException ?: error
+    is java.util.concurrent.ExecutionException -> error.cause ?: error
+    else -> error
+  }
+
+// 作者: long；Mac native sender 的 OpenH264 SPS 使用 42c0 约束位，Android 解码能力列表必须优先匹配真实码流，再保留旧 42e0/High Profile 兼容会话。
+private val REMOTE_DESK_H264_PROFILE_LEVEL_IDS = listOf("42c028", "42c01e", "42e028", "42e01f", "640c1f")
 
 private fun remoteDeskH264Codec(profileLevelId: String): VideoCodecInfo =
   VideoCodecInfo(
@@ -9509,36 +9749,23 @@ private class RemoteDeskMtkSafeH264DecoderFactory(
       logCreateDecoder(codecInfo, "webrtc_software_h264")
       return RemoteDeskLoggingVideoDecoder("webrtc-software-h264", softwareDecoder)
     }
-    // 作者: long；WebRTC 纯软件 H.264 不可用时，先按固定 MTK 硬解名直建，避免全量 MediaCodec 枚举；SPS/PPS 连续后需要重新验证硬解是否仍然零帧。
-    val hardwareDecoder = createDirectHardwareAvcDecoder()
-    val softwareDecoder = createDirectSoftwareAvcDecoder()
-    val decoder = when {
-      hardwareDecoder != null && softwareDecoder != null -> VideoDecoderFallback(softwareDecoder, hardwareDecoder)
-      hardwareDecoder != null -> hardwareDecoder
-      else -> softwareDecoder
-    }
+    // 作者: long；这台 MTK 机型的厂商 AVC 硬解历史上会建链后零帧，本轮先把硬解从主路径拿掉，避免它在 initDecode 阶段先拖住 codec 服务。
+    val decoder = createDirectSoftwareAvcDecoder()
     if (decoder == null) {
       logCreateDecoder(codecInfo, "direct_software_avc_unavailable:${directDecoderError.ifBlank { "-" }}")
       return null
     }
-    logCreateDecoder(
-      codecInfo,
-      when {
-        hardwareDecoder != null && softwareDecoder != null -> "direct_hardware_avc_with_software_fallback"
-        hardwareDecoder != null -> "direct_hardware_avc"
-        else -> "direct_software_avc"
-      },
-    )
+    logCreateDecoder(codecInfo, "direct_software_avc")
     return decoder
   }
 
   override fun getSupportedCodecs(): Array<VideoCodecInfo> {
     val codecs = linkedSetOf<VideoCodecInfo>()
-    codecs.addAll(softwareFactory.supportedCodecs)
     // 作者: long；MTK 规避机型仍需要向 WebRTC 协商 H.264，但 codec 枚举只暴露通用软件 AVC，避免重新选到 MTK 硬解零帧路径。
     REMOTE_DESK_H264_PROFILE_LEVEL_IDS.forEach { profileLevelId ->
       codecs.add(remoteDeskH264Codec(profileLevelId))
     }
+    codecs.addAll(softwareFactory.supportedCodecs)
     return codecs.toTypedArray()
   }
 
@@ -9603,13 +9830,36 @@ private class RemoteDeskMtkSafeH264DecoderFactory(
 
   private fun createDirectSoftwareAvcDecoder(): VideoDecoder? {
     // 作者: long；这台 MTK Android 14 设备在 WebRTC 的 MediaCodecVideoDecoderFactory 全量枚举阶段会卡住，
-    // 这里按系统软件 AVC 的稳定 codec 名直建 AndroidVideoDecoder，让 H.264 接收链路避开枚举死锁；软件 AVC 强制走 byte-buffer，避免 surface 输出在 initDecode 阶段卡住首帧链路。
-    val directDecoderEglContext: EglBase.Context? = null
-    val decoders = REMOTE_DESK_MTK_DIRECT_H264_CODEC_NAMES.flatMap { codecName ->
-      remoteDeskPreferredAvcColorFormats(codecName, directDecoderEglContext).mapNotNull { colorFormat ->
-        createDirectAndroidVideoDecoder(codecName, colorFormat, directDecoderEglContext)
+    // c2.android 在 Redmi/MTK 真机低分辨率下仍会卡 initDecode，所以先试 Google 软件 AVC；不存在时会快速 fallback，再进入 c2 兜底。
+    val decoders = mutableListOf<VideoDecoder>()
+    val byteBufferEglContext: EglBase.Context? = null
+    REMOTE_DESK_MTK_DIRECT_H264_CODEC_NAMES
+      .filter { codecName -> codecName.startsWith("OMX.google.", ignoreCase = true) }
+      .forEach { codecName ->
+        remoteDeskPreferredAvcColorFormats(codecName, byteBufferEglContext)
+          .take(1)
+          .mapNotNull { colorFormat ->
+            createDirectAndroidVideoDecoder(codecName, colorFormat, byteBufferEglContext)
+          }
+          .firstOrNull()
+          ?.let(decoders::add)
       }
+    eglContext?.let { directDecoderEglContext ->
+      val codecName = "c2.android.avc.decoder"
+      remoteDeskPreferredAvcColorFormats(codecName, directDecoderEglContext)
+        .firstOrNull()
+        ?.let { colorFormat ->
+          createDirectAndroidVideoDecoder(codecName, colorFormat, directDecoderEglContext)
+        }
+        ?.let(decoders::add)
     }
+    remoteDeskPreferredAvcColorFormats("c2.android.avc.decoder", byteBufferEglContext)
+      .take(1)
+      .mapNotNull { colorFormat ->
+        createDirectAndroidVideoDecoder("c2.android.avc.decoder", colorFormat, byteBufferEglContext)
+      }
+      .firstOrNull()
+      ?.let(decoders::add)
     if (decoders.isEmpty()) {
       return null
     }
@@ -9633,9 +9883,12 @@ private class RemoteDeskMtkSafeH264DecoderFactory(
     return try {
       val wrapperFactoryClass = Class.forName("org.webrtc.MediaCodecWrapperFactory")
       val wrapperImplClass = Class.forName("org.webrtc.MediaCodecWrapperFactoryImpl")
-      val wrapperConstructor = wrapperImplClass.getDeclaredConstructor()
-      wrapperConstructor.isAccessible = true
-      val wrapperFactory = wrapperConstructor.newInstance()
+      val wrapperFactory = createRemoteDeskLoggingMediaCodecWrapperFactory(
+        codecName = codecName,
+        decoderKey = decoderKey,
+        wrapperFactoryClass = wrapperFactoryClass,
+        wrapperImplClass = wrapperImplClass,
+      )
       val codecTypeClass = Class.forName("org.webrtc.VideoCodecMimeType")
       val h264Type = codecTypeClass.getMethod("valueOf", String::class.java).invoke(null, "H264")
       val decoderClass = Class.forName("org.webrtc.AndroidVideoDecoder")
@@ -9741,7 +9994,7 @@ private class RemoteDeskLoggingVideoDecoder(
     return status
   }
 
-  override fun decode(image: EncodedImage, info: VideoDecoder.DecodeInfo): VideoCodecStatus {
+  override fun decode(image: EncodedImage, info: VideoDecoder.DecodeInfo?): VideoCodecStatus {
     val decodeCount = decodeLogCount + 1
     decodeLogCount = decodeCount
     val shouldLog = decodeCount <= REMOTE_DESK_DECODER_LOG_LIMIT ||
@@ -9750,7 +10003,7 @@ private class RemoteDeskLoggingVideoDecoder(
       val encodedBytes = image.buffer?.remaining() ?: -1
       Log.i(
         "RemoteDeskRtc",
-        "decoder_decode_start codec_name=$codecName count=$decodeCount frame_type=${image.frameType} encoded_size=${image.encodedWidth}x${image.encodedHeight} bytes=$encodedBytes missing=${info.isMissingFrames} render_time_ms=${info.renderTimeMs}",
+        "decoder_decode_start codec_name=$codecName count=$decodeCount frame_type=${image.frameType} encoded_size=${image.encodedWidth}x${image.encodedHeight} bytes=$encodedBytes missing=${info?.isMissingFrames ?: "-"} render_time_ms=${info?.renderTimeMs ?: "-"}",
       )
     }
     val status = callDecoder(
@@ -9863,12 +10116,12 @@ private class RemoteDeskVideoDecoderFactory(
   override fun getSupportedCodecs(): Array<VideoCodecInfo> {
     val codecs = linkedSetOf<VideoCodecInfo>()
     // 作者: long；真机远控优先保留平台软件 H.264 后备，部分 MTK 硬解会建链成功但不吐帧，不能让首帧验收卡死在硬解路径。
-    codecs.addAll(softwareFactory.supportedCodecs)
-    codecs.addAll(platformSoftwareFactory.supportedCodecs)
-    codecs.addAll(hardwareFactory.supportedCodecs)
     REMOTE_DESK_H264_PROFILE_LEVEL_IDS.forEach { profileLevelId ->
       codecs.add(remoteDeskH264Codec(profileLevelId))
     }
+    codecs.addAll(softwareFactory.supportedCodecs)
+    codecs.addAll(platformSoftwareFactory.supportedCodecs)
+    codecs.addAll(hardwareFactory.supportedCodecs)
     return codecs.toTypedArray()
   }
 }
@@ -9887,11 +10140,11 @@ private class RemoteDeskPlatformSoftwareVideoDecoderFactory(
   override fun getSupportedCodecs(): Array<VideoCodecInfo> {
     val codecs = linkedSetOf<VideoCodecInfo>()
     // 作者: long；Redmi Note 8 Pro 上只暴露软件/平台软件解码，保留 H.264 能力但不触碰 MTK AVC 硬解零帧路径。
-    codecs.addAll(softwareFactory.supportedCodecs)
-    codecs.addAll(platformSoftwareFactory.supportedCodecs)
     REMOTE_DESK_H264_PROFILE_LEVEL_IDS.forEach { profileLevelId ->
       codecs.add(remoteDeskH264Codec(profileLevelId))
     }
+    codecs.addAll(softwareFactory.supportedCodecs)
+    codecs.addAll(platformSoftwareFactory.supportedCodecs)
     return codecs.toTypedArray()
   }
 }
@@ -9921,9 +10174,9 @@ private class RemoteDeskLazyPlatformH264DecoderFactory(
 
   override fun getSupportedCodecs(): Array<VideoCodecInfo> {
     val codecs = mutableListOf<VideoCodecInfo>()
-    codecs.addAll(softwareFactory.supportedCodecs)
     // 作者: long；建 PeerConnection 时只静态声明 H.264，避免提前枚举 MTK MediaCodec；真正收到 H.264 帧时再懒加载平台软件 decoder。
     codecs.addAll(REMOTE_DESK_H264_PROFILE_LEVEL_IDS.map(::remoteDeskH264Codec))
+    codecs.addAll(softwareFactory.supportedCodecs)
     return codecs.toTypedArray()
   }
 
