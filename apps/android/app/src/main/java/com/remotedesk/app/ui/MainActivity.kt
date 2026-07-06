@@ -151,6 +151,8 @@ class MainActivity : AppCompatActivity() {
     private const val RTC_WATCHDOG_INTERVAL_MS = 2000L
     private const val RTC_WATCHDOG_NO_TRACK_TIMEOUT_MS = 6000L
     private const val RTC_WATCHDOG_NO_FRAME_TIMEOUT_MS = 7000L
+    // 作者: long；PeerConnection 创建是最终媒体链路的入口，真机 native 层卡死时要先释放信令线程，避免 answer/ICE 后续诊断全部丢失。
+    private const val RTC_CREATE_PEER_CONNECTION_TIMEOUT_MS = 5000L
     private const val RTC_WATCHDOG_RECOVERY_COOLDOWN_MS = 8000L
     private const val RTC_WATCHDOG_MAX_RECOVERY_ATTEMPTS = 3
     private const val RTC_RENDER_LOG_SAMPLE_INTERVAL_MS = 2000L
@@ -1085,8 +1087,8 @@ class MainActivity : AppCompatActivity() {
         "decoder_hardware_factory_retry reason=mtk_software_avc_init_timeout model=${Build.MODEL} device=${Build.DEVICE} sdk=${Build.VERSION.SDK_INT}",
       )
       logH264DecoderCandidatesForMtk()
-      // 作者: long；这版 WebRTC AAR 没有 H.264 纯软件解码，而 Android/Google 软件 AVC 在 MTK Android 14 会卡在 initDecode；当前 sender 已补齐 42e028 与 SPS/PPS，先恢复硬解 primary 让最终媒体链路出帧。
-      return RemoteDeskVideoDecoderFactory(eglContext, Predicate { true })
+      // 作者: long；MTK Android 14 在 PeerConnection 建立阶段枚举硬解会卡住，首轮协商只暴露静态 H.264 能力，真正解码时再走受超时保护的软件 AVC 兜底。
+      return RemoteDeskMtkSafeH264DecoderFactory(eglContext)
     }
     val hardwarePredicate = Predicate<MediaCodecInfo> { codecInfo ->
       // 作者: long；Redmi Note 8 Pro 的 MTK AVC 硬解会成功建链但不吐帧，只对白名单机型屏蔽，避免影响其他设备的正常硬解。
@@ -2274,6 +2276,7 @@ class MainActivity : AppCompatActivity() {
     config.tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
     config.candidateNetworkPolicy = PeerConnection.CandidateNetworkPolicy.ALL
     config.continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+    // 作者: long；真机 answer 必须持续产出本地 ICE candidate，Mac native sender 才能拿到回程路径；MTK 卡死风险已转到 decoder factory 和 PC 创建超时保护里处理。
     config.iceCandidatePoolSize = 1
     config.enableIceGatheringOnAnyAddressPorts = true
     config.iceTransportsType = if (rtcIceTransportRelayOnly) {
@@ -2343,12 +2346,71 @@ class MainActivity : AppCompatActivity() {
     }
     val createStartedAtMs = SystemClock.elapsedRealtime()
     Log.i(RTC_TAG, "create_pc_step create_peer_connection_start session=$sessionId")
-    rtcPeerConnection = factory.createPeerConnection(config, observer)
+    rtcPeerConnection = createPeerConnectionWithTimeout(
+      factory = factory,
+      config = config,
+      observer = observer,
+      sessionId = sessionId,
+      startedAtMs = createStartedAtMs,
+    )
     Log.i(
       RTC_TAG,
       "create_pc_step create_peer_connection_done session=$sessionId ok=${rtcPeerConnection != null} elapsed_ms=${SystemClock.elapsedRealtime() - createStartedAtMs}",
     )
     return rtcPeerConnection
+  }
+
+  private fun createPeerConnectionWithTimeout(
+    factory: PeerConnectionFactory,
+    config: PeerConnection.RTCConfiguration,
+    observer: PeerConnection.Observer,
+    sessionId: String,
+    startedAtMs: Long,
+  ): PeerConnection? {
+    val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
+    val executor = Executors.newSingleThreadExecutor { runnable ->
+      Thread(runnable, "rd-create-pc-$sessionId").apply {
+        isDaemon = true
+      }
+    }
+    val future = executor.submit<PeerConnection?> {
+      val created = factory.createPeerConnection(config, observer)
+      if (timedOut.get()) {
+        Log.w(
+          RTC_TAG,
+          "create_pc_step create_peer_connection_late_done session=$sessionId ok=${created != null} elapsed_ms=${SystemClock.elapsedRealtime() - startedAtMs}",
+        )
+        created?.close()
+        return@submit null
+      }
+      created
+    }
+    return try {
+      future.get(RTC_CREATE_PEER_CONNECTION_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+    } catch (error: java.util.concurrent.TimeoutException) {
+      timedOut.set(true)
+      future.cancel(true)
+      Log.e(
+        RTC_TAG,
+        "create_pc_step create_peer_connection_timeout session=$sessionId timeout_ms=$RTC_CREATE_PEER_CONNECTION_TIMEOUT_MS elapsed_ms=${SystemClock.elapsedRealtime() - startedAtMs}",
+        error,
+      )
+      null
+    } catch (error: Throwable) {
+      val cause = if (error is java.util.concurrent.ExecutionException) {
+        error.cause ?: error
+      } else {
+        error
+      }
+      Log.e(
+        RTC_TAG,
+        "create_pc_step create_peer_connection_failed session=$sessionId elapsed_ms=${SystemClock.elapsedRealtime() - startedAtMs} reason=${cause.message ?: cause.javaClass.simpleName}",
+        cause,
+      )
+      null
+    } finally {
+      executor.shutdownNow()
+    }
   }
 
   private fun attachRemoteVideoTrack(track: VideoTrack, source: String) {
@@ -2728,14 +2790,22 @@ class MainActivity : AppCompatActivity() {
       return
     }
     val offer = SessionDescription(SessionDescription.Type.OFFER, sdp)
+    Log.i(RTC_TAG, "set_remote_offer_start session=$messageSessionId sdp_len=${offer.description.length}")
     peerConnection.setRemoteDescription(SimpleSdpObserver(
       onSetSuccess = {
+        Log.i(RTC_TAG, "set_remote_offer_ok session=$messageSessionId")
         flushPendingRemoteIceCandidates()
+        Log.i(RTC_TAG, "create_answer_start session=$messageSessionId")
         peerConnection.createAnswer(SimpleSdpObserver(onCreateSuccess = { answer ->
           if (answer == null) {
             appendLog("创建 webrtc.answer 失败：answer 为空")
             return@SimpleSdpObserver
           }
+          Log.i(
+            RTC_TAG,
+            "create_answer_ok session=$messageSessionId sdp_len=${answer.description.length} has_video=${answer.description.contains("m=video")}",
+          )
+          Log.i(RTC_TAG, "set_local_answer_start session=$messageSessionId")
           peerConnection.setLocalDescription(SimpleSdpObserver(
             onSetSuccess = {
               val localSdp = peerConnection.localDescription?.description.orEmpty()
@@ -2749,14 +2819,17 @@ class MainActivity : AppCompatActivity() {
               )
             },
             onSetFailure = { reason ->
+              Log.e(RTC_TAG, "set_local_answer_failed session=$messageSessionId reason=$reason")
               appendLog("设置本地 answer 失败：$reason")
             },
           ), answer)
         }, onCreateFailure = { reason ->
+          Log.e(RTC_TAG, "create_answer_failed session=$messageSessionId reason=$reason")
           appendLog("创建 webrtc.answer 失败：$reason")
         }), MediaConstraints())
       },
       onSetFailure = { reason ->
+        Log.e(RTC_TAG, "set_remote_offer_failed session=$messageSessionId reason=$reason")
         appendLog("设置远端 offer 失败：$reason")
       },
     ), offer)
