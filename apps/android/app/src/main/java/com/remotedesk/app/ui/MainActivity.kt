@@ -87,6 +87,7 @@ import org.webrtc.VideoTrack
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -9478,6 +9479,18 @@ private const val REMOTE_DESK_DECODER_INIT_TIMEOUT_MS = 2500L
 private const val REMOTE_DESK_DECODER_DECODE_TIMEOUT_MS = 700L
 private const val REMOTE_DESK_DECODER_RELEASE_TIMEOUT_MS = 900L
 
+private data class RemoteDeskH264PayloadInfo(
+  val payloadFormat: String,
+  val nalTypes: List<Int>,
+  val hasSps: Boolean,
+  val hasPps: Boolean,
+  val hasIdr: Boolean,
+  val spsProfileLevelId: String?,
+) {
+  val nalCount: Int = nalTypes.size
+  val nalTypesText: String = nalTypes.take(12).joinToString(",").ifBlank { "-" }
+}
+
 @Volatile private var remoteDeskMtkH264CodecCandidatesLogged = false
 private val remoteDeskBlockedDirectH264Codecs: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
@@ -9589,6 +9602,130 @@ private fun remoteDeskDecoderCreateErrorMessage(error: Throwable): String {
   } else {
     "${error.javaClass.simpleName}:$causeMessage"
   }
+}
+
+// 作者: long；H.264 首帧问题容易被 WebRTC 层吞掉细节，这里只复制 duplicate 缓冲区做 NAL 摘要，既能核对 SPS/PPS/IDR 连续性，也不会移动真正交给 decoder 的 position。
+private fun remoteDeskDescribeH264Payload(buffer: ByteBuffer?): RemoteDeskH264PayloadInfo? {
+  if (buffer == null || buffer.remaining() <= 0) {
+    return null
+  }
+  val duplicate = buffer.duplicate()
+  val bytes = ByteArray(duplicate.remaining())
+  duplicate.get(bytes)
+  return remoteDeskDescribeH264Bytes(bytes)
+}
+
+private fun remoteDeskDescribeH264Bytes(bytes: ByteArray): RemoteDeskH264PayloadInfo {
+  if (bytes.isEmpty()) {
+    return RemoteDeskH264PayloadInfo("empty", emptyList(), false, false, false, null)
+  }
+  val annexBStart = remoteDeskFindH264StartCode(bytes, 0)
+  if (annexBStart != null) {
+    val nalRanges = mutableListOf<IntRange>()
+    var searchFrom = annexBStart.first
+    while (true) {
+      val start = remoteDeskFindH264StartCode(bytes, searchFrom) ?: break
+      val nalStart = start.first + start.second
+      val nextStart = remoteDeskFindH264StartCode(bytes, nalStart)
+      var nalEnd = nextStart?.first ?: bytes.size
+      while (nalEnd > nalStart && bytes[nalEnd - 1].toInt() == 0) {
+        nalEnd -= 1
+      }
+      if (nalStart < nalEnd) {
+        nalRanges.add(nalStart until nalEnd)
+      }
+      searchFrom = nextStart?.first ?: bytes.size
+      if (searchFrom >= bytes.size) {
+        break
+      }
+    }
+    return remoteDeskBuildH264PayloadInfo("annexb", bytes, nalRanges)
+  }
+  remoteDeskReadAvccNalRanges(bytes, 4)?.let { nalRanges ->
+    return remoteDeskBuildH264PayloadInfo("avcc4", bytes, nalRanges)
+  }
+  remoteDeskReadAvccNalRanges(bytes, 2)?.let { nalRanges ->
+    return remoteDeskBuildH264PayloadInfo("avcc2", bytes, nalRanges)
+  }
+  return remoteDeskBuildH264PayloadInfo("single_nal", bytes, listOf(bytes.indices))
+}
+
+private fun remoteDeskH264StartCodeLengthAt(bytes: ByteArray, offset: Int): Int {
+  return when {
+    offset + 4 <= bytes.size &&
+      bytes[offset].toInt() == 0 &&
+      bytes[offset + 1].toInt() == 0 &&
+      bytes[offset + 2].toInt() == 0 &&
+      bytes[offset + 3].toInt() == 1 -> 4
+    offset + 3 <= bytes.size &&
+      bytes[offset].toInt() == 0 &&
+      bytes[offset + 1].toInt() == 0 &&
+      bytes[offset + 2].toInt() == 1 -> 3
+    else -> 0
+  }
+}
+
+private fun remoteDeskFindH264StartCode(bytes: ByteArray, from: Int): Pair<Int, Int>? {
+  if (bytes.size < 3 || from >= bytes.size) {
+    return null
+  }
+  var offset = from.coerceAtLeast(0)
+  while (offset + 3 <= bytes.size) {
+    val length = remoteDeskH264StartCodeLengthAt(bytes, offset)
+    if (length > 0) {
+      return offset to length
+    }
+    offset += 1
+  }
+  return null
+}
+
+private fun remoteDeskReadAvccNalRanges(bytes: ByteArray, lengthFieldBytes: Int): List<IntRange>? {
+  val ranges = mutableListOf<IntRange>()
+  var offset = 0
+  while (offset + lengthFieldBytes <= bytes.size) {
+    var nalLength = 0
+    repeat(lengthFieldBytes) { index ->
+      nalLength = (nalLength shl 8) or (bytes[offset + index].toInt() and 0xff)
+    }
+    offset += lengthFieldBytes
+    if (nalLength <= 0 || offset + nalLength > bytes.size) {
+      return null
+    }
+    ranges.add(offset until offset + nalLength)
+    offset += nalLength
+  }
+  return if (offset == bytes.size && ranges.isNotEmpty()) ranges else null
+}
+
+private fun remoteDeskBuildH264PayloadInfo(
+  payloadFormat: String,
+  bytes: ByteArray,
+  nalRanges: List<IntRange>,
+): RemoteDeskH264PayloadInfo {
+  val nalTypes = nalRanges.mapNotNull { range ->
+    if (range.first in bytes.indices) bytes[range.first].toInt() and 0x1f else null
+  }
+  val spsRange = nalRanges.firstOrNull { range ->
+    range.first in bytes.indices && (bytes[range.first].toInt() and 0x1f) == 7
+  }
+  val profileLevelId = if (spsRange != null && spsRange.first + 3 <= spsRange.last) {
+    "%02x%02x%02x".format(
+      bytes[spsRange.first + 1].toInt() and 0xff,
+      bytes[spsRange.first + 2].toInt() and 0xff,
+      bytes[spsRange.first + 3].toInt() and 0xff,
+    )
+  } else {
+    null
+  }
+  return RemoteDeskH264PayloadInfo(
+    payloadFormat = payloadFormat,
+    nalTypes = nalTypes,
+    hasSps = nalTypes.any { it == 7 },
+    hasPps = nalTypes.any { it == 8 },
+    hasIdr = nalTypes.any { it == 5 },
+    spsProfileLevelId = profileLevelId,
+  )
 }
 
 private fun createRemoteDeskLoggingMediaCodecWrapperFactory(
@@ -10001,9 +10138,10 @@ private class RemoteDeskLoggingVideoDecoder(
       image.frameType == EncodedImage.FrameType.VideoFrameKey
     if (shouldLog) {
       val encodedBytes = image.buffer?.remaining() ?: -1
+      val payloadInfo = remoteDeskDescribeH264Payload(image.buffer)
       Log.i(
         "RemoteDeskRtc",
-        "decoder_decode_start codec_name=$codecName count=$decodeCount frame_type=${image.frameType} encoded_size=${image.encodedWidth}x${image.encodedHeight} bytes=$encodedBytes missing=${info?.isMissingFrames ?: "-"} render_time_ms=${info?.renderTimeMs ?: "-"}",
+        "decoder_decode_start codec_name=$codecName count=$decodeCount frame_type=${image.frameType} encoded_size=${image.encodedWidth}x${image.encodedHeight} bytes=$encodedBytes payload_format=${payloadInfo?.payloadFormat ?: "-"} nal_count=${payloadInfo?.nalCount ?: "-"} nal_types=${payloadInfo?.nalTypesText ?: "-"} sps=${payloadInfo?.hasSps ?: "-"} pps=${payloadInfo?.hasPps ?: "-"} idr=${payloadInfo?.hasIdr ?: "-"} sps_profile_level_id=${payloadInfo?.spsProfileLevelId ?: "-"} missing=${info?.isMissingFrames ?: "-"} render_time_ms=${info?.renderTimeMs ?: "-"}",
       )
     }
     val status = callDecoder(
