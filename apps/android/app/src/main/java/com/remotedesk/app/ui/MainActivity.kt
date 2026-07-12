@@ -246,8 +246,8 @@ class MainActivity : AppCompatActivity() {
     private const val SESSION_FILE_CHUNK_RAW_BYTES = 192 * 1024
     private const val ANDROID_INCOMING_FILE_MAX_BYTES = 64L * 1024L * 1024L
     private const val SESSION_FILE_MAX_CHUNKS = 512
-    // 作者: long；远控会话的画面和输入不能依赖系统 MediaProvider，个别 ROM 上 MediaProvider ANR/死亡会把持有稳定 provider 连接的进程一并结束。
-    private const val ANDROID_INCOMING_FILE_USE_MEDIASTORE = false
+    // 作者: long；接收文件应优先进入公开下载目录，MediaProvider 异常时由超时和 app-private 兜底保住已传输的数据。
+    private const val ANDROID_INCOMING_FILE_USE_MEDIASTORE = true
     private const val ANDROID_FILE_MEDIASTORE_TIMEOUT_MS = 8_000L
   }
 
@@ -5960,7 +5960,7 @@ class MainActivity : AppCompatActivity() {
     val expectedSha256 = payload.optNonBlank("sha256") ?: transfer.sha256
     incomingFileTransfers.remove(fileId)
     updateRemoteTransferStatus("文件：正在保存 ${transfer.name}")
-    // 作者: long；接收文件默认先落应用私有目录，避免远控热路径持有 MediaProvider 依赖；后续可单独做“导出到下载目录”的显式动作。
+    // 作者: long；文件校验完成后才尝试发布到公开下载目录，避免用户在文件管理器中看到未收齐或哈希错误的半成品。
     // 作者: long；接收文件保存不能复用设备同步线程；真机上 /devices 或 proof 请求一旦超时，会让用户看到“正在保存”但实际文件永远不落盘。
     fileTransferExecutor.execute {
       try {

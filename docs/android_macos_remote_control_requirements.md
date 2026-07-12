@@ -152,9 +152,9 @@ RemoteDesk 当前目标是让 Android 真机作为控制端，远程查看并操
 - 常规清晰档仍未达标：当前 JPEG-only 轮次 `1547x1000` 只有约 `3.4-3.7fps`；旧 WebRTC/OpenH264 轮次也只有约 `14fps`，两条路径都低于 `>=24fps` 目标。
 - 双指 pinch 仍未自动闭环：普通 `adb input swipe` 不能可靠产生真实多点缩放；debug/manual span fallback 已出现 `remote_viewport_pinch_scale source=manual`，但这只能证明 fallback 代码路径，不替代真实手指或 instrumentation 多点验收。
 - “鼠标输入落地”已经稳定，但“画面里的鼠标移动肉眼流畅”不能宣称完成。
-- 剪贴板和文件传输已通过 debug 自动验收，且本轮 result 回执已验证；Android “发剪贴板”真实按钮已验收，但 Android 系统文件选择器发送、Desktop 会话工具栏“剪贴板/文件”仍未验收。
+- 剪贴板和文件传输 result 回执已验证；Android “发剪贴板”和系统文件选择器“发文件”真实按钮已验收，Desktop 会话工具栏“剪贴板/文件”仍未完成全部人工验收。
 - Android 14 scoped storage 已确认：debug path 直接读 `/sdcard/Download/...` 会 `EACCES`，用户文件发送必须依赖系统文件选择器授权。
-- 本轮 Android “发文件”按钮已确认能打开 DocumentsUI picker，但自动化选文件未闭环：`最近`/`下载` 列表出现空列表或 `暂时无法加载内容`，需要人工手选或进一步修复 picker 可测性。
+- 2026-07-12 真实 UI 复测中，Android DocumentsUI 的“下载”目录可正常加载并完成选文件发送；此前空列表或“暂时无法加载内容”本轮未复现。
 - WebRTC H.264 仍未修复：当前 Redmi 真机可见画面来自 JPEG fallback，不能写成 WebRTC 视频链路通过。
 - JPEG fallback 只达到“可见且可操作”：最新清晰档约 `3.4-3.8fps @1547x1000`，全屏空闲约 `7.4-8.0fps @960x621`，全屏鼠标交互约 `12.0-13.4fps @640x414`，均低于 `>=24fps` 流畅验收。
 - 2026-07-05 09:16 已复测 `560x364` 交互档、`1.08x` 局部高清触发和裁剪链路，但视觉 FPS 仍只有约 `13-14fps @560x362`，不能写成流畅完成；真实人工双指 pinch 手感仍未验收。
@@ -200,4 +200,4 @@ RemoteDesk 当前目标是让 Android 真机作为控制端，远程查看并操
 - P3：优化 macOS 捕获/编码路径，优先评估硬件编码、更低成本 BGRA -> YUV 转换或直接从 ScreenCaptureKit 输出可编码像素格式；最新 worker 采样已证明 JPEG fallback 捕获/编码耗时本身经常超过目标帧间隔。
 - P4：补 instrumentation 多点触控测试，关闭双指 pinch 自动验收缺口。
 - P5：人工真机验收双指缩放、双指平移、缩放后单指移动鼠标和键盘输入体验。
-- P6：补 Android 文件选择器发送、Desktop 工具栏剪贴板/文件发送的手动 UI 验收，并评估 WebRTC DataChannel 或 HTTP 分片通道替代当前 WebSocket 信令分块方案。
+- P6：补 Desktop 工具栏剪贴板/文件发送的手动 UI 验收，并评估 WebRTC DataChannel 或 HTTP 分片通道替代当前 WebSocket 信令分块方案。

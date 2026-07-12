@@ -1376,6 +1376,16 @@ rg -n 'RemoteDeskSoak.*soak_dynamic_bounds|RemoteDeskSoak.*soak_phase|render_fra
 - [ ] P2：评估 DataChannel 或 HTTP 分片通道，替代当前 WebSocket 大 payload 文件分块方案。
 - [ ] P3：继续推进最终媒体链路和真实双指 pinch 验收；工具通道已闭环不代表远控视觉体验完成。
 
+## 2026-07-12 12:16 文件传输公开下载目录真机复测
+
+本轮恢复 Android 10+ 通过 `MediaStore.Downloads` 保存接收文件，公开目录写入失败或超过 8 秒时仍降级到 app-private，避免已传输数据丢失。
+
+- [x] Android -> Mac 真实 UI：点击“发文件”后 DocumentsUI 可正常打开并加载“下载”目录，选择 `remotedesk-ui-picker-20260712.txt (99 B)` 后，Mac 保存到 `~/Downloads/RemoteDesk/`，源文件与目标文件 SHA256 一致。
+- [x] Mac -> Android 单分块：`remotedesk-public-download-20260712.txt (99 B)` 保存到公开 `Downloads/RemoteDesk/`，MediaStore URI 为 `content://media/external/downloads/1524`，源文件与目标文件 SHA256 均为 `c53b631fcfbc5770716188a163cf80e06381558da356bb00fa023d7032dbd541`。
+- [x] Mac -> Android 多分块：`remotedesk-public-download-1m-20260712.bin (1048576 B)` 共 6 块，保存到公开 `Downloads/RemoteDesk/`，MediaStore URI 为 `content://media/external/downloads/1525`，源文件与目标文件 SHA256 均为 `30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58`。
+- [x] 两轮公开目录写入后 Android 进程保持存活，日志未出现 `incoming_file_mediastore_save_failed`，且均回传 `file.transfer.result applied=true`。
+- [ ] Desktop 会话工具栏“发文件”的人工点击仍需补一次 UI 验收；本轮 Mac -> Android 使用显式 debug 文件入口触发发送。
+
 ## 2026-07-05 15:33 全屏缩放/局部高清档位回收复测
 
 本轮目标：继续处理“全屏双指缩放不流畅、缩放后画面不够清晰、鼠标移动不流畅”。15:26 复测发现 `1088x634 source_rect` 局部高清只有 `5.68/4.21/4.23fps`，因此本轮不再继续加大 JPEG 局部帧，而是回收停手高清档并缩短保持窗口。
