@@ -4010,6 +4010,7 @@ class MainActivity : AppCompatActivity() {
       binding.remoteZoomResetButton,
       binding.remoteFullscreenButton,
       binding.remoteKeyboardPanelButton,
+      binding.remoteRightClickButton,
     ).firstOrNull { control ->
       if (!control.isShown) {
         return@firstOrNull false
@@ -5405,6 +5406,9 @@ class MainActivity : AppCompatActivity() {
     binding.remoteKeyboardPanelButton.setOnClickListener {
       showRemoteKeyboardDialog()
     }
+    binding.remoteRightClickButton.setOnClickListener {
+      sendRemoteRightClickAtLastPoint()
+    }
     binding.remoteKeyboardSendButton.setOnClickListener {
       val text = binding.remoteKeyboardInput.text?.toString().orEmpty()
       if (sendRemoteKeyboardText(text)) {
@@ -5458,6 +5462,20 @@ class MainActivity : AppCompatActivity() {
         false
       }
     }
+  }
+
+  private fun sendRemoteRightClickAtLastPoint() {
+    val currentSessionId = sessionId
+    if (currentSessionId.isNullOrBlank()) {
+      appendLog("当前没有会话，不能执行右键")
+      return
+    }
+    val point = remoteLastInputPoint ?: NormalizedPoint(0.5, 0.5)
+    // 作者: long；右键按钮使用最近一次触摸映射出的远端坐标，先补一帧移动再发完整 down/up，确保右键菜单出现在用户最后指向的位置。
+    sendRemoteMouseMove(currentSessionId, point, logSuccess = false, force = true, inputCategory = "right_click")
+    sendRemoteMouseButton(currentSessionId, point, "right", "down", logSuccess = true, inputCategory = "right_click")
+    sendRemoteMouseButton(currentSessionId, point, "right", "up", logSuccess = true, inputCategory = "right_click")
+    updateRemoteTransferStatus("输入：已执行右键")
   }
 
   private fun initializeSessionToolControls() {
@@ -7234,8 +7252,8 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun styleNavButton(button: MaterialButton, selected: Boolean) {
-    val textColor = Color.parseColor(if (selected) "#2B6DFF" else "#6A86AD")
-    val backgroundColor = Color.parseColor(if (selected) "#E6EFFF" else "#FFFFFF")
+    val textColor = Color.parseColor(if (selected) "#7DE8FF" else "#7897B8")
+    val backgroundColor = Color.parseColor(if (selected) "#173A59" else "#122137")
     button.alpha = if (selected) 1f else 0.95f
     button.setTextColor(textColor)
     button.iconTint = ColorStateList.valueOf(textColor)
@@ -7629,9 +7647,9 @@ class MainActivity : AppCompatActivity() {
     val selected = effectiveTargetDeviceId == device.deviceId
     val isSelf = device.deviceId == deviceId
     val previewPalettes = arrayOf(
-      intArrayOf(Color.parseColor("#EFF3F8"), Color.parseColor("#E2E8F0")),
-      intArrayOf(Color.parseColor("#EEF2F7"), Color.parseColor("#E3E9F1")),
-      intArrayOf(Color.parseColor("#F1F4F8"), Color.parseColor("#E6EBF3")),
+      intArrayOf(Color.parseColor("#183B59"), Color.parseColor("#205D72")),
+      intArrayOf(Color.parseColor("#1F355B"), Color.parseColor("#3E4B7A")),
+      intArrayOf(Color.parseColor("#183F45"), Color.parseColor("#1D6B66")),
     )
     val palette = previewPalettes[(device.deviceId.hashCode() and Int.MAX_VALUE) % previewPalettes.size]
 
@@ -7645,13 +7663,8 @@ class MainActivity : AppCompatActivity() {
       radius = dpFloat(16)
       cardElevation = 0f
       strokeWidth = dp(1)
-      strokeColor = Color.parseColor(
-        when {
-          selected -> "#89A6FF"
-          else -> "#E4E8EE"
-        },
-      )
-      setCardBackgroundColor(Color.parseColor(if (selected) "#F4F8FF" else "#FFFFFF"))
+      strokeColor = Color.parseColor(if (selected) "#2DB8D4" else "#25415E")
+      setCardBackgroundColor(Color.parseColor(if (selected) "#173A59" else "#122137"))
       isClickable = true
       isFocusable = true
       setOnClickListener {
@@ -7693,7 +7706,7 @@ class MainActivity : AppCompatActivity() {
         else -> device.deviceName.take(1).uppercase(Locale.ROOT)
       }
       gravity = Gravity.CENTER
-      setTextColor(Color.parseColor("#3A475A"))
+      setTextColor(Color.parseColor("#D9F6FF"))
       textSize = 12f
       typeface = Typeface.DEFAULT_BOLD
       layoutParams = FrameLayout.LayoutParams(
@@ -7705,14 +7718,14 @@ class MainActivity : AppCompatActivity() {
 
     val statusBadge = TextView(this).apply {
       text = if (isOnline) "在线" else "离线"
-      setTextColor(Color.parseColor(if (isOnline) "#0E8A4B" else "#707B8C"))
+      setTextColor(Color.parseColor(if (isOnline) "#6DE0B0" else "#7897B8"))
       textSize = 9f
       typeface = Typeface.DEFAULT_BOLD
       setPadding(dp(6), dp(2), dp(6), dp(2))
       background = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
         cornerRadius = dpFloat(10)
-        setColor(Color.parseColor(if (isOnline) "#DFF5EA" else "#ECEFF4"))
+        setColor(Color.parseColor(if (isOnline) "#164A43" else "#1D2D41"))
       }
     }
     preview.addView(
@@ -7749,7 +7762,7 @@ class MainActivity : AppCompatActivity() {
 
     val nameText = TextView(this).apply {
       text = device.deviceName
-      setTextColor(Color.parseColor("#111111"))
+      setTextColor(Color.parseColor("#F3F7FF"))
       textSize = 13f
       typeface = Typeface.DEFAULT_BOLD
     }
@@ -7768,7 +7781,7 @@ class MainActivity : AppCompatActivity() {
 
     val platformText = TextView(this).apply {
       text = "${platformIcon(device.platform)} ${device.platformLabel()}"
-      setTextColor(Color.parseColor("#5B6472"))
+      setTextColor(Color.parseColor("#8EA5BF"))
       textSize = 11f
     }
     metaRow.addView(platformText)
@@ -7779,7 +7792,7 @@ class MainActivity : AppCompatActivity() {
         selected -> "  · 已选择"
         else -> ""
       }
-      setTextColor(Color.parseColor("#2B6DFF"))
+      setTextColor(Color.parseColor("#7DE8FF"))
       textSize = 10f
       layoutParams = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -7827,14 +7840,14 @@ class MainActivity : AppCompatActivity() {
         else -> canConnect
       }
       val bgColor = when {
-        isSelf -> "#CBD3DF"
-        showDisconnect -> "#ED5E5E"
-        showConnecting -> "#B3C5EE"
-        canConnect -> "#4F7BFF"
-        else -> "#CBD3DF"
+        isSelf -> "#36516B"
+        showDisconnect -> "#C85B68"
+        showConnecting -> "#496A86"
+        canConnect -> "#2DB8D4"
+        else -> "#36516B"
       }
       backgroundTintList = ColorStateList.valueOf(Color.parseColor(bgColor))
-      setTextColor(Color.parseColor("#FFFFFF"))
+      setTextColor(Color.parseColor("#07111F"))
       setOnClickListener {
         if (showDisconnect) {
           handleEndSessionAction()
@@ -8612,6 +8625,11 @@ class MainActivity : AppCompatActivity() {
       bringToFront()
     }
     binding.remoteKeyboardPanelButton.apply {
+      visibility = View.VISIBLE
+      elevation = dpFloat(8)
+      bringToFront()
+    }
+    binding.remoteRightClickButton.apply {
       visibility = View.VISIBLE
       elevation = dpFloat(8)
       bringToFront()

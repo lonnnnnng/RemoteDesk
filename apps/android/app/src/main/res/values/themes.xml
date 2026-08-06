@@ -2,17 +2,17 @@
   <style name="Theme.RemoteDesk" parent="Theme.MaterialComponents.NoActionBar">
     <item name="colorPrimary">#4CD7F6</item>
     <item name="colorPrimaryVariant">#03B5D3</item>
-    <item name="colorOnPrimary">#003640</item>
+    <item name="colorOnPrimary">#07111F</item>
     <item name="colorSecondary">#4CD7F6</item>
     <item name="colorSecondaryVariant">#03B5D3</item>
-    <item name="colorOnSecondary">#003640</item>
-    <item name="colorSurface">#FFFFFF</item>
-    <item name="colorOnSurface">#0D1726</item>
-    <item name="android:colorBackground">#F6F8FB</item>
-    <item name="android:windowBackground">#F6F8FB</item>
-    <item name="android:statusBarColor">#F6F8FB</item>
-    <item name="android:navigationBarColor">#FFFFFF</item>
-    <item name="android:windowLightStatusBar">true</item>
-    <item name="android:windowLightNavigationBar">true</item>
+    <item name="colorOnSecondary">#07111F</item>
+    <item name="colorSurface">#122137</item>
+    <item name="colorOnSurface">#F3F7FF</item>
+    <item name="android:colorBackground">#091321</item>
+    <item name="android:windowBackground">#091321</item>
+    <item name="android:statusBarColor">#091321</item>
+    <item name="android:navigationBarColor">#091321</item>
+    <item name="android:windowLightStatusBar">false</item>
+    <item name="android:windowLightNavigationBar">false</item>
   </style>
 </resources>

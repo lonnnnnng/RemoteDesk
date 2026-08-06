@@ -3,20 +3,20 @@
   xmlns:app="http://schemas.android.com/apk/res-auto"
   android:layout_width="match_parent"
   android:layout_height="match_parent"
-  android:background="#F6F8FB"
+  android:background="#091321"
   android:fitsSystemWindows="true"
   android:orientation="vertical">
 
   <LinearLayout
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:background="#FFFFFF"
+    android:background="#0E1A2D"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingStart="18dp"
-    android:paddingTop="32dp"
-    android:paddingEnd="18dp"
-    android:paddingBottom="12dp">
+    android:paddingStart="20dp"
+    android:paddingTop="26dp"
+    android:paddingEnd="20dp"
+    android:paddingBottom="16dp">
 
     <LinearLayout
       android:layout_width="0dp"
@@ -27,9 +27,10 @@
       <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="远控"
-        android:textColor="#0D1726"
-        android:textSize="20sp"
+        android:text="RemoteDesk"
+        android:textColor="#F3F7FF"
+        android:letterSpacing="0.02"
+        android:textSize="21sp"
         android:textStyle="bold" />
 
       <TextView
@@ -38,17 +39,17 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="2dp"
         android:text="连接状态：未连接"
-        android:textColor="#5F6F85"
+        android:textColor="#8EA5BF"
         android:textSize="12sp" />
     </LinearLayout>
 
     <TextView
       android:layout_width="36dp"
       android:layout_height="36dp"
-      android:background="#EAF2FF"
+      android:background="@drawable/bg_brand_badge"
       android:gravity="center"
-      android:text="控"
-      android:textColor="#1263FF"
+      android:text="RD"
+      android:textColor="#7DE8FF"
       android:textSize="12sp"
       android:textStyle="bold" />
   </LinearLayout>
@@ -56,7 +57,7 @@
   <View
     android:layout_width="match_parent"
     android:layout_height="1dp"
-    android:background="#E4E8EE" />
+    android:background="#1C3148" />
 
   <FrameLayout
     android:layout_width="match_parent"
@@ -75,7 +76,7 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingStart="18dp"
-        android:paddingTop="18dp"
+        android:paddingTop="22dp"
         android:paddingEnd="18dp"
         android:paddingBottom="96dp">
 
@@ -103,8 +104,8 @@
               <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="设备列表"
-                android:textColor="#0D1726"
+                android:text="我的设备"
+                android:textColor="#F3F7FF"
                 android:textSize="24sp"
                 android:textStyle="bold" />
 
@@ -114,7 +115,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:text="在线设备 0"
-                android:textColor="#5F6F85"
+                android:textColor="#8EA5BF"
                 android:textSize="13sp" />
             </LinearLayout>
 
@@ -130,10 +131,10 @@
               android:paddingEnd="14dp"
               android:text="刷新"
               android:textAllCaps="false"
-              android:textColor="#1263FF"
+              android:textColor="#7DE8FF"
               android:textSize="13sp"
               app:cornerRadius="8dp"
-              app:strokeColor="#CBD6E3" />
+              app:strokeColor="#25415E" />
           </LinearLayout>
 
           <LinearLayout
@@ -162,10 +163,10 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
-            app:cardBackgroundColor="#FFFFFF"
+            app:cardBackgroundColor="#122137"
             app:cardCornerRadius="14dp"
             app:cardElevation="0dp"
-            app:strokeColor="#E6EAF0"
+            app:strokeColor="#25415E"
             app:strokeWidth="1dp">
 
             <TextView
@@ -174,7 +175,7 @@
               android:layout_height="wrap_content"
               android:padding="12dp"
               android:text="暂无设备。先完成连接和注册，或检查中继服务是否可访问。"
-              android:textColor="#68707F"
+              android:textColor="#8EA5BF"
               android:textSize="12sp" />
           </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
@@ -208,8 +209,8 @@
               <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="远程会话"
-                android:textColor="#0D1726"
+                android:text="远程工作台"
+                android:textColor="#F3F7FF"
                 android:textSize="24sp"
                 android:textStyle="bold" />
 
@@ -217,8 +218,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="画面与输入在独立会话页中运行"
-                android:textColor="#5F6F85"
+                android:text="实时画面 · 精准输入 · 安全连接"
+                android:textColor="#8EA5BF"
                 android:textSize="13sp" />
             </LinearLayout>
 
@@ -232,12 +233,12 @@
               android:minWidth="0dp"
               android:paddingStart="12dp"
               android:paddingEnd="12dp"
-              android:text="返回"
+              android:text="设备"
               android:textAllCaps="false"
-              android:textColor="#40516B"
+              android:textColor="#C4D7EA"
               android:textSize="13sp"
               app:cornerRadius="8dp"
-              app:strokeColor="#CBD6E3" />
+              app:strokeColor="#25415E" />
           </LinearLayout>
 
           <com.google.android.material.card.MaterialCardView
@@ -246,10 +247,10 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
             android:visibility="gone"
-            app:cardBackgroundColor="#FFFFFF"
+            app:cardBackgroundColor="#122137"
             app:cardCornerRadius="12dp"
             app:cardElevation="0dp"
-            app:strokeColor="#D9E4F2"
+            app:strokeColor="#25415E"
             app:strokeWidth="1dp">
 
             <LinearLayout
@@ -266,7 +267,7 @@
                 android:maxLines="1"
                 android:singleLine="true"
                 android:text="当前状态：准备连接"
-                android:textColor="#11325E"
+                android:textColor="#F3F7FF"
                 android:textSize="13sp" />
 
               <TextView
@@ -275,7 +276,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text="当前会话：-"
-                android:textColor="#5F6F85"
+                android:textColor="#8EA5BF"
                 android:textSize="13sp" />
 
               <TextView
@@ -284,7 +285,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="会话开始：-"
-                android:textColor="#5F6F85"
+                android:textColor="#8EA5BF"
                 android:textSize="13sp" />
 
               <TextView
@@ -293,7 +294,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="会话时长：-"
-                android:textColor="#5F6F85"
+                android:textColor="#8EA5BF"
                 android:textSize="13sp" />
 
               <TextView
@@ -302,7 +303,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text="当前画面：-"
-                android:textColor="#5F6F85"
+                android:textColor="#8EA5BF"
                 android:textSize="12sp" />
 
               <TextView
@@ -311,7 +312,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:text="输入回执：-"
-                android:textColor="#5F6F85"
+                android:textColor="#8EA5BF"
                 android:textSize="12sp" />
 
               <FrameLayout
@@ -376,9 +377,9 @@
                   android:paddingEnd="10dp"
                   android:text="1x"
                   android:textAllCaps="false"
-                  android:textColor="#1E3A8A"
+                  android:textColor="#9CE8FF"
                   android:textSize="11sp"
-                  app:backgroundTint="#DCE9FF"
+                  app:backgroundTint="#17415D"
                   app:cornerRadius="10dp" />
 
                 <com.google.android.material.button.MaterialButton
@@ -395,9 +396,9 @@
                   android:paddingEnd="10dp"
                   android:text="全屏"
                   android:textAllCaps="false"
-                  android:textColor="#1E3A8A"
+                  android:textColor="#9CE8FF"
                   android:textSize="11sp"
-                  app:backgroundTint="#DCE9FF"
+                  app:backgroundTint="#17415D"
                   app:cornerRadius="10dp" />
 
                 <com.google.android.material.button.MaterialButton
@@ -414,9 +415,29 @@
                   android:paddingEnd="10dp"
                   android:text="键盘"
                   android:textAllCaps="false"
-                  android:textColor="#1E3A8A"
+                  android:textColor="#9CE8FF"
                   android:textSize="11sp"
-                  app:backgroundTint="#DCE9FF"
+                  app:backgroundTint="#17415D"
+                  app:cornerRadius="10dp" />
+
+                <com.google.android.material.button.MaterialButton
+                  android:id="@+id/remoteRightClickButton"
+                  android:layout_width="wrap_content"
+                  android:layout_height="32dp"
+                  android:layout_gravity="bottom|start"
+                  android:layout_marginStart="8dp"
+                  android:layout_marginBottom="8dp"
+                  android:contentDescription="在当前光标位置执行右键"
+                  android:insetTop="0dp"
+                  android:insetBottom="0dp"
+                  android:minWidth="0dp"
+                  android:paddingStart="10dp"
+                  android:paddingEnd="10dp"
+                  android:text="右键"
+                  android:textAllCaps="false"
+                  android:textColor="#9CE8FF"
+                  android:textSize="11sp"
+                  app:backgroundTint="#17415D"
                   app:cornerRadius="10dp" />
               </FrameLayout>
 
@@ -425,13 +446,13 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                app:boxBackgroundColor="#F3F7FF"
+                app:boxBackgroundColor="#0F2035"
                 app:boxBackgroundMode="filled"
                 app:boxCornerRadiusBottomEnd="12dp"
                 app:boxCornerRadiusBottomStart="12dp"
                 app:boxCornerRadiusTopEnd="12dp"
                 app:boxCornerRadiusTopStart="12dp"
-                app:boxStrokeColor="#D4E2F8"
+                app:boxStrokeColor="#25415E"
                 app:boxStrokeWidth="1dp"
                 app:boxStrokeWidthFocused="1dp"
                 app:hintEnabled="false">
@@ -448,8 +469,8 @@
                   android:paddingTop="12dp"
                   android:paddingEnd="14dp"
                   android:paddingBottom="12dp"
-                  android:textColor="#11325E"
-                  android:textColorHint="#6A86AD"
+                  android:textColor="#F3F7FF"
+                  android:textColorHint="#7897B8"
                   android:textSize="14sp" />
               </com.google.android.material.textfield.TextInputLayout>
 
@@ -470,7 +491,7 @@
                   android:textAllCaps="false"
                   android:textColor="#FFFFFF"
                   android:textSize="13sp"
-                  app:backgroundTint="#2B6DFF"
+                  app:backgroundTint="#2DB8D4"
                   app:cornerRadius="12dp" />
 
                 <com.google.android.material.button.MaterialButton
@@ -484,10 +505,10 @@
                   android:insetBottom="0dp"
                   android:text="退格"
                   android:textAllCaps="false"
-                  android:textColor="#35598C"
+                  android:textColor="#9AB9D8"
                   android:textSize="13sp"
                   app:cornerRadius="12dp"
-                  app:strokeColor="#D4E2F8" />
+                  app:strokeColor="#25415E" />
 
                 <com.google.android.material.button.MaterialButton
                   android:id="@+id/remoteKeyboardEnterButton"
@@ -500,10 +521,10 @@
                   android:insetBottom="0dp"
                   android:text="回车"
                   android:textAllCaps="false"
-                  android:textColor="#35598C"
+                  android:textColor="#9AB9D8"
                   android:textSize="13sp"
 	                  app:cornerRadius="12dp"
-	                  app:strokeColor="#D4E2F8" />
+	                  app:strokeColor="#25415E" />
 	              </LinearLayout>
 
 	              <LinearLayout
@@ -522,10 +543,10 @@
 	                  android:insetBottom="0dp"
 	                  android:text="发剪贴板"
 	                  android:textAllCaps="false"
-	                  android:textColor="#35598C"
+	                  android:textColor="#9AB9D8"
 	                  android:textSize="12sp"
 	                  app:cornerRadius="10dp"
-	                  app:strokeColor="#D4E2F8" />
+	                  app:strokeColor="#25415E" />
 
 	                <com.google.android.material.button.MaterialButton
 	                  android:id="@+id/remoteFileSendButton"
@@ -538,10 +559,10 @@
 	                  android:insetBottom="0dp"
 	                  android:text="发文件"
 	                  android:textAllCaps="false"
-	                  android:textColor="#35598C"
+	                  android:textColor="#9AB9D8"
 	                  android:textSize="12sp"
 	                  app:cornerRadius="10dp"
-	                  app:strokeColor="#D4E2F8" />
+	                  app:strokeColor="#25415E" />
 	              </LinearLayout>
 
 	              <TextView
@@ -552,7 +573,7 @@
 	                android:ellipsize="end"
 	                android:maxLines="2"
 	                android:text="剪贴板/文件：等待会话"
-	                android:textColor="#5F6F85"
+	                android:textColor="#8EA5BF"
 	                android:textSize="12sp" />
 
 	              <HorizontalScrollView
@@ -583,10 +604,10 @@
                     android:singleLine="true"
                     android:text="⌘A"
                     android:textAllCaps="false"
-                    android:textColor="#35598C"
+                    android:textColor="#9AB9D8"
                     android:textSize="12sp"
                     app:cornerRadius="10dp"
-                    app:strokeColor="#D4E2F8" />
+                    app:strokeColor="#25415E" />
 
                   <com.google.android.material.button.MaterialButton
                     android:id="@+id/remoteShortcutCopyButton"
@@ -605,10 +626,10 @@
                     android:singleLine="true"
                     android:text="⌘C"
                     android:textAllCaps="false"
-                    android:textColor="#35598C"
+                    android:textColor="#9AB9D8"
                     android:textSize="12sp"
                     app:cornerRadius="10dp"
-                    app:strokeColor="#D4E2F8" />
+                    app:strokeColor="#25415E" />
 
                   <com.google.android.material.button.MaterialButton
                     android:id="@+id/remoteShortcutPasteButton"
@@ -627,10 +648,10 @@
                     android:singleLine="true"
                     android:text="⌘V"
                     android:textAllCaps="false"
-                    android:textColor="#35598C"
+                    android:textColor="#9AB9D8"
                     android:textSize="12sp"
                     app:cornerRadius="10dp"
-                    app:strokeColor="#D4E2F8" />
+                    app:strokeColor="#25415E" />
 
                   <com.google.android.material.button.MaterialButton
                     android:id="@+id/remoteShortcutUndoButton"
@@ -649,10 +670,10 @@
                     android:singleLine="true"
                     android:text="⌘Z"
                     android:textAllCaps="false"
-                    android:textColor="#35598C"
+                    android:textColor="#9AB9D8"
                     android:textSize="12sp"
                     app:cornerRadius="10dp"
-                    app:strokeColor="#D4E2F8" />
+                    app:strokeColor="#25415E" />
 
                   <com.google.android.material.button.MaterialButton
                     android:id="@+id/remoteShortcutEscapeButton"
@@ -671,10 +692,10 @@
                     android:singleLine="true"
                     android:text="Esc"
                     android:textAllCaps="false"
-                    android:textColor="#35598C"
+                    android:textColor="#9AB9D8"
                     android:textSize="12sp"
                     app:cornerRadius="10dp"
-                    app:strokeColor="#D4E2F8" />
+                    app:strokeColor="#25415E" />
 
                   <com.google.android.material.button.MaterialButton
                     android:id="@+id/remoteShortcutTabButton"
@@ -693,10 +714,10 @@
                     android:singleLine="true"
                     android:text="Tab"
                     android:textAllCaps="false"
-                    android:textColor="#35598C"
+                    android:textColor="#9AB9D8"
                     android:textSize="12sp"
                     app:cornerRadius="10dp"
-                    app:strokeColor="#D4E2F8" />
+                    app:strokeColor="#25415E" />
 
                   <com.google.android.material.button.MaterialButton
                     android:id="@+id/remoteShortcutArrowLeftButton"
@@ -715,10 +736,10 @@
                     android:singleLine="true"
                     android:text="←"
                     android:textAllCaps="false"
-                    android:textColor="#35598C"
+                    android:textColor="#9AB9D8"
                     android:textSize="14sp"
                     app:cornerRadius="10dp"
-                    app:strokeColor="#D4E2F8" />
+                    app:strokeColor="#25415E" />
 
                   <com.google.android.material.button.MaterialButton
                     android:id="@+id/remoteShortcutArrowDownButton"
@@ -737,10 +758,10 @@
                     android:singleLine="true"
                     android:text="↓"
                     android:textAllCaps="false"
-                    android:textColor="#35598C"
+                    android:textColor="#9AB9D8"
                     android:textSize="14sp"
                     app:cornerRadius="10dp"
-                    app:strokeColor="#D4E2F8" />
+                    app:strokeColor="#25415E" />
 
                   <com.google.android.material.button.MaterialButton
                     android:id="@+id/remoteShortcutArrowUpButton"
@@ -759,10 +780,10 @@
                     android:singleLine="true"
                     android:text="↑"
                     android:textAllCaps="false"
-                    android:textColor="#35598C"
+                    android:textColor="#9AB9D8"
                     android:textSize="14sp"
                     app:cornerRadius="10dp"
-                    app:strokeColor="#D4E2F8" />
+                    app:strokeColor="#25415E" />
 
                   <com.google.android.material.button.MaterialButton
                     android:id="@+id/remoteShortcutArrowRightButton"
@@ -781,10 +802,10 @@
                     android:singleLine="true"
                     android:text="→"
                     android:textAllCaps="false"
-                    android:textColor="#35598C"
+                    android:textColor="#9AB9D8"
                     android:textSize="14sp"
                     app:cornerRadius="10dp"
-                    app:strokeColor="#D4E2F8" />
+                    app:strokeColor="#25415E" />
                 </LinearLayout>
               </HorizontalScrollView>
 
@@ -794,7 +815,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text="传输方式：-"
-                android:textColor="#5F6F85"
+                android:textColor="#8EA5BF"
                 android:textSize="13sp" />
 
               <TextView
@@ -803,7 +824,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="会话链路：-"
-                android:textColor="#5F6F85"
+                android:textColor="#8EA5BF"
                 android:textSize="13sp" />
 
               <TextView
@@ -811,10 +832,10 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:background="#F3F7FF"
+                android:background="#0F2035"
                 android:padding="10dp"
                 android:text="实时指标：\n首帧：-\n渲染FPS：-\n接收码率：-\n发送FPS/码率：-\n候选路径/分级：-\n质量判定：-"
-                android:textColor="#5F6F85"
+                android:textColor="#8EA5BF"
                 android:textSize="12sp" />
 
               <com.google.android.material.button.MaterialButton
@@ -827,10 +848,10 @@
                 android:insetBottom="0dp"
                 android:text="结束会话"
                 android:textAllCaps="false"
-                android:textColor="#B3261E"
+                android:textColor="#FF9A91"
                 android:textSize="13sp"
                 app:cornerRadius="10dp"
-                app:strokeColor="#F1B8B4" />
+                app:strokeColor="#6B3B47" />
             </LinearLayout>
           </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
@@ -847,10 +868,10 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            app:cardBackgroundColor="#FFFFFF"
+            app:cardBackgroundColor="#122137"
             app:cardCornerRadius="16dp"
             app:cardElevation="0dp"
-            app:strokeColor="#D4E2F8"
+            app:strokeColor="#25415E"
             app:strokeWidth="1dp">
 
             <LinearLayout
@@ -864,7 +885,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="本机设备 ID：-"
-                android:textColor="#11325E"
+                android:textColor="#F3F7FF"
                 android:textSize="14sp" />
 
               <TextView
@@ -873,7 +894,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:text="访问凭证：未注册"
-                android:textColor="#5E769B"
+                android:textColor="#8EA5BF"
                 android:textSize="13sp" />
             </LinearLayout>
           </com.google.android.material.card.MaterialCardView>
@@ -882,10 +903,10 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            app:cardBackgroundColor="#FFFFFF"
+            app:cardBackgroundColor="#122137"
             app:cardCornerRadius="16dp"
             app:cardElevation="0dp"
-            app:strokeColor="#D4E2F8"
+            app:strokeColor="#25415E"
             app:strokeWidth="1dp">
 
             <LinearLayout
@@ -898,7 +919,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="中继信令设置"
-                android:textColor="#11325E"
+                android:textColor="#F3F7FF"
                 android:textSize="18sp"
                 android:textStyle="bold" />
 
@@ -906,13 +927,13 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                app:boxBackgroundColor="#F3F7FF"
+                app:boxBackgroundColor="#0F2035"
                 app:boxBackgroundMode="filled"
                 app:boxCornerRadiusBottomEnd="12dp"
                 app:boxCornerRadiusBottomStart="12dp"
                 app:boxCornerRadiusTopEnd="12dp"
                 app:boxCornerRadiusTopStart="12dp"
-                app:boxStrokeColor="#D4E2F8"
+                app:boxStrokeColor="#25415E"
                 app:boxStrokeWidth="1dp"
                 app:boxStrokeWidthFocused="1dp"
                 app:hintEnabled="false">
@@ -927,8 +948,8 @@
                   android:paddingTop="14dp"
                   android:paddingEnd="14dp"
                   android:paddingBottom="14dp"
-                  android:textColor="#11325E"
-                  android:textColorHint="#6A86AD"
+                  android:textColor="#F3F7FF"
+                  android:textColorHint="#7897B8"
                   android:textSize="14sp" />
               </com.google.android.material.textfield.TextInputLayout>
 
@@ -937,7 +958,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="说明：画面走 WebRTC；这里仅做设备发现与信令。"
-                android:textColor="#5E769B"
+                android:textColor="#8EA5BF"
                 android:textSize="12sp" />
 
               <com.google.android.material.button.MaterialButton
@@ -951,7 +972,7 @@
                 android:textAllCaps="false"
                 android:textColor="#FFFFFF"
                 android:textSize="14sp"
-                app:backgroundTint="#2B6DFF"
+                app:backgroundTint="#2DB8D4"
                 app:cornerRadius="12dp" />
 
               <com.google.android.material.button.MaterialButton
@@ -964,9 +985,9 @@
                 android:insetBottom="0dp"
                 android:text="注册设备"
                 android:textAllCaps="false"
-                android:textColor="#35598C"
+                android:textColor="#9AB9D8"
                 app:cornerRadius="12dp"
-                app:strokeColor="#D4E2F8" />
+                app:strokeColor="#25415E" />
 
               <com.google.android.material.button.MaterialButton
                 android:id="@+id/heartbeatButton"
@@ -978,9 +999,9 @@
                 android:insetBottom="0dp"
                 android:text="发送心跳"
                 android:textAllCaps="false"
-                android:textColor="#35598C"
+                android:textColor="#9AB9D8"
                 app:cornerRadius="12dp"
-                app:strokeColor="#D4E2F8" />
+                app:strokeColor="#25415E" />
 
               <com.google.android.material.button.MaterialButton
                 android:id="@+id/sessionButton"
@@ -992,9 +1013,9 @@
                 android:insetBottom="0dp"
                 android:text="发起会话"
                 android:textAllCaps="false"
-                android:textColor="#35598C"
+                android:textColor="#9AB9D8"
                 app:cornerRadius="12dp"
-                app:strokeColor="#D4E2F8" />
+                app:strokeColor="#25415E" />
             </LinearLayout>
           </com.google.android.material.card.MaterialCardView>
 
@@ -1002,10 +1023,10 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            app:cardBackgroundColor="#FFFFFF"
+            app:cardBackgroundColor="#122137"
             app:cardCornerRadius="16dp"
             app:cardElevation="0dp"
-            app:strokeColor="#D4E2F8"
+            app:strokeColor="#25415E"
             app:strokeWidth="1dp">
 
             <LinearLayout
@@ -1025,7 +1046,7 @@
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
                   android:text="开发者调试"
-                  android:textColor="#11325E"
+                  android:textColor="#F3F7FF"
                   android:textSize="18sp"
                   android:textStyle="bold" />
 
@@ -1034,7 +1055,7 @@
                   android:layout_height="wrap_content"
                   android:layout_marginTop="4dp"
                   android:text="开启后显示 E2E proof、测试输入和运行日志。"
-                  android:textColor="#5E769B"
+                  android:textColor="#8EA5BF"
                   android:textSize="12sp" />
               </LinearLayout>
 
@@ -1057,10 +1078,10 @@
             <com.google.android.material.card.MaterialCardView
               android:layout_width="match_parent"
               android:layout_height="wrap_content"
-              app:cardBackgroundColor="#FFFFFF"
+              app:cardBackgroundColor="#122137"
               app:cardCornerRadius="16dp"
               app:cardElevation="0dp"
-              app:strokeColor="#D4E2F8"
+              app:strokeColor="#25415E"
               app:strokeWidth="1dp">
 
               <LinearLayout
@@ -1073,7 +1094,7 @@
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
                   android:text="开发调试"
-                  android:textColor="#11325E"
+                  android:textColor="#F3F7FF"
                   android:textSize="18sp"
                   android:textStyle="bold" />
 
@@ -1087,9 +1108,9 @@
                   android:insetBottom="0dp"
                   android:text="发送测试点击"
                   android:textAllCaps="false"
-                  android:textColor="#35598C"
+                  android:textColor="#9AB9D8"
                   app:cornerRadius="12dp"
-                  app:strokeColor="#D4E2F8" />
+                  app:strokeColor="#25415E" />
 
                 <com.google.android.material.button.MaterialButton
                   android:id="@+id/debugKeyboardButton"
@@ -1101,9 +1122,9 @@
                   android:insetBottom="0dp"
                   android:text="发送按键A"
                   android:textAllCaps="false"
-                  android:textColor="#35598C"
+                  android:textColor="#9AB9D8"
                   app:cornerRadius="12dp"
-                  app:strokeColor="#D4E2F8" />
+                  app:strokeColor="#25415E" />
 
                 <com.google.android.material.button.MaterialButton
                   android:id="@+id/debugScrollButton"
@@ -1115,9 +1136,9 @@
                   android:insetBottom="0dp"
                   android:text="发送滚轮"
                   android:textAllCaps="false"
-                  android:textColor="#35598C"
+                  android:textColor="#9AB9D8"
                   app:cornerRadius="12dp"
-                  app:strokeColor="#D4E2F8" />
+                  app:strokeColor="#25415E" />
 
                 <com.google.android.material.button.MaterialButton
                   android:id="@+id/debugProofSequenceButton"
@@ -1129,9 +1150,9 @@
                   android:insetBottom="0dp"
                   android:text="E2E proof input"
                   android:textAllCaps="false"
-                  android:textColor="#35598C"
+                  android:textColor="#9AB9D8"
                   app:cornerRadius="12dp"
-                  app:strokeColor="#D4E2F8" />
+                  app:strokeColor="#25415E" />
 
                 <LinearLayout
                   android:layout_width="match_parent"
@@ -1149,9 +1170,9 @@
                     android:insetBottom="0dp"
                     android:text="Refresh proof"
                     android:textAllCaps="false"
-                    android:textColor="#35598C"
+                    android:textColor="#9AB9D8"
                     app:cornerRadius="12dp"
-                    app:strokeColor="#D4E2F8" />
+                    app:strokeColor="#25415E" />
 
                   <com.google.android.material.button.MaterialButton
                     android:id="@+id/debugProofResetButton"
@@ -1164,9 +1185,9 @@
                     android:insetBottom="0dp"
                     android:text="Reset proof"
                     android:textAllCaps="false"
-                    android:textColor="#35598C"
+                    android:textColor="#9AB9D8"
                     app:cornerRadius="12dp"
-                    app:strokeColor="#D4E2F8" />
+                    app:strokeColor="#25415E" />
                 </LinearLayout>
 
                 <TextView
@@ -1174,10 +1195,10 @@
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
                   android:layout_marginTop="8dp"
-                  android:background="#F3F7FF"
+                  android:background="#0F2035"
                   android:padding="10dp"
                   android:text="E2E proof: not checked"
-                  android:textColor="#5E769B"
+                  android:textColor="#8EA5BF"
                   android:textSize="12sp" />
               </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
@@ -1186,10 +1207,10 @@
               android:layout_width="match_parent"
               android:layout_height="wrap_content"
               android:layout_marginTop="10dp"
-              app:cardBackgroundColor="#FFFFFF"
+              app:cardBackgroundColor="#122137"
               app:cardCornerRadius="16dp"
               app:cardElevation="0dp"
-              app:strokeColor="#D4E2F8"
+              app:strokeColor="#25415E"
               app:strokeWidth="1dp">
 
               <LinearLayout
@@ -1202,7 +1223,7 @@
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
                   android:text="运行日志"
-                  android:textColor="#11325E"
+                  android:textColor="#F3F7FF"
                   android:textSize="18sp"
                   android:textStyle="bold" />
 
@@ -1211,10 +1232,10 @@
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
                   android:layout_marginTop="10dp"
-                  android:background="#F3F7FF"
+                  android:background="#0F2035"
                   android:padding="12dp"
                   android:text="暂无日志"
-                  android:textColor="#5E769B"
+                  android:textColor="#8EA5BF"
                   android:textSize="12sp" />
               </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
@@ -1231,10 +1252,10 @@
       android:layout_marginStart="0dp"
       android:layout_marginEnd="0dp"
       android:layout_marginBottom="0dp"
-      app:cardBackgroundColor="#FFFFFF"
+      app:cardBackgroundColor="#122137"
       app:cardCornerRadius="0dp"
       app:cardElevation="0dp"
-      app:strokeColor="#D4E2F8"
+      app:strokeColor="#25415E"
       app:strokeWidth="1dp">
 
       <LinearLayout
@@ -1258,14 +1279,14 @@
           android:minHeight="42dp"
           android:text="设备"
           android:textAllCaps="false"
-          android:textColor="#6A86AD"
+          android:textColor="#7897B8"
           android:textSize="11sp"
           app:cornerRadius="10dp"
           app:icon="@android:drawable/ic_menu_slideshow"
           app:iconGravity="top"
           app:iconPadding="2dp"
           app:iconSize="16dp"
-          app:iconTint="#6A86AD" />
+          app:iconTint="#7897B8" />
 
         <com.google.android.material.button.MaterialButton
           android:id="@+id/navCloudButton"
@@ -1279,14 +1300,14 @@
           android:minHeight="42dp"
           android:text="云端"
           android:textAllCaps="false"
-          android:textColor="#6A86AD"
+          android:textColor="#7897B8"
           android:textSize="11sp"
           app:cornerRadius="10dp"
           app:icon="@android:drawable/ic_menu_upload"
           app:iconGravity="top"
           app:iconPadding="2dp"
           app:iconSize="16dp"
-          app:iconTint="#6A86AD" />
+          app:iconTint="#7897B8" />
 
         <com.google.android.material.button.MaterialButton
           android:id="@+id/navAssistButton"
@@ -1300,14 +1321,14 @@
           android:minHeight="42dp"
           android:text="协助"
           android:textAllCaps="false"
-          android:textColor="#6A86AD"
+          android:textColor="#7897B8"
           android:textSize="11sp"
           app:cornerRadius="10dp"
           app:icon="@android:drawable/ic_menu_share"
           app:iconGravity="top"
           app:iconPadding="2dp"
           app:iconSize="16dp"
-          app:iconTint="#6A86AD" />
+          app:iconTint="#7897B8" />
 
         <com.google.android.material.button.MaterialButton
           android:id="@+id/navProfileButton"
@@ -1320,14 +1341,14 @@
           android:minHeight="42dp"
           android:text="设置"
           android:textAllCaps="false"
-          android:textColor="#6A86AD"
+          android:textColor="#7897B8"
           android:textSize="11sp"
           app:cornerRadius="10dp"
           app:icon="@android:drawable/ic_menu_myplaces"
           app:iconGravity="top"
           app:iconPadding="2dp"
           app:iconSize="16dp"
-          app:iconTint="#6A86AD" />
+          app:iconTint="#7897B8" />
       </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
   </FrameLayout>
