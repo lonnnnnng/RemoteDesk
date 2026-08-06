@@ -87,6 +87,9 @@
         -webkit-font-smoothing: antialiased;
       }
 
+      .app-icon { display: inline-block; flex: 0 0 auto; vertical-align: middle; }
+      .button-with-icon { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+
       .desktop-shell { display: grid; grid-template-columns: 212px minmax(0, 1fr); height: 100vh; overflow: hidden; }
       .sidebar-shell {
         background: linear-gradient(180deg, #eaf2ff 0%, #e2ecff 100%);
@@ -795,6 +798,10 @@
         background: #172130;
       }
       .session-tool-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
         background: rgba(255, 255, 255, 0.05);
         color: #e8eef7;
         border-color: rgba(255, 255, 255, 0.1);
@@ -858,6 +865,8 @@
       .floating-session-panel button {
         min-width: 48px;
         min-height: 42px;
+        display: grid;
+        place-items: center;
         border: 0;
         border-radius: 8px;
         background: rgba(255, 255, 255, 0.1);
@@ -869,6 +878,11 @@
       .floating-session-panel button:focus-visible {
         background: rgba(134, 232, 255, 0.2);
         color: #b9f3ff;
+      }
+      .session-tool-btn:focus-visible,
+      .floating-session-panel button:focus-visible {
+        outline: 2px solid rgba(134, 232, 255, 0.8);
+        outline-offset: 2px;
       }
       .session-footer {
         display: flex;

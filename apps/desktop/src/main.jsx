@@ -46,6 +46,46 @@ function describeUnhandledReason(reason) {
   }
 }
 
+// 作者: long；桌面端不额外引入图标运行时，复用一组轻量线性图标保持侧栏和会话工具栏的视觉语言一致。
+function AppIcon({ name, size = 16 }) {
+  const common = {
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    className: "app-icon",
+    "aria-hidden": "true",
+  }
+  switch (name) {
+    case "monitor":
+      return <svg {...common}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg>
+    case "settings":
+      return <svg {...common}><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4" /><circle cx="12" cy="12" r="4" /></svg>
+    case "refresh":
+      return <svg {...common}><path d="M20 11a8 8 0 0 0-14.7-4L4 9" /><path d="M4 4v5h5M4 13a8 8 0 0 0 14.7 4L20 15" /><path d="M20 20v-5h-5" /></svg>
+    case "keyboard":
+      return <svg {...common}><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M6 10h.01M9 10h.01M12 10h.01M15 10h.01M18 10h.01M6 14h12" /></svg>
+    case "clipboard":
+      return <svg {...common}><rect x="6" y="5" width="12" height="16" rx="2" /><path d="M9 5V3h6v2M9 10h6M9 14h4" /></svg>
+    case "file":
+      return <svg {...common}><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5M9 13h6M9 17h6" /></svg>
+    case "focus":
+      return <svg {...common}><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" /><circle cx="12" cy="12" r="3" /></svg>
+    case "command":
+      return <svg {...common}><path d="M9 9V7a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v10a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z" /></svg>
+    case "fullscreen":
+      return <svg {...common}><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" /></svg>
+    case "more":
+      return <svg {...common}><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" /></svg>
+    default:
+      return null
+  }
+}
+
 function showFatalOverlay(title, message) {
   if (fatalOverlayShown) {
     return
@@ -494,6 +534,7 @@ const state = {
   devicesLoading: false,
   lastDevicesSyncAt: 0,
   lastDevicesPushAt: 0,
+  deviceSearchQuery: "",
   presenceReady: false,
   devicesNoticeDismissed: false,
   agentAutoPrepareAttempted: false,
@@ -12760,7 +12801,20 @@ function DesktopReactApp() {
         ? "error"
         : "not checked"
 
-  const visibleDevices = state.relayDevices.length ? state.relayDevices : onlineDevices
+  const allVisibleDevices = state.relayDevices.length ? state.relayDevices : onlineDevices
+  const deviceSearchQuery = `${state.deviceSearchQuery || ""}`.trim().toLowerCase()
+  const visibleDevices = allVisibleDevices.filter((device) => {
+    if (!deviceSearchQuery) {
+      return true
+    }
+    return [
+      device.display_name,
+      device.device_id,
+      device.platform_label,
+      device.role_label,
+      device.status_label,
+    ].filter(Boolean).join(" ").toLowerCase().includes(deviceSearchQuery)
+  })
   const onlineCount = visibleDevices.filter((device) => device.status !== "offline").length
   const sessionDeviceName = querySessionDeviceName || selectedTargetName || "远程设备"
   const sessionPrimaryLabel = sessionActive
@@ -12805,26 +12859,43 @@ function DesktopReactApp() {
           <button
             className="session-tool-btn"
             disabled={!sessionActive}
+            title="发送 Ctrl+Alt+Del"
+            aria-label="发送 Ctrl+Alt+Del"
             onClick={() => sendRemoteCtrlAltDel()}
           >
+            <AppIcon name="command" />
             Ctrl+Alt+Del
           </button>
           <button
             className="session-tool-btn"
             disabled={!sessionActive}
+            title="发送本机剪贴板"
+            aria-label="发送本机剪贴板"
             onClick={() => void sendClipboardToRemote()}
           >
+            <AppIcon name="clipboard" />
             剪贴板
           </button>
           <button
             className="session-tool-btn"
             disabled={!sessionActive}
+            title="选择文件并发送"
+            aria-label="选择文件并发送"
             onClick={() => document.getElementById("sessionFileInput")?.click()}
           >
+            <AppIcon name="file" />
             文件
           </button>
-          <button className="session-tool-btn" disabled={!sessionActive}>截图</button>
-          <button className="session-tool-btn" disabled={!sessionActive}>视图</button>
+          <button
+            className="session-tool-btn"
+            disabled={!sessionActive}
+            title="聚焦远端画面"
+            aria-label="聚焦远端画面"
+            onClick={() => document.getElementById("remoteViewport")?.focus()}
+          >
+            <AppIcon name="focus" />
+            聚焦
+          </button>
           <input
             id="sessionFileInput"
             type="file"
@@ -12870,10 +12941,16 @@ function DesktopReactApp() {
               ? <img src={activeFrameUrl} alt="远端画面" className="viewport-image" />
               : (!hasViewportStream ? <div className="session-placeholder">{viewportHint}</div> : null)}
           </div>
-          <aside className="floating-session-panel">
-            <button type="button" disabled={!sessionActive}>1x</button>
-            <button type="button" disabled={!sessionActive}>键盘</button>
-            <button type="button" disabled={!sessionActive}>更多</button>
+          <aside className="floating-session-panel" aria-label="远端画面工具">
+            <button
+              type="button"
+              disabled={!sessionActive}
+              title="聚焦远端画面"
+              aria-label="聚焦远端画面"
+              onClick={() => document.getElementById("remoteViewport")?.focus()}
+            >
+              <AppIcon name="focus" />
+            </button>
           </aside>
         </section>
 
@@ -12911,7 +12988,7 @@ function DesktopReactApp() {
               }
             }}
           >
-            <span className="nav-dot-icon">▣</span>
+            <span className="nav-dot-icon"><AppIcon name="monitor" size={17} /></span>
             <span>设备</span>
           </button>
           <button
@@ -12922,7 +12999,7 @@ function DesktopReactApp() {
               render()
             }}
           >
-            <span className="nav-dot-icon">⚙</span>
+            <span className="nav-dot-icon"><AppIcon name="settings" size={17} /></span>
             <span>设置</span>
           </button>
         </div>
@@ -12941,8 +13018,8 @@ function DesktopReactApp() {
             </div>
           </div>
           <div className="topbar-actions">
-            <button className="secondary-btn" onClick={() => void refreshRelayDevices({ force: true })}>刷新</button>
-            <button className="primary-btn" onClick={() => { state.currentPage = "settings"; render() }}>设置连接</button>
+            <button className="secondary-btn button-with-icon" title="刷新设备列表" aria-label="刷新设备列表" onClick={() => void refreshRelayDevices({ force: true })}><AppIcon name="refresh" />刷新</button>
+            <button className="primary-btn button-with-icon" title="打开连接设置" aria-label="打开连接设置" onClick={() => { state.currentPage = "settings"; render() }}><AppIcon name="settings" />设置连接</button>
           </div>
         </header>
 
@@ -13186,10 +13263,18 @@ function DesktopReactApp() {
                   </div>
                   <div className="device-list-actions">
                     <label className="search-field">
-                      <span>⌕</span>
-                      <input placeholder="搜索设备、平台或设备 ID" readOnly />
+                      <span aria-hidden="true">⌕</span>
+                      <input
+                        aria-label="搜索设备、平台或设备 ID"
+                        value={state.deviceSearchQuery}
+                        placeholder="搜索设备、平台或设备 ID"
+                        onInput={(event) => {
+                          state.deviceSearchQuery = `${event.target.value || ""}`
+                          render()
+                        }}
+                      />
                     </label>
-                    <button className="secondary-btn" onClick={() => void refreshRelayDevices({ force: true })}>刷新</button>
+                    <button className="secondary-btn button-with-icon" title="刷新设备列表" aria-label="刷新设备列表" onClick={() => void refreshRelayDevices({ force: true })}><AppIcon name="refresh" />刷新</button>
                   </div>
                 </div>
 
@@ -13219,11 +13304,14 @@ function DesktopReactApp() {
                         <span className="row-actions">
                           <button
                             className="secondary-btn compact-action"
+                            title={isSelf ? "本机不可远程控制" : `打开 ${device.display_name || device.device_id} 的远控窗口`}
+                            aria-label={isSelf ? "本机不可远程控制" : `打开 ${device.display_name || device.device_id} 的远控窗口`}
                             disabled={!canRemote}
                             onClick={() => {
                               void openRemoteSessionWindow(device)
                             }}
                           >
+                            <AppIcon name={isSelf ? "monitor" : "fullscreen"} size={15} />
                             {isSelf ? "本机" : "远程"}
                           </button>
                         </span>
