@@ -316,8 +316,8 @@ const LOCAL_PREVIEW_FPS_SAMPLE_MS = 1000
 const SESSION_LINK_SNAPSHOT_LOG_INTERVAL_MS = 2000
 const LIVE_E2E_PROOF_REPORT_MIN_INTERVAL_MS = 1500
 const REMOTE_POINTER_MOVE_THROTTLE_MS = 16
-// 作者: long；Android 最大缩放平移视角时，source_rect 重配、JPEG 帧和原生鼠标事件会叠加成系统合成压力，受控端同步降到约 25fps 执行鼠标 move。
-const REMOTE_ZOOM_PAN_MOUSE_MOVE_THROTTLE_MS = 48
+// 作者: long；缩放后的单指仍然是远端鼠标，保持和普通输入一致的刷新节奏，避免光标落后于局部视角。
+const REMOTE_ZOOM_PAN_MOUSE_MOVE_THROTTLE_MS = 16
 const REMOTE_ZOOM_PAN_MOUSE_MOVE_RECENT_MS = 1800
 const REMOTE_WHEEL_DELTA_SCALE = 120
 const REMOTE_WHEEL_MAX_DELTA = 4096

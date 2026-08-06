@@ -189,10 +189,10 @@ class MainActivity : AppCompatActivity() {
     private const val REMOTE_POINTER_MOVE_MIN_INTERVAL_MS = 12L
     private const val REMOTE_POINTER_MOVE_MIN_DELTA = 0.00032
     private const val REMOTE_POINTER_MOVE_TRAILING_MAX_DELAY_MS = 12L
-    // 作者: long；最大缩放拖动视角时会同时发鼠标移动和 source_rect，单独降低鼠标 move 频率，避免 Mac 输入执行和 Android 全屏合成一起抢主线程。
-    private const val REMOTE_ZOOM_PAN_POINTER_MOVE_MIN_INTERVAL_MS = 48L
-    private const val REMOTE_ZOOM_PAN_POINTER_MOVE_MIN_DELTA = 0.0015
-    private const val REMOTE_ZOOM_PAN_POINTER_MOVE_TRAILING_MAX_DELAY_MS = 48L
+    // 作者: long；缩放后的单指仍然是远端鼠标，保持接近屏幕刷新节奏，避免局部视角更新时光标明显落后于手指。
+    private const val REMOTE_ZOOM_PAN_POINTER_MOVE_MIN_INTERVAL_MS = 16L
+    private const val REMOTE_ZOOM_PAN_POINTER_MOVE_MIN_DELTA = 0.00055
+    private const val REMOTE_ZOOM_PAN_POINTER_MOVE_TRAILING_MAX_DELAY_MS = 16L
     private const val REMOTE_POINTER_MOVE_MAX_HISTORY_SAMPLES = 4
     private const val REMOTE_WHEEL_MIN_INTERVAL_MS = 40L
     private const val REMOTE_WHEEL_DELTA_PER_PIXEL = 3f
@@ -3847,6 +3847,7 @@ class MainActivity : AppCompatActivity() {
         resetRemotePinchFocus()
         remoteTouchDownPoint = mapTouchToFrame(imageView, event.x, event.y)
         remoteLastInputPoint = remoteTouchDownPoint
+        updateRemoteRightClickAvailability()
         remoteLastSentMovePoint = null
         remoteLastSentMoveAtMs = 0L
         remoteLastWheelAtMs = 0L
@@ -3926,6 +3927,7 @@ class MainActivity : AppCompatActivity() {
           }
           val point = mapTouchToFrame(imageView, event.x, event.y)
           remoteLastInputPoint = point ?: remoteLastInputPoint
+          updateRemoteRightClickAvailability()
           remoteLastTouchX = event.x
           remoteLastTouchY = event.y
           return true
@@ -3945,6 +3947,7 @@ class MainActivity : AppCompatActivity() {
         }
         val point = mapTouchToFrame(imageView, event.x, event.y)
         remoteLastInputPoint = point ?: remoteLastInputPoint
+        updateRemoteRightClickAvailability()
         remoteLastTouchX = event.x
         remoteLastTouchY = event.y
         return true
@@ -4140,6 +4143,7 @@ class MainActivity : AppCompatActivity() {
     remoteLongPressDragArmed = false
     remoteTouchDownPoint = null
     remoteLastInputPoint = null
+    updateRemoteRightClickAvailability()
     remoteLastSentMovePoint = null
     remoteLastSentMoveAtMs = 0L
     remoteMouseViewportPanSourceRect = null
@@ -5475,12 +5479,32 @@ class MainActivity : AppCompatActivity() {
       appendLog("当前没有会话，不能执行右键")
       return
     }
-    val point = remoteLastInputPoint ?: NormalizedPoint(0.5, 0.5)
+    val point = remoteLastInputPoint
+    if (point == null) {
+      // 作者: long；右键必须落在用户真实指向的位置，未建立坐标映射时禁用操作，避免把菜单误点到远端桌面中心。
+      updateRemoteTransferStatus("输入：请先在画面中移动光标")
+      appendLog("右键未发送：尚未获得有效远端光标位置")
+      return
+    }
     // 作者: long；右键按钮使用最近一次触摸映射出的远端坐标，先补一帧移动再发完整 down/up，确保右键菜单出现在用户最后指向的位置。
     sendRemoteMouseMove(currentSessionId, point, logSuccess = false, force = true, inputCategory = "right_click")
     sendRemoteMouseButton(currentSessionId, point, "right", "down", logSuccess = true, inputCategory = "right_click")
     sendRemoteMouseButton(currentSessionId, point, "right", "up", logSuccess = true, inputCategory = "right_click")
     updateRemoteTransferStatus("输入：已执行右键")
+  }
+
+  private fun updateRemoteRightClickAvailability() {
+    if (!::binding.isInitialized) {
+      return
+    }
+    val enabled = !sessionId.isNullOrBlank() && remoteLastInputPoint != null
+    binding.remoteRightClickButton.isEnabled = enabled
+    binding.remoteRightClickButton.alpha = if (enabled) 1f else 0.56f
+    binding.remoteRightClickButton.contentDescription = if (enabled) {
+      "在当前光标位置执行右键"
+    } else {
+      "先在远端画面中移动光标后执行右键"
+    }
   }
 
   private fun initializeSessionToolControls() {
@@ -8774,6 +8798,7 @@ class MainActivity : AppCompatActivity() {
       toggleRemoteViewportFullscreen()
     }
     updateRemoteFullscreenButtonText()
+    updateRemoteRightClickAvailability()
   }
 
   private fun applyRemoteViewportTransform(commitRenderScale: Boolean = false) {
