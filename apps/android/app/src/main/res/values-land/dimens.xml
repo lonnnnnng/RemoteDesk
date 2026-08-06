@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 作者: long；横屏非沉浸式页面压低画布高度，给输入工具和状态栏留出可用空间；全屏逻辑仍会把容器扩展到宿主窗口。 -->
+    <dimen name="remote_viewport_height">216dp</dimen>
+</resources>

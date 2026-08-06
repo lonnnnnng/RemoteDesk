@@ -748,6 +748,10 @@
         color: #e8eef7;
       }
       .session-window-shell .session-titlebar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
         height: 52px;
         padding: 0 16px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -894,6 +898,191 @@
         color: #b7c4d6;
         font-size: 12px;
       }
+      /* 作者: long；这些状态样式把连接、可交互和传输细节分成不同视觉层级，避免远控画布被诊断文字夺走注意力。 */
+      .product-desktop-shell .page-shell {
+        background: #f1f4f7;
+      }
+      .product-desktop-shell .topbar-actions {
+        align-items: center;
+      }
+      .product-desktop-shell .device-list-panel,
+      .product-desktop-shell .device-side-panel,
+      .product-desktop-shell .settings-panel {
+        box-shadow: 0 12px 30px rgba(15, 30, 48, 0.055);
+      }
+      .product-desktop-shell .device-table-row:not(.device-table-head):hover {
+        background: #f4fbfb;
+        border-top-color: #b8dfe0;
+      }
+      .product-desktop-shell .device-row-active {
+        position: relative;
+        background: #eef9f8;
+        border-color: #75c7ca;
+        box-shadow: inset 3px 0 0 #139ba0;
+      }
+      .product-desktop-shell .device-row-active::before {
+        content: "当前目标";
+        position: absolute;
+        top: 8px;
+        right: 16px;
+        color: #08777c;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+      }
+      .search-result-count {
+        color: #6c7a8a;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .icon-btn {
+        display: inline-grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        border-radius: 8px;
+        box-shadow: none;
+      }
+      .subtle-icon-btn {
+        color: #667689;
+        background: #eef2f5;
+        border: 1px solid #d2dbe4;
+      }
+      .subtle-icon-btn:hover:enabled {
+        background: #e2e9ef;
+        color: #1c2b3a;
+      }
+      .side-panel-heading {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .panel-kicker {
+        display: block;
+        color: #139ba0;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      .selected-target-summary {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+        padding: 12px;
+        border: 1px solid #cfe0e3;
+        border-radius: 8px;
+        background: #f2fbfb;
+      }
+      .selected-target-copy {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+      .selected-target-copy strong,
+      .selected-target-copy span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .selected-target-copy strong { color: #102132; font-size: 14px; }
+      .selected-target-copy span { color: #657786; font-size: 12px; }
+      .side-panel-primary-action {
+        width: 100%;
+        gap: 8px;
+      }
+      .capability-label {
+        color: #7d8b99;
+        font-size: 12px;
+      }
+      .capability-ready {
+        color: #12836c;
+        font-weight: 760;
+      }
+      .session-toolbar-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .session-toolbar-tools {
+        padding-left: 8px;
+        border-left: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      .session-primary-dot,
+      .session-link-dot {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        flex: 0 0 7px;
+        border-radius: 999px;
+        background: #d19a36;
+        box-shadow: 0 0 0 3px rgba(209, 154, 54, 0.15);
+      }
+      .session-primary-btn .session-primary-dot { background: #d9f7f0; box-shadow: 0 0 0 3px rgba(217, 247, 240, 0.13); }
+      .session-link-dot.online { background: #4ee2ab; box-shadow: 0 0 0 3px rgba(78, 226, 171, 0.14); }
+      .session-link-dot.offline { background: #d19a36; }
+      .session-toolbar-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        color: #c5d2e2;
+      }
+      .session-metrics-details {
+        position: relative;
+        color: #c5d2e2;
+        font-size: 12px;
+      }
+      .session-metrics-details summary {
+        cursor: pointer;
+        list-style: none;
+        padding: 5px 8px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 7px;
+        color: #aab9cb;
+        white-space: nowrap;
+      }
+      .session-metrics-details summary::-webkit-details-marker { display: none; }
+      .session-metrics-details[open] summary { color: #d8f5f4; border-color: rgba(109, 215, 215, 0.52); }
+      .session-metrics-popover {
+        position: absolute;
+        z-index: 5;
+        right: 0;
+        top: calc(100% + 8px);
+        display: grid;
+        gap: 7px;
+        min-width: 220px;
+        padding: 10px;
+        border: 1px solid rgba(154, 191, 206, 0.24);
+        border-radius: 8px;
+        background: rgba(12, 20, 31, 0.98);
+        box-shadow: 0 16px 34px rgba(0, 0, 0, 0.3);
+      }
+      .session-canvas-badge {
+        position: absolute;
+        z-index: 2;
+        top: 16px;
+        left: 18px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 28px;
+        padding: 0 10px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 7px;
+        background: rgba(7, 13, 21, 0.72);
+        color: #cad6e5;
+        font-size: 11px;
+        font-weight: 760;
+        backdrop-filter: blur(8px);
+        pointer-events: none;
+      }
+      .session-canvas-badge.ready { color: #baf0d7; border-color: rgba(78, 226, 171, 0.34); }
+      .session-canvas-badge.waiting { color: #f1d38a; border-color: rgba(209, 154, 54, 0.32); }
       @media (max-width: 1180px) {
         .content-grid { grid-template-columns: 1fr; }
         .summary-grid, .flow-grid, .inline-metrics, .two-up, .four-up, .partner-grid, .debug-grid, .devices-summary-grid, .local-device-grid { grid-template-columns: 1fr 1fr; }
@@ -966,6 +1155,18 @@
           height: auto;
           padding: 10px 12px;
         }
+        .session-toolbar-group,
+        .session-toolbar-status {
+          width: 100%;
+        }
+        .session-toolbar-tools {
+          padding-left: 0;
+          border-left: 0;
+          border-top: 1px solid rgba(255, 255, 255, 0.1);
+          padding-top: 8px;
+        }
+        .session-toolbar-tools .session-tool-btn { flex: 1 1 0; }
+        .session-metrics-details { margin-left: auto; }
       }
     </style>
   </head>

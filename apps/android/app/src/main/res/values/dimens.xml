@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 作者: long；普通纵向页面给远控画布保留稳定的 16:9 视觉重量，避免固定高度在不同模拟器上挤压或浪费空间。 -->
+    <dimen name="remote_viewport_height">248dp</dimen>
+</resources>

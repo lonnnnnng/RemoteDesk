@@ -81,6 +81,8 @@ function AppIcon({ name, size = 16 }) {
       return <svg {...common}><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" /></svg>
     case "more":
       return <svg {...common}><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" /></svg>
+    case "close":
+      return <svg {...common}><path d="M6 6l12 12M18 6L6 18" /></svg>
     default:
       return null
   }
@@ -12722,6 +12724,8 @@ function DesktopReactApp() {
   const sessionActive = Boolean(state.sessionId)
   const selectedTargetOffline = selectedTarget?.status === "offline"
   const selectedTargetName = selectedTarget?.display_name || state.targetDeviceId || "未选择目标设备"
+  const selectedTargetPlatform = selectedTarget?.platform_label || "未知平台"
+  const selectedTargetCanRemote = Boolean(selectedTarget?.is_target_candidate)
   const controllerDeviceId = `${state.sessionInfo?.controller_device_id || ""}`.trim()
   const controllerDevice = controllerDeviceId
     ? (state.relayDevices.find((device) => device.device_id === controllerDeviceId) || null)
@@ -12896,59 +12900,28 @@ function DesktopReactApp() {
         </header>
 
         <section className="session-toolbar">
-          <button
-            className={sessionActive ? "danger-btn" : "session-primary-btn"}
-            disabled={sessionPrimaryDisabled}
-            onClick={() => {
-              if (sessionActive) {
-                endSession()
-              } else {
-                runSessionPrimaryAction()
-              }
-            }}
-          >
-            {sessionPrimaryLabel}
-          </button>
-          <button
-            className="session-tool-btn"
-            disabled={!sessionActive}
-            title="发送 Ctrl+Alt+Del"
-            aria-label="发送 Ctrl+Alt+Del"
-            onClick={() => sendRemoteCtrlAltDel()}
-          >
-            <AppIcon name="command" />
-            Ctrl+Alt+Del
-          </button>
-          <button
-            className="session-tool-btn"
-            disabled={!sessionActive}
-            title="发送本机剪贴板"
-            aria-label="发送本机剪贴板"
-            onClick={() => void sendClipboardToRemote()}
-          >
-            <AppIcon name="clipboard" />
-            剪贴板
-          </button>
-          <button
-            className="session-tool-btn"
-            disabled={!sessionActive}
-            title="选择文件并发送"
-            aria-label="选择文件并发送"
-            onClick={() => document.getElementById("sessionFileInput")?.click()}
-          >
-            <AppIcon name="file" />
-            文件
-          </button>
-          <button
-            className="session-tool-btn"
-            disabled={!sessionActive}
-            title="聚焦远端画面"
-            aria-label="聚焦远端画面"
-            onClick={() => document.getElementById("remoteViewport")?.focus()}
-          >
-            <AppIcon name="focus" />
-            聚焦
-          </button>
+          <div className="session-toolbar-group session-toolbar-primary">
+            <button
+              className={sessionActive ? "danger-btn" : "session-primary-btn"}
+              disabled={sessionPrimaryDisabled}
+              onClick={() => {
+                if (sessionActive) {
+                  endSession()
+                } else {
+                  runSessionPrimaryAction()
+                }
+              }}
+            >
+              <span className="session-primary-dot" aria-hidden="true" />
+              {sessionPrimaryLabel}
+            </button>
+          </div>
+          <div className="session-toolbar-group session-toolbar-tools" aria-label="远程工具">
+            <button className="session-tool-btn" disabled={!sessionActive} title="发送 Ctrl+Alt+Del" aria-label="发送 Ctrl+Alt+Del" onClick={() => sendRemoteCtrlAltDel()}><AppIcon name="command" />Ctrl+Alt+Del</button>
+            <button className="session-tool-btn" disabled={!sessionActive} title="发送本机剪贴板" aria-label="发送本机剪贴板" onClick={() => void sendClipboardToRemote()}><AppIcon name="clipboard" />剪贴板</button>
+            <button className="session-tool-btn" disabled={!sessionActive} title="选择文件并发送" aria-label="选择文件并发送" onClick={() => document.getElementById("sessionFileInput")?.click()}><AppIcon name="file" />文件</button>
+            <button className="session-tool-btn" disabled={!sessionActive} title="聚焦远端画面" aria-label="聚焦远端画面" onClick={() => document.getElementById("remoteViewport")?.focus()}><AppIcon name="focus" />聚焦</button>
+          </div>
           <input
             id="sessionFileInput"
             type="file"
@@ -12964,14 +12937,27 @@ function DesktopReactApp() {
             }}
           />
           <div className="session-toolbar-spacer" />
-          <span className="metric-inline">{transportModeLabel}</span>
-          {showCandidateMetric ? <span className="metric-inline">{`${liveCandidatePath || "-"} / ${liveCandidateTier || "-"}`}</span> : null}
-          <span className="metric-inline">{firstFrameMs >= 0 ? `${firstFrameMs} ms 首帧` : "等待首帧"}</span>
-          <span className="metric-inline">{state.clipboardStatus}</span>
-          <span className="metric-inline">{state.fileTransferStatus}</span>
+          <div className="session-toolbar-status" aria-live="polite">
+            <span className={`session-link-dot ${connectionReady() ? "online" : "offline"}`} aria-hidden="true" />
+            <span className="metric-inline">{state.webrtcState === "connected" ? "WebRTC 已连接" : readyStateLabel()}</span>
+            <details className="session-metrics-details">
+              <summary>链路详情</summary>
+              <div className="session-metrics-popover">
+                <span className="metric-inline">传输：{transportModeLabel}</span>
+                {showCandidateMetric ? <span className="metric-inline">路径：{`${liveCandidatePath || "-"} / ${liveCandidateTier || "-"}`}</span> : null}
+                <span className="metric-inline">首帧：{firstFrameMs >= 0 ? `${firstFrameMs} ms` : "等待"}</span>
+                <span className="metric-inline">剪贴板：{state.clipboardStatus}</span>
+                <span className="metric-inline">文件：{state.fileTransferStatus}</span>
+              </div>
+            </details>
+          </div>
         </section>
 
         <section className="session-canvas">
+          <div className={`session-canvas-badge ${canSendInput() ? "ready" : "waiting"}`}>
+            <span className="session-link-dot" aria-hidden="true" />
+            {canSendInput() ? "可交互" : state.webrtcState === "connected" ? "等待输入权限" : "等待首帧"}
+          </div>
           <div
             id="remoteViewport"
             className={`session-viewport ${canSendInput() ? "clickable" : ""}`}
@@ -13327,6 +13313,8 @@ function DesktopReactApp() {
                         }}
                       />
                     </label>
+                    <span className="search-result-count">{visibleDevices.length}/{allVisibleDevices.length} 台</span>
+                    {deviceSearchQuery ? <button className="icon-btn subtle-icon-btn" title="清除搜索" aria-label="清除搜索" onClick={() => { state.deviceSearchQuery = ""; render() }}><AppIcon name="close" size={15} /></button> : null}
                     <button className="secondary-btn button-with-icon" title="刷新设备列表" aria-label="刷新设备列表" onClick={() => void refreshRelayDevices({ force: true })}><AppIcon name="refresh" />刷新</button>
                   </div>
                 </div>
@@ -13336,7 +13324,7 @@ function DesktopReactApp() {
                     <span>设备</span>
                     <span>平台</span>
                     <span>状态</span>
-                    <span>延迟</span>
+                    <span>能力</span>
                     <span>最近活跃</span>
                     <span>操作</span>
                   </div>
@@ -13352,7 +13340,7 @@ function DesktopReactApp() {
                         </div>
                         <span>{device.platform_label}</span>
                         <span className="status-text"><i className={`status-dot ${statusDotClass(device.status)}`} />{device.status_label}</span>
-                        <span>{device.status === "offline" ? "-" : "-"}</span>
+                        <span className={`capability-label ${canRemote ? "capability-ready" : ""}`}>{canRemote ? "可控" : "只读"}</span>
                         <span>{device.last_seen_label || "-"}</span>
                         <span className="row-actions">
                           <button
@@ -13375,7 +13363,28 @@ function DesktopReactApp() {
               </section>
 
               <section className="device-side-panel">
-                <h3>当前状态</h3>
+                <div className="side-panel-heading">
+                  <div>
+                    <span className="panel-kicker">工作台状态</span>
+                    <h3>当前目标</h3>
+                  </div>
+                  <span className={`chip ${connectionReady() ? "chip-success" : "chip-muted"}`}>{readyStateLabel()}</span>
+                </div>
+                <div className="selected-target-summary">
+                  <span className={`platform-badge ${selectedTarget?.platform || "unknown"}`}>{selectedTarget ? platformBadgeLabel(selectedTarget.platform) : "--"}</span>
+                  <div className="selected-target-copy">
+                    <strong>{selectedTargetName}</strong>
+                    <span>{selectedTarget ? `${selectedTargetPlatform} · ${selectedTarget.status_label || "等待状态"}` : "从列表选择一台在线设备"}</span>
+                  </div>
+                </div>
+                <button
+                  className="primary-btn side-panel-primary-action"
+                  disabled={!selectedTarget || !selectedTargetCanRemote || selectedTargetOffline}
+                  onClick={() => { if (selectedTarget) void openRemoteSessionWindow(selectedTarget) }}
+                >
+                  <AppIcon name="fullscreen" size={15} />
+                  {selectedTargetOffline ? "目标离线" : selectedTarget ? "打开远控窗口" : "选择目标设备"}
+                </button>
                 <div className="kv-two-col single-col">
                   <div className="kv-item"><span>角色</span><strong>{roleLabel}</strong></div>
                   <div className="kv-item"><span>会话</span><strong>{state.sessionId || "未开始"}</strong></div>

@@ -52,6 +52,7 @@ import androidx.core.view.isVisible
 import androidx.core.widget.doAfterTextChanged
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
+import com.remotedesk.app.R
 import com.remotedesk.app.controller.StubSessionController
 import com.remotedesk.app.databinding.ActivityMainBinding
 import com.remotedesk.app.network.StubSocketClient
@@ -9333,7 +9334,14 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun updateRemoteFullscreenButtonText() {
-    binding.remoteFullscreenButton.text = if (!remoteFullscreenActive) "全屏" else "退出全屏"
+    val actionLabel = if (!remoteFullscreenActive) "进入全屏" else "退出全屏"
+    // 作者: long；横屏画布的全屏动作使用图标和无障碍标签表达状态，避免文字胶囊覆盖远端桌面内容。
+    binding.remoteFullscreenButton.apply {
+      text = ""
+      contentDescription = actionLabel
+      tooltipText = actionLabel
+      setIconResource(if (!remoteFullscreenActive) R.drawable.ic_fullscreen else R.drawable.ic_fullscreen_exit)
+    }
   }
 
   private fun applyImmersiveMode(enabled: Boolean) {
