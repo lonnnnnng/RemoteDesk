@@ -8825,6 +8825,9 @@ class MainActivity : AppCompatActivity() {
             scheduleRemoteViewportHardwareLayerRelease()
           }
           sendRemoteViewportInteractionHint("end", "pinch", force = true)
+          // 作者: long；ScaleGestureDetector 已经发送了最终裁剪区域，标记手势完成，避免同一个 ACTION_POINTER_UP 再走手写兜底把局部视口误重置为整屏。
+          remoteManualPinchActive = false
+          remoteManualPinchLastSpan = 0f
         }
       },
     )
