@@ -29,6 +29,8 @@ RD_AGENT_DEVICE_ID="${RD_AGENT_DEVICE_ID:-auto}"
 RD_DESKTOP_DEBUG_ENABLE_TOOLS="${RD_DESKTOP_DEBUG_ENABLE_TOOLS:-0}"
 RD_DESKTOP_DEBUG_SEND_CLIPBOARD_TEXT="${RD_DESKTOP_DEBUG_SEND_CLIPBOARD_TEXT:-}"
 RD_DESKTOP_DEBUG_SEND_FILE_PATH="${RD_DESKTOP_DEBUG_SEND_FILE_PATH:-}"
+# 作者: long；本地三端联调已经用 relay_udp 证明 H.264/RTP 收发稳定，默认选中继避免候选优选到无媒体包的 P2P 路径；仍可通过环境变量切回 default。
+RD_ICE_MODE="${RD_ICE_MODE:-relay_udp}"
 RD_DETECTED_AGENT_DEVICE_ID=""
 
 ANDROID_SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
@@ -496,7 +498,7 @@ start_relay() {
     return 0
   fi
   log "starting relay service on :${RD_WS_PORT}"
-  screen_start "${RELAY_SCREEN}" bash -lc "cd '${ROOT_DIR}' && RD_TURN_PORT='${RD_ACTIVE_TURN_PORT}' make server-run >> '${RELAY_LOG}' 2>&1"
+  screen_start "${RELAY_SCREEN}" bash -lc "cd '${ROOT_DIR}' && RD_TURN_PORT='${RD_ACTIVE_TURN_PORT}' RD_ICE_MODE='${RD_ICE_MODE}' make server-run >> '${RELAY_LOG}' 2>&1"
   if ! wait_for_tcp_listen "${RD_WS_PORT}" 30; then
     warn "relay did not listen on ${RD_WS_PORT} in time, check ${RELAY_LOG}"
     return 1
@@ -723,7 +725,7 @@ Environment overrides:
   RD_EMULATOR_ARGS='-no-snapshot-load -no-snapshot-save'
   RD_AGENT_DEVICE_ID=auto
   RD_SCREEN_PREFIX=rdtriad
-  RD_ICE_MODE=default|relay_only|relay_udp|relay_tcp
+  RD_ICE_MODE=relay_udp|default|relay_only|relay_tcp (default: relay_udp)
   RD_ICE_DISABLE_STUN=0|1
   RD_ICE_TURN_TRANSPORT=all|udp|tcp
   RD_ICE_POLICY_RELAY_UDP_HIGH_RTT_MS=220

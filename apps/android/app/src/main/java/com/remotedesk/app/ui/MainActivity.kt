@@ -405,6 +405,8 @@ class MainActivity : AppCompatActivity() {
   private var remoteMouseButtonDown = false
   private var remoteTouchDownPoint: NormalizedPoint? = null
   private var remoteLastInputPoint: NormalizedPoint? = null
+  // 作者: long；当前手势抬手后仍要保留最后一个真实远端坐标，右键按钮才能在下一次操作中落到用户刚才指向的位置。
+  private var remoteLastKnownInputPoint: NormalizedPoint? = null
   private var remoteLastSentMovePoint: NormalizedPoint? = null
   private var remoteLastSentMoveAtMs = 0L
   private var remotePendingMoveSessionId: String? = null
@@ -3846,7 +3848,7 @@ class MainActivity : AppCompatActivity() {
         remotePinchZoomActive = false
         resetRemotePinchFocus()
         remoteTouchDownPoint = mapTouchToFrame(imageView, event.x, event.y)
-        remoteLastInputPoint = remoteTouchDownPoint
+        recordRemoteInputPoint(remoteTouchDownPoint)
         updateRemoteRightClickAvailability()
         remoteLastSentMovePoint = null
         remoteLastSentMoveAtMs = 0L
@@ -3881,7 +3883,8 @@ class MainActivity : AppCompatActivity() {
         if (remoteScrollGestureActive) {
           remoteScrollLastFocusX = averageRemainingPointerX(event, event.actionIndex)
           remoteScrollLastFocusY = averageRemainingPointerY(event, event.actionIndex)
-          remoteMultiTouchStartSpan = pointerSpan(event)
+          // 作者: long；ACTION_POINTER_UP 仍会把抬起的指针留在事件数组里，三指切回双指时必须只用剩余指针计算跨度，否则下一帧会被误判成缩放跳变。
+          remoteMultiTouchStartSpan = pointerSpanExcluding(event, event.actionIndex)
         } else {
           if (remoteManualPinchActive) {
             endRemoteViewportManualPinch(reason = "pointer_up")
@@ -3926,7 +3929,7 @@ class MainActivity : AppCompatActivity() {
             sendRemotePointerMovesFromMotionEvent(imageView, event, inputCategory = "drag")
           }
           val point = mapTouchToFrame(imageView, event.x, event.y)
-          remoteLastInputPoint = point ?: remoteLastInputPoint
+          recordRemoteInputPoint(point ?: remoteLastInputPoint)
           updateRemoteRightClickAvailability()
           remoteLastTouchX = event.x
           remoteLastTouchY = event.y
@@ -3946,7 +3949,7 @@ class MainActivity : AppCompatActivity() {
           )
         }
         val point = mapTouchToFrame(imageView, event.x, event.y)
-        remoteLastInputPoint = point ?: remoteLastInputPoint
+        recordRemoteInputPoint(point ?: remoteLastInputPoint)
         updateRemoteRightClickAvailability()
         remoteLastTouchX = event.x
         remoteLastTouchY = event.y
@@ -4045,7 +4048,7 @@ class MainActivity : AppCompatActivity() {
     }
     val point = mapTouchToFrame(imageView, touchX, touchY) ?: return false
     updateRemoteLocalCursor(touchX, touchY)
-    remoteLastInputPoint = point
+    recordRemoteInputPoint(point)
     return if (force) {
       // 作者: long；单指移动只同步光标位置，不按下鼠标键，避免用户想悬停时被误识别成拖拽。
       sendRemoteMouseMove(currentSessionId, point, logSuccess = false, force = true, inputCategory = inputCategory, sentAtMs = sampleAtMs)
@@ -4080,7 +4083,7 @@ class MainActivity : AppCompatActivity() {
     }
     val mappedPoint = point ?: return false
     updateRemoteLocalCursor(candidateX, candidateY, sampleAtMs = now)
-    remoteLastInputPoint = mappedPoint
+    recordRemoteInputPoint(mappedPoint)
     // 作者: long；真机 move 事件可能一帧内合并多个历史点，远控鼠标更需要稳定尾点而不是把历史轨迹全量灌进 CGEvent 队列；每个 Android vsync 只发送最新坐标，抬手时再强制补尾帧。
     return scheduleFrameCoalescedRemoteMouseMove(
       sessionId = currentSessionId,
@@ -4166,6 +4169,19 @@ class MainActivity : AppCompatActivity() {
     }
     scheduleRemoteViewportHardwareLayerRelease()
     scheduleRemoteLocalCursorHide()
+  }
+
+  private fun recordRemoteInputPoint(point: NormalizedPoint?) {
+    remoteLastInputPoint = point
+    if (point != null) {
+      remoteLastKnownInputPoint = point
+    }
+  }
+
+  private fun clearRemoteLastKnownInputPoint() {
+    remoteLastInputPoint = null
+    remoteLastKnownInputPoint = null
+    updateRemoteRightClickAvailability()
   }
 
   private fun releaseRemoteInputState(sendMouseUp: Boolean = true) {
@@ -4508,7 +4524,7 @@ class MainActivity : AppCompatActivity() {
       }
       remoteLastSentMovePoint = point
       remoteLastSentMoveAtMs = sentAtMs
-      remoteLastInputPoint = point
+      recordRemoteInputPoint(point)
     }
     return sent
   }
@@ -5168,6 +5184,28 @@ class MainActivity : AppCompatActivity() {
     return kotlin.math.sqrt(((dx * dx) + (dy * dy)).toDouble()).toFloat()
   }
 
+  private fun pointerSpanExcluding(event: MotionEvent, excludedIndex: Int): Float {
+    var firstIndex = -1
+    var secondIndex = -1
+    for (index in 0 until event.pointerCount) {
+      if (index == excludedIndex) {
+        continue
+      }
+      if (firstIndex < 0) {
+        firstIndex = index
+      } else {
+        secondIndex = index
+        break
+      }
+    }
+    if (firstIndex < 0 || secondIndex < 0) {
+      return 0f
+    }
+    val dx = event.getX(firstIndex) - event.getX(secondIndex)
+    val dy = event.getY(firstIndex) - event.getY(secondIndex)
+    return kotlin.math.sqrt(((dx * dx) + (dy * dy)).toDouble()).toFloat()
+  }
+
   private fun averagePointerX(event: MotionEvent): Float {
     if (event.pointerCount <= 0) {
       return 0f
@@ -5479,7 +5517,7 @@ class MainActivity : AppCompatActivity() {
       appendLog("当前没有会话，不能执行右键")
       return
     }
-    val point = remoteLastInputPoint
+    val point = remoteLastKnownInputPoint
     if (point == null) {
       // 作者: long；右键必须落在用户真实指向的位置，未建立坐标映射时禁用操作，避免把菜单误点到远端桌面中心。
       updateRemoteTransferStatus("输入：请先在画面中移动光标")
@@ -5497,7 +5535,7 @@ class MainActivity : AppCompatActivity() {
     if (!::binding.isInitialized) {
       return
     }
-    val enabled = !sessionId.isNullOrBlank() && remoteLastInputPoint != null
+    val enabled = !sessionId.isNullOrBlank() && remoteLastKnownInputPoint != null
     binding.remoteRightClickButton.isEnabled = enabled
     binding.remoteRightClickButton.alpha = if (enabled) 1f else 0.56f
     binding.remoteRightClickButton.contentDescription = if (enabled) {
@@ -7174,6 +7212,7 @@ class MainActivity : AppCompatActivity() {
 
   private fun resetSessionUi(clearFrame: Boolean = false) {
     releaseRemoteInputState()
+    clearRemoteLastKnownInputPoint()
     sessionId = null
     autoProofInputSentForSessionId = ""
     sessionStartedAtWallClockMs = 0L

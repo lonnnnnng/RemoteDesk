@@ -345,16 +345,14 @@
 
       .product-desktop-shell {
         grid-template-columns: 184px minmax(0, 1fr);
-        background:
-          linear-gradient(180deg, #f7f9fc 0%, #eef2f6 52%, #e7edf4 100%),
-          repeating-linear-gradient(90deg, rgba(13, 23, 38, 0.035) 0 1px, transparent 1px 72px);
+        background: #f4f7fb;
       }
       .product-desktop-shell .sidebar-shell {
         grid-template-rows: auto 1fr auto;
         gap: 18px;
         padding: 14px 10px;
-        background: rgba(251, 252, 254, 0.96);
-        border-right: 1px solid #dbe3ed;
+        background: #111827;
+        border-right: 1px solid #273247;
       }
       .product-desktop-shell .sidebar-brand {
         padding: 0 2px 10px;
@@ -372,21 +370,21 @@
         height: 30px;
         flex: 0 0 30px;
         border-radius: 8px;
-        background: #e8f1ff;
-        color: #1263ff;
+        background: #1d3447;
+        color: #86e8ff;
         font-size: 12px;
         font-weight: 800;
         letter-spacing: 0;
       }
       .product-desktop-shell .brand-title {
-        color: #0d1726;
+        color: #f8fafc;
         font-size: 17px;
         line-height: 1.15;
         font-weight: 760;
         letter-spacing: 0;
       }
       .product-desktop-shell .brand-subtitle {
-        color: #5f6f85;
+        color: #93a4b8;
         font-size: 12px;
         letter-spacing: 0;
       }
@@ -403,7 +401,7 @@
         min-height: 42px;
         padding: 0 12px;
         border-radius: 8px;
-        color: #40516b;
+        color: #adbacb;
         font-weight: 680;
         letter-spacing: 0;
       }
@@ -412,13 +410,14 @@
         grid-auto-rows: max-content;
       }
       .product-desktop-shell .nav-item:hover:enabled {
-        background: #f1f6ff;
-        color: #1263ff;
+        background: #1a2738;
+        color: #86e8ff;
       }
       .product-desktop-shell .nav-item-active {
-        background: #eaf2ff;
-        color: #1263ff;
-        border: 0;
+        background: #1b3144;
+        color: #86e8ff;
+        border: 1px solid #2e526a;
+        box-shadow: inset 3px 0 0 #5dd8f5;
         transform: none;
       }
       .sidebar-status {
@@ -427,7 +426,7 @@
         gap: 8px;
         min-height: 36px;
         padding: 0 10px;
-        color: #5f6f85;
+        color: #93a4b8;
         font-size: 13px;
       }
       .status-dot {
@@ -438,11 +437,11 @@
         border-radius: 999px;
         background: #8795aa;
       }
-      .status-dot.online { background: #079455; }
+      .status-dot.online { background: #37d39a; box-shadow: 0 0 0 4px rgba(55, 211, 154, 0.12); }
       .status-dot.busy { background: #e59b12; }
       .status-dot.offline { background: #aab6c6; }
       .product-desktop-shell .main-shell {
-        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        background: #f7f9fc;
       }
       .product-desktop-shell .topbar-shell {
         height: 72px;
@@ -817,6 +816,7 @@
         min-height: 0;
         overflow: hidden;
         background: #05080d;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
       }
       .session-viewport {
         width: 100%;
@@ -848,21 +848,27 @@
         display: grid;
         gap: 8px;
         transform: translateY(-50%);
-        padding: 8px;
+        padding: 6px;
         border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 18px;
-        background: rgba(13, 23, 38, 0.72);
+        border-radius: 12px;
+        background: rgba(12, 18, 29, 0.92);
         backdrop-filter: blur(12px);
+        box-shadow: 0 14px 32px rgba(0, 0, 0, 0.22);
       }
       .floating-session-panel button {
-        min-width: 58px;
-        min-height: 38px;
+        min-width: 48px;
+        min-height: 42px;
         border: 0;
         border-radius: 8px;
         background: rgba(255, 255, 255, 0.1);
         color: #ffffff;
         font-size: 12px;
         font-weight: 720;
+      }
+      .floating-session-panel button:hover:enabled,
+      .floating-session-panel button:focus-visible {
+        background: rgba(134, 232, 255, 0.2);
+        color: #b9f3ff;
       }
       .session-footer {
         display: flex;
