@@ -5144,6 +5144,20 @@ class MainActivity : AppCompatActivity() {
     return maxOf(localScale, sourceRectScale)
   }
 
+  private fun remoteViewportEffectiveScale(): Float {
+    val materializedSourceRect = remotePinchViewportSourceRect
+      ?.takeIf { isMaterializedRemoteFrameSourceRect(it) }
+      ?: remoteFrameSourceRect.takeIf { isMaterializedRemoteFrameSourceRect(it) }
+      ?: currentRemoteViewportVisibleRect()?.takeIf { isMaterializedRemoteFrameSourceRect(it) }
+    val localScale = remoteViewportScale.coerceIn(REMOTE_VIEWPORT_MIN_SCALE, REMOTE_VIEWPORT_MAX_SCALE)
+    val sourceRectScale = materializedSourceRect
+      ?.let { remoteViewportInteractionScale(it, requestFullViewport = false) }
+      ?: REMOTE_VIEWPORT_MIN_SCALE
+    // 作者: long；本地 transform 和受控端裁剪可能异步完成，取两者较大值可以让倍率反馈覆盖先本地放大、后高清帧到达和反向过程。
+    return maxOf(localScale, sourceRectScale)
+      .coerceIn(REMOTE_VIEWPORT_MIN_SCALE, REMOTE_VIEWPORT_MAX_SCALE)
+  }
+
   private fun remoteMultiTouchSpanChanged(event: MotionEvent): Boolean {
     if (event.pointerCount < 2) {
       return false
@@ -8878,11 +8892,19 @@ class MainActivity : AppCompatActivity() {
       translationX = tx + remoteSourceRectPreviewOffsetX
       translationY = ty + remoteSourceRectPreviewOffsetY
     }
-    val nextLabel = if (requestedScale <= REMOTE_VIEWPORT_MIN_SCALE + 0.005f) {
+    val effectiveScale = remoteViewportEffectiveScale()
+    val nextLabel = if (effectiveScale <= REMOTE_VIEWPORT_MIN_SCALE + 0.005f) {
       "1x"
     } else {
-      String.format(Locale.US, "%.1fx", requestedScale)
+      String.format(Locale.US, "%.1fx", effectiveScale)
     }
+    // 作者: long；局部高清帧会把本地矩阵恢复到 1x，但用户看到的仍是放大后的 source_rect；无障碍文案必须反映真正的观察倍率，避免按钮状态与画面不一致。
+    binding.remoteZoomResetButton.contentDescription = if (nextLabel == "1x") {
+      "远端画面缩放 1x，点击重置"
+    } else {
+      "远端画面缩放 $nextLabel，点击重置"
+    }
+    binding.remoteZoomResetButton.tooltipText = "重置缩放（当前 $nextLabel）"
     if (remoteZoomResetButtonLabel != nextLabel) {
       val now = SystemClock.elapsedRealtime()
       val canUpdateLabel = !remoteScaleGestureDetector.isInProgress ||

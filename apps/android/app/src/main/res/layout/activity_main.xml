@@ -369,7 +369,7 @@
 
                 <com.google.android.material.button.MaterialButton
                   android:id="@+id/remoteZoomResetButton"
-                  android:layout_width="64dp"
+                  android:layout_width="84dp"
                   android:layout_height="44dp"
                   android:layout_gravity="top|start"
                   android:layout_marginStart="12dp"
@@ -381,6 +381,7 @@
                   android:tooltipText="重置缩放"
                   android:paddingStart="8dp"
                   android:paddingEnd="8dp"
+                  android:singleLine="true"
                   android:text="1x"
                   android:textAllCaps="false"
                   android:textColor="#9CE8FF"

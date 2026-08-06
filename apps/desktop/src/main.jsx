@@ -5040,7 +5040,7 @@ function sourceRectPatchChangedEnough(previousKey, nextPatch) {
 function androidPhoneCaptureSourceRectPatch(options = {}) {
   if (
     !isAndroidControllerProfile() ||
-    (!options.allowAndroidZoomDetail && !options.allowAndroidZoomStill)
+    (!options.allowAndroidFullscreenDetail && !options.allowAndroidZoomDetail && !options.allowAndroidZoomStill)
   ) {
     return fullSourceRectPatch()
   }
@@ -5054,7 +5054,7 @@ function androidPhoneCaptureSourceRectPatch(options = {}) {
   ) {
     return fullSourceRectPatch()
   }
-  // 作者: long；缩放后的高清档必须按手机当前可视区域裁剪源桌面，否则只是把整屏 JPEG 继续放大，文字不会出现新的真实细节。
+  // 作者: long；缩放后的高清档必须按手机当前可视区域裁剪源桌面；全屏 detail 也要保留该区域，否则只是把整屏 H.264 继续放大，文字不会出现新的真实细节。
   return sourceRectPatchFromRegion(interaction.viewport_region)
 }
 
@@ -5120,11 +5120,15 @@ function scheduleAndroidPhoneZoomDetailUpgrade(activeSessionId, reason = "androi
     ) {
       return
     }
-    // 作者: long；最大缩放后用户更容易继续移动视角，当前 legacy JPEG 链路先保持 512px 局部跟手档；800px detail 会和 Android 全屏窗口提交叠加，v5 真机已出现 BLASTSyncEngine 预警。
+    const fullscreenZoomActive = state.nativeSenderFullscreenProfileActive
+      && state.nativeSenderFullscreenSessionId === activeSessionId
+    // 作者: long；停手后的局部区域必须回到真实高清编码；全屏沿用 1280x832 档，普通窗口使用 1280x832 的局部 detail 档，避免 source_rect 已缩小但编码仍停在 512px。
     void applyNativeSenderCaptureConfig(activeSessionId, {
-      profile: buildAndroidPhoneZoomMotionNativeProfile(),
-      allowAndroidZoomDetail: true,
-      androidPhoneZoomMotion: true,
+      profile: fullscreenZoomActive
+        ? buildAndroidPhoneFullscreenNativeProfile()
+        : buildAndroidPhoneZoomDetailNativeProfile(),
+      allowAndroidFullscreenDetail: fullscreenZoomActive,
+      allowAndroidZoomDetail: !fullscreenZoomActive,
       reason,
       log: false,
     })
@@ -5279,14 +5283,19 @@ function scheduleNativeSenderInteractiveProfileForInput(msg, options = {}) {
     state.nativeSenderInteractiveProfileMode = desiredProfileMode
     state.nativeSenderInteractiveSourceRectKey = desiredSourceRectKey
     state.nativeSenderInteractiveSourceRectUpdatedAt = Date.now()
+    const fullscreenZoomActive = state.nativeSenderFullscreenProfileActive
+      && state.nativeSenderFullscreenSessionId === activeSessionId
     const interactionProfile = shouldKeepZoomRegion
-      ? buildAndroidPhoneZoomMotionNativeProfile()
+      ? fullscreenZoomActive
+        ? buildAndroidPhoneFullscreenNativeProfile()
+        : buildAndroidPhoneZoomMotionNativeProfile()
       : buildAndroidPhoneInteractiveNativeProfile()
     void applyNativeSenderCaptureConfig(activeSessionId, {
       // 作者: long；用户已经放大到局部后，鼠标移动仍要保留可读文字；可视区域明显变化时节流刷新裁剪源，避免双指移动后继续看上一块旧局部。
       profile: interactionProfile,
-      allowAndroidZoomDetail: shouldKeepZoomRegion,
-      androidPhoneZoomMotion: shouldKeepZoomRegion,
+      allowAndroidFullscreenDetail: shouldKeepZoomRegion && fullscreenZoomActive,
+      allowAndroidZoomDetail: shouldKeepZoomRegion && !fullscreenZoomActive,
+      androidPhoneZoomMotion: shouldKeepZoomRegion && !fullscreenZoomActive,
       reason: shouldKeepZoomRegion
         ? (sourceRectUpdateDue
           ? (shouldForceFinalPanSourceRectUpdate ? "android_phone_zoom_region_source_rect_final" : "android_phone_zoom_region_source_rect_update")
@@ -5307,11 +5316,16 @@ function scheduleNativeSenderInteractiveProfileForInput(msg, options = {}) {
     state.nativeSenderInteractiveSourceRectKey = ""
     state.nativeSenderInteractiveSourceRectUpdatedAt = 0
     if (shouldRestoreToZoomDetail || shouldKeepZoomRegion) {
-      // 作者: long；放大后继续平移或移动鼠标时，先保留低成本局部源预览，停稳后再升高清，避免画面在低清整屏和重局部帧之间来回抖。
+      // 作者: long；普通窗口放大后先保留低成本局部源预览，停稳后再升高清；全屏则直接维持高清 profile，避免横屏查看文字时出现明显回退。
+      const fullscreenZoomActive = state.nativeSenderFullscreenProfileActive
+        && state.nativeSenderFullscreenSessionId === activeSessionId
       void applyNativeSenderCaptureConfig(activeSessionId, {
-        profile: buildAndroidPhoneZoomMotionNativeProfile(),
-        allowAndroidZoomDetail: true,
-        androidPhoneZoomMotion: true,
+        profile: fullscreenZoomActive
+          ? buildAndroidPhoneFullscreenNativeProfile()
+          : buildAndroidPhoneZoomMotionNativeProfile(),
+        allowAndroidFullscreenDetail: fullscreenZoomActive,
+        allowAndroidZoomDetail: !fullscreenZoomActive,
+        androidPhoneZoomMotion: !fullscreenZoomActive,
         reason: shouldRestoreToZoomDetail ? "android_phone_pinch_zoom_preview" : "android_phone_zoom_region_preview",
         log: false,
       })
