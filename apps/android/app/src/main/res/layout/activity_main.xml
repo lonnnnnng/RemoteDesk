@@ -14,7 +14,7 @@
     android:gravity="center_vertical"
     android:orientation="horizontal"
     android:paddingStart="20dp"
-    android:paddingTop="26dp"
+    android:paddingTop="18dp"
     android:paddingEnd="20dp"
     android:paddingBottom="16dp">
 
@@ -106,7 +106,7 @@
                 android:layout_height="wrap_content"
                 android:text="我的设备"
                 android:textColor="#F3F7FF"
-                android:textSize="24sp"
+                android:textSize="22sp"
                 android:textStyle="bold" />
 
               <TextView
@@ -318,7 +318,7 @@
               <FrameLayout
                 android:id="@+id/remoteViewportContainer"
                 android:layout_width="match_parent"
-                android:layout_height="262dp"
+                android:layout_height="280dp"
                 android:layout_marginTop="10dp"
                 android:background="#000000"
                 android:clipChildren="true"
@@ -366,7 +366,7 @@
                 <com.google.android.material.button.MaterialButton
                   android:id="@+id/remoteZoomResetButton"
                   android:layout_width="wrap_content"
-                  android:layout_height="40dp"
+                  android:layout_height="42dp"
                   android:layout_gravity="top|start"
                   android:layout_marginStart="12dp"
                   android:layout_marginTop="12dp"
@@ -374,6 +374,7 @@
                   android:insetBottom="0dp"
                   android:minWidth="0dp"
                   android:contentDescription="重置远端画面缩放"
+                  android:tooltipText="重置缩放"
                   android:paddingStart="12dp"
                   android:paddingEnd="12dp"
                   android:text="1x"
@@ -390,7 +391,7 @@
                 <com.google.android.material.button.MaterialButton
                   android:id="@+id/remoteFullscreenButton"
                   android:layout_width="wrap_content"
-                  android:layout_height="40dp"
+                  android:layout_height="42dp"
                   android:layout_gravity="top|end"
                   android:layout_marginTop="12dp"
                   android:layout_marginEnd="12dp"
@@ -398,6 +399,7 @@
                   android:insetBottom="0dp"
                   android:minWidth="0dp"
                   android:contentDescription="切换远端画面全屏"
+                  android:tooltipText="切换全屏"
                   android:paddingStart="12dp"
                   android:paddingEnd="12dp"
                   android:text="全屏"
@@ -414,7 +416,7 @@
                 <com.google.android.material.button.MaterialButton
                   android:id="@+id/remoteKeyboardPanelButton"
                   android:layout_width="wrap_content"
-                  android:layout_height="40dp"
+                  android:layout_height="42dp"
                   android:layout_gravity="bottom|end"
                   android:layout_marginEnd="12dp"
                   android:layout_marginBottom="12dp"
@@ -422,6 +424,7 @@
                   android:insetBottom="0dp"
                   android:minWidth="0dp"
                   android:contentDescription="打开远端键盘"
+                  android:tooltipText="打开键盘"
                   android:paddingStart="12dp"
                   android:paddingEnd="12dp"
                   android:text="键盘"
@@ -438,11 +441,12 @@
                 <com.google.android.material.button.MaterialButton
                   android:id="@+id/remoteRightClickButton"
                   android:layout_width="wrap_content"
-                  android:layout_height="40dp"
+                  android:layout_height="42dp"
                   android:layout_gravity="bottom|start"
                   android:layout_marginStart="12dp"
                   android:layout_marginBottom="12dp"
                   android:contentDescription="在当前光标位置执行右键"
+                  android:tooltipText="执行右键"
                   android:insetTop="0dp"
                   android:insetBottom="0dp"
                   android:minWidth="0dp"
@@ -1285,7 +1289,7 @@
         android:paddingStart="8dp"
         android:paddingTop="4dp"
         android:paddingEnd="8dp"
-        android:paddingBottom="4dp">
+        android:paddingBottom="8dp">
 
         <com.google.android.material.button.MaterialButton
           android:id="@+id/navMyDevicesButton"
@@ -1301,7 +1305,7 @@
           android:textColor="#7897B8"
           android:textSize="11sp"
           app:cornerRadius="10dp"
-          app:icon="@android:drawable/ic_menu_slideshow"
+          app:icon="@drawable/ic_devices"
           app:iconGravity="top"
           app:iconPadding="2dp"
           app:iconSize="16dp"
@@ -1363,7 +1367,7 @@
           android:textColor="#7897B8"
           android:textSize="11sp"
           app:cornerRadius="10dp"
-          app:icon="@android:drawable/ic_menu_myplaces"
+          app:icon="@drawable/ic_settings"
           app:iconGravity="top"
           app:iconPadding="2dp"
           app:iconSize="16dp"

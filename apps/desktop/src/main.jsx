@@ -278,6 +278,11 @@ const EMULATOR_SESSION_MAX_WIDTH = 960
 const EMULATOR_SESSION_MAX_HEIGHT = 624
 const EMULATOR_SESSION_MAX_FPS = 24
 const EMULATOR_SESSION_MAX_BITRATE = 5200000
+// 作者: long；模拟器横屏全屏需要真实像素覆盖宽屏窗口，单独提高采集上限；普通会话仍留在 960x624 以维持稳定帧率。
+const EMULATOR_FULLSCREEN_MAX_WIDTH = 1280
+const EMULATOR_FULLSCREEN_MAX_HEIGHT = 832
+const EMULATOR_FULLSCREEN_MAX_FPS = 20
+const EMULATOR_FULLSCREEN_MAX_BITRATE = 12000000
 // 作者: long；模拟器全屏画面要有足够的真实像素，默认锁在均衡档而不是把 848x480 放大到横屏窗口。
 const EMULATOR_SESSION_PROFILE_INDEX = 1
 const EMULATOR_SESSION_MIN_PROFILE_INDEX = 1
@@ -2901,9 +2906,43 @@ function currentSessionControllerProfile() {
   return `${state.sessionInfo?.webrtc?.controller_profile || "standard"}`.trim().toLowerCase() || "standard"
 }
 
+function isAndroidControllerProfile(profile = currentSessionControllerProfile()) {
+  return profile === "android_phone" || profile === "emulator"
+}
+
 function currentSessionMediaCaps(options = {}) {
   const controllerProfile = currentSessionControllerProfile()
   if (controllerProfile === "emulator") {
+    if (options.allowAndroidFullscreenDetail) {
+      return {
+        source: "emulator_fullscreen_detail",
+        maxWidth: EMULATOR_FULLSCREEN_MAX_WIDTH,
+        maxHeight: EMULATOR_FULLSCREEN_MAX_HEIGHT,
+        maxFps: EMULATOR_FULLSCREEN_MAX_FPS,
+        maxBitrate: EMULATOR_FULLSCREEN_MAX_BITRATE,
+        maxScaleResolutionDownBy: EMULATOR_SESSION_MAX_SCALE_DOWN_BY,
+      }
+    }
+    if (options.allowAndroidZoomStill) {
+      return {
+        source: "emulator_zoom_still",
+        maxWidth: EMULATOR_FULLSCREEN_MAX_WIDTH,
+        maxHeight: EMULATOR_FULLSCREEN_MAX_HEIGHT,
+        maxFps: EMULATOR_FULLSCREEN_MAX_FPS,
+        maxBitrate: EMULATOR_FULLSCREEN_MAX_BITRATE,
+        maxScaleResolutionDownBy: EMULATOR_SESSION_MAX_SCALE_DOWN_BY,
+      }
+    }
+    if (options.allowAndroidZoomDetail || options.androidPhoneZoomMotion) {
+      return {
+        source: "emulator_zoom_detail",
+        maxWidth: EMULATOR_FULLSCREEN_MAX_WIDTH,
+        maxHeight: EMULATOR_FULLSCREEN_MAX_HEIGHT,
+        maxFps: EMULATOR_FULLSCREEN_MAX_FPS,
+        maxBitrate: EMULATOR_FULLSCREEN_MAX_BITRATE,
+        maxScaleResolutionDownBy: EMULATOR_SESSION_MAX_SCALE_DOWN_BY,
+      }
+    }
     return {
       source: "emulator",
       maxWidth: EMULATOR_SESSION_MAX_WIDTH,
@@ -4617,7 +4656,7 @@ async function applyNativeSenderCaptureConfig(sessionId, options = {}) {
   }
   try {
     syncCaptureStatus(await invoke("capture_update_config", { patch }))
-    if (currentSessionControllerProfile() === "android_phone") {
+    if (isAndroidControllerProfile()) {
       // 作者: long；切换交互/全屏/高清档后，下一帧必须按新采集尺寸发送，避免兜底流继续复用上一档 capture_ts。
       state.streamLastSentCaptureTs = 0
     }
@@ -4657,17 +4696,34 @@ function buildAndroidPhoneInteractiveNativeProfile() {
 }
 
 function buildAndroidPhoneFullscreenNativeProfile() {
+  return buildAndroidControllerFullscreenNativeProfile()
+}
+
+function buildAndroidControllerFullscreenNativeProfile() {
   const clearProfile = buildEffectiveAdaptiveProfile(AGENT_ADAPTIVE_PROFILES[ANDROID_PHONE_SESSION_PROFILE_INDEX], {
     allowAndroidFullscreenDetail: true,
   })
+  const controllerProfile = currentSessionControllerProfile()
+  const maxWidth = controllerProfile === "emulator"
+    ? EMULATOR_FULLSCREEN_MAX_WIDTH
+    : ANDROID_PHONE_FULLSCREEN_MAX_WIDTH
+  const maxHeight = controllerProfile === "emulator"
+    ? EMULATOR_FULLSCREEN_MAX_HEIGHT
+    : ANDROID_PHONE_FULLSCREEN_MAX_HEIGHT
+  const maxFps = controllerProfile === "emulator"
+    ? EMULATOR_FULLSCREEN_MAX_FPS
+    : ANDROID_PHONE_FULLSCREEN_MAX_FPS
+  const maxBitrate = controllerProfile === "emulator"
+    ? EMULATOR_FULLSCREEN_MAX_BITRATE
+    : ANDROID_PHONE_FULLSCREEN_MAX_BITRATE
   return {
     ...clearProfile,
-    id: "android_phone_fullscreen",
-    label: "真机全屏高清",
-    maxWidth: Math.min(clearProfile.maxWidth, ANDROID_PHONE_FULLSCREEN_MAX_WIDTH),
-    maxHeight: Math.min(clearProfile.maxHeight, ANDROID_PHONE_FULLSCREEN_MAX_HEIGHT),
-    maxFps: Math.min(clearProfile.maxFps, ANDROID_PHONE_FULLSCREEN_MAX_FPS),
-    maxBitrate: ANDROID_PHONE_FULLSCREEN_MAX_BITRATE,
+    id: controllerProfile === "emulator" ? "emulator_fullscreen" : "android_phone_fullscreen",
+    label: controllerProfile === "emulator" ? "模拟器全屏高清" : "真机全屏高清",
+    maxWidth: Math.min(clearProfile.maxWidth, maxWidth),
+    maxHeight: Math.min(clearProfile.maxHeight, maxHeight),
+    maxFps: Math.min(clearProfile.maxFps, maxFps),
+    maxBitrate,
     scaleResolutionDownBy: 1,
   }
 }
@@ -4765,7 +4821,7 @@ function resetNativeSenderInteractiveProfileState() {
 }
 
 function shouldUseNativeSenderInteractiveProfileForInput(msg) {
-  if (!isTauri() || !isAgentSession() || currentSessionControllerProfile() !== "android_phone") {
+  if (!isTauri() || !isAgentSession() || !isAndroidControllerProfile()) {
     return false
   }
   const legacyFrameStreamActive = Boolean(state.streamTimer)
@@ -4800,7 +4856,7 @@ function androidPhoneIdleNativeProfileForSession(sessionId = state.sessionId) {
     && state.nativeSenderFullscreenSessionId === activeSessionId
   ) {
     return {
-      profile: buildAndroidPhoneFullscreenNativeProfile(),
+      profile: buildAndroidControllerFullscreenNativeProfile(),
       allowAndroidFullscreenDetail: true,
       reason: "android_phone_fullscreen_idle_restore",
     }
@@ -4834,23 +4890,19 @@ function shouldRestoreAndroidPhoneFullViewport(msg) {
   const interaction = `${payload.interaction || ""}`.trim().toLowerCase()
   const scale = Number(payload.scale || 0)
   const viewportRegion = parseAndroidViewportRegion(payload)
-  const isFullRegion = Boolean(viewportRegion)
-    && viewportRegion.viewport_x <= 0.000001
-    && viewportRegion.viewport_y <= 0.000001
-    && viewportRegion.viewport_width >= 0.999999
-    && viewportRegion.viewport_height >= 0.999999
+  // 作者: long；并拢收尾时 Android 可能仍携带上一帧局部 source_rect；1x 已经表达“回到整屏”，不能再要求旧区域先同步成整屏，否则视口会卡在裁剪状态。
   return phase === "end"
     && interaction === "pinch"
     && Number.isFinite(scale)
     && scale < ANDROID_PHONE_ZOOM_DETAIL_MIN_SCALE
-    && isFullRegion
+    && Boolean(viewportRegion)
 }
 
 function shouldKeepAndroidPhoneZoomRegionForSession(activeSessionId) {
   const normalizedSessionId = `${activeSessionId || ""}`.trim()
   const interaction = state.lastAndroidViewportInteraction
   if (
-    currentSessionControllerProfile() !== "android_phone"
+    !isAndroidControllerProfile()
     || !normalizedSessionId
     || !interaction
     || interaction.session_id !== normalizedSessionId
@@ -4985,7 +5037,7 @@ function sourceRectPatchChangedEnough(previousKey, nextPatch) {
 
 function androidPhoneCaptureSourceRectPatch(options = {}) {
   if (
-    currentSessionControllerProfile() !== "android_phone" ||
+    !isAndroidControllerProfile() ||
     (!options.allowAndroidZoomDetail && !options.allowAndroidZoomStill)
   ) {
     return fullSourceRectPatch()
@@ -5011,7 +5063,7 @@ function currentAndroidFrameSourceRectMetadata() {
   const width = Number(config.source_rect_width_ppm ?? config.sourceRectWidthPpm ?? ANDROID_PHONE_SOURCE_RECT_UNITS)
   const height = Number(config.source_rect_height_ppm ?? config.sourceRectHeightPpm ?? ANDROID_PHONE_SOURCE_RECT_UNITS)
   if (
-    currentSessionControllerProfile() !== "android_phone"
+    !isAndroidControllerProfile()
     || !Number.isFinite(x)
     || !Number.isFinite(y)
     || !Number.isFinite(width)
@@ -5492,7 +5544,7 @@ function scheduleHostMouseMoveDrain(delayMs = 0) {
 }
 
 function currentHostMouseMoveThrottleMs(msg = hostMouseMovePendingMsg) {
-  if (!isTauri() || !isAgentSession() || currentSessionControllerProfile() !== "android_phone") {
+  if (!isTauri() || !isAgentSession() || !isAndroidControllerProfile()) {
     return REMOTE_POINTER_MOVE_THROTTLE_MS
   }
   if (msg?.type !== "input.mouse.move") {
@@ -10203,7 +10255,7 @@ function fitCaptureSize(width, height) {
 }
 
 function legacyFrameStreamIntervalMs() {
-  if (currentSessionControllerProfile() !== "android_phone") {
+  if (!isAndroidControllerProfile()) {
     return CAPTURE_FRAME_INTERVAL_MS
   }
   const config = state.captureStatus?.config || {}
