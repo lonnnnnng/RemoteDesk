@@ -3108,6 +3108,10 @@ class MainActivity : AppCompatActivity() {
           clearLegacyFrameBitmap()
           binding.remoteFrameView.isVisible = false
           activateRemoteVideoRenderer(useTexture = remoteFullscreenActive)
+          if (remoteFullscreenActive) {
+            // 作者: long；会话可能在视口已经全屏后才建立或恢复，必须向新 session 重放全屏状态，否则 Mac 会按普通档位恢复采集，导致并拢回 1x 后重新变糊。
+            sendRemoteViewportInteractionHint("start", "fullscreen", force = true)
+          }
           if (currentPage != MainPage.SESSION) {
             switchPage(MainPage.SESSION, autoRefreshDevices = false)
           }

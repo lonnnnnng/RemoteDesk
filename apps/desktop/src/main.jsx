@@ -5219,6 +5219,7 @@ function scheduleNativeSenderInteractiveProfileForInput(msg, options = {}) {
     // 作者: long；Android 已经缩回完整桌面视口时，立即恢复整屏采集，避免前一个 pinch 的延迟高清任务把 source_rect 又抢回局部。
     void applyNativeSenderCaptureConfig(activeSessionId, {
       profile: idleProfile.profile,
+      allowAndroidFullscreenDetail: Boolean(idleProfile.allowAndroidFullscreenDetail),
       reason: "android_phone_zoom_full_viewport_restore",
       log: false,
     })
