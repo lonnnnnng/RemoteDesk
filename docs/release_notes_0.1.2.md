@@ -1,0 +1,17 @@
+# RemoteDesk v0.1.2 发布说明
+
+发布日期：`2026-08-07`
+
+## 发布范围
+
+- 统一 Android、Desktop、Tauri、Cargo、协议 fixture、OpenAPI 示例、seed 和运行时 `client_version` 到 `0.1.2`。
+- Android `versionCode` 从 `2` 提升到 `3`。
+- 纳入全屏局部缩放高清媒体链路、双指缩放恢复和远程输入交互优化。
+- 发布 Android debug APK、Android unsigned release APK、macOS arm64 Desktop 二进制及 macOS arm64 relay/TURN 二进制。
+
+## 已知边界
+
+- 按本次发布指令未重新运行测试套件或端到端回归；发布资产仅执行必要的 release 构建和静态元数据核对。
+- Android release APK 仍未配置正式签名，因此同时提供 debug APK 和 unsigned release APK。
+- macOS/Windows 正式安装包尚未启用，Tauri 配置仍为 `bundle.active=false`。
+
