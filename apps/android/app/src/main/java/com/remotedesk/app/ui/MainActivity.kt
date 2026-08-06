@@ -656,9 +656,14 @@ class MainActivity : AppCompatActivity() {
     },
     onMessage = { text ->
       if (isWebRtcSignalMessage(text)) {
-        // 作者: long；真机上创建 PeerConnection 可能阻塞数秒，WebRTC 信令放到独立串行线程，避免主线程卡住后 UI 树和后续 offer/ICE 都停在旧会话。
-        rtcSignalingExecutor.execute {
-          parseMessage(text)
+        // 作者: long；WebSocket 回调虽然有序，但会话消息走主线程、WebRTC 信令直接走后台线程时，offer 可能越过 session.start 而被误判成旧会话。先经过主线程顺序门，再把耗时协商交回串行信令线程，既保住消息顺序也不阻塞界面。
+        runOnUiThread {
+          if (!isActivityAlive) {
+            return@runOnUiThread
+          }
+          rtcSignalingExecutor.execute {
+            parseMessage(text)
+          }
         }
         return@StubSocketClient
       }
