@@ -7,7 +7,8 @@
 - 统一 Android、Desktop、Tauri、Cargo、协议 fixture、OpenAPI 示例、seed 和运行时 `client_version` 到 `0.1.2`。
 - Android `versionCode` 从 `2` 提升到 `3`。
 - 纳入全屏局部缩放高清媒体链路、双指缩放恢复和远程输入交互优化。
-- 发布一个 Android 正式签名 release APK、macOS arm64 Desktop 二进制及 macOS arm64 relay/TURN 二进制。
+- 发布一个 Android 正式签名 release APK、macOS arm64 Desktop 二进制，以及 macOS arm64、Linux amd64、Linux arm64 relay/TURN 二进制。
+- Linux 服务包包含环境变量示例与启动说明，下载后可直接配置公网 WebSocket/TURN 地址运行。
 
 ## 已知边界
 
