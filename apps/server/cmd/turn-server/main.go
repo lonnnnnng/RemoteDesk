@@ -1,27 +1,27 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"net"
-	"os"
-	"strings"
 
 	turn "github.com/pion/turn/v2"
-)
 
-const (
-	defaultBindAddr = "0.0.0.0:3478"
-	defaultRealm    = "remote.desk"
-	defaultUser     = "rd"
-	defaultPassword = "rdpass"
+	"remote_desk/apps/server/internal/config"
 )
 
 func main() {
-	bindAddr := envOrDefault("RD_TURN_BIND_ADDR", defaultBindAddr)
-	realm := envOrDefault("RD_TURN_REALM", defaultRealm)
-	username := envOrDefault("RD_TURN_USERNAME", defaultUser)
-	password := envOrDefault("RD_TURN_PASSWORD", defaultPassword)
-	relayIP := resolveRelayIP()
+	configPath := flag.String("config", "", "JSON config file path (or set RD_CONFIG_FILE)")
+	flag.Parse()
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		log.Fatalf("load server config: %v", err)
+	}
+	bindAddr := cfg.TurnBindAddr
+	realm := cfg.TurnRealm
+	username := cfg.TurnUsername
+	password := cfg.TurnPassword
+	relayIP := resolveRelayIP(cfg.TurnPublicIP)
 
 	udpListener, err := net.ListenPacket("udp4", bindAddr)
 	if err != nil {
@@ -89,12 +89,12 @@ func main() {
 	select {}
 }
 
-func resolveRelayIP() net.IP {
-	if explicit := strings.TrimSpace(os.Getenv("RD_TURN_PUBLIC_IP")); explicit != "" {
+func resolveRelayIP(explicit string) net.IP {
+	if explicit != "" {
 		if parsed := net.ParseIP(explicit); parsed != nil && parsed.To4() != nil {
 			return parsed.To4()
 		}
-		log.Printf("invalid RD_TURN_PUBLIC_IP=%q, fallback to auto detect", explicit)
+		log.Printf("invalid turn_public_ip=%q, fallback to auto detect", explicit)
 	}
 
 	ifaces, err := net.Interfaces()
@@ -132,13 +132,6 @@ func addressIP(addr net.Addr) net.IP {
 	default:
 		return nil
 	}
-}
-
-func envOrDefault(key, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		return value
-	}
-	return fallback
 }
 
 func remoteAddrString(addr net.Addr) string {

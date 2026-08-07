@@ -1,6 +1,8 @@
 SHELL := /bin/bash
 ROOT := $(CURDIR)
 SERVER_DIR := $(ROOT)/apps/server
+LOCAL_SERVER_CONFIG := $(ROOT)/remote-desk.json
+SERVER_CONFIG ?= $(if $(wildcard $(LOCAL_SERVER_CONFIG)),$(LOCAL_SERVER_CONFIG),$(ROOT)/infra/remote-desk.example.json)
 
 ifneq (,$(wildcard .env))
 include .env
@@ -11,7 +13,8 @@ endif
 
 init:
 	@cp -n .env.example .env 2>/dev/null || true
-	@echo "Initialized local env file if missing."
+	@cp -n infra/remote-desk.example.json $(LOCAL_SERVER_CONFIG) 2>/dev/null || true
+	@echo "Initialized local env and server config files if missing."
 
 dev:
 	docker compose -f infra/compose/docker-compose.dev.yml up -d postgres
@@ -21,10 +24,10 @@ proto-check:
 	python3 scripts/check_protocol.py
 
 server-run:
-	cd $(SERVER_DIR) && go run ./cmd/api-server
+	cd $(SERVER_DIR) && go run ./cmd/api-server -config "$(SERVER_CONFIG)"
 
 turn-run:
-	cd $(SERVER_DIR) && go run ./cmd/turn-server
+	cd $(SERVER_DIR) && go run ./cmd/turn-server -config "$(SERVER_CONFIG)"
 
 server-test:
 	cd $(SERVER_DIR) && go test ./...

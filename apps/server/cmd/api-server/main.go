@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
+	"log"
 	"net/http"
 
 	"remote_desk/apps/server/internal/config"
@@ -12,7 +14,12 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	configPath := flag.String("config", "", "JSON config file path (or set RD_CONFIG_FILE)")
+	flag.Parse()
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		log.Fatalf("load server config: %v", err)
+	}
 	logger := observability.New()
 	registry := presence.NewRegistry()
 	sessions := store.New()

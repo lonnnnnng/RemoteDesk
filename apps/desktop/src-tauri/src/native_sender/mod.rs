@@ -933,12 +933,6 @@ fn map_ice_servers(servers: &[NativeSenderIceServer]) -> Vec<RTCIceServer> {
             credential_type: RTCIceCredentialType::Password,
         });
     }
-    if mapped.is_empty() {
-        mapped.push(RTCIceServer {
-            urls: vec!["stun:stun.l.google.com:19302".to_string()],
-            ..Default::default()
-        });
-    }
     mapped
 }
 

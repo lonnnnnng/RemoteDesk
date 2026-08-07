@@ -28,3 +28,5 @@
 5. server 返回 `presence.heartbeat.rsp`
 6. controller 可发送 `session.request.req`
 7. server 返回 stub `session.request.result.push` 与 `session.start.push`
+
+`session.start.push.webrtc.ice_servers` 由 relay 的共享服务端配置生成，可包含 STUN URL，以及 TURN URL、`username` 和 `credential`。`ice_policy` 同步描述 ICE 模式、TURN 传输方式和链路降级阈值；客户端只有在用户未手动配置 ICE 时才使用这些下发值。

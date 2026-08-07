@@ -114,6 +114,10 @@ class MainActivity : AppCompatActivity() {
     private const val PREFS_NAME = "remote_desk_demo"
     private const val PREF_DEVICE_ID = "device_id"
     private const val PREF_WS_URL = "ws_url"
+    private const val PREF_TURN_URL = "turn_url"
+    private const val PREF_TURN_USERNAME = "turn_username"
+    private const val PREF_TURN_PASSWORD = "turn_password"
+    private const val PREF_STUN_URL = "stun_url"
     private const val PREF_TARGET_DEVICE_ID = "target_device_id"
     private const val EXTRA_WS_URL = "rd_ws_url"
     private const val EXTRA_TARGET_DEVICE_ID = "rd_target_device_id"
@@ -146,9 +150,6 @@ class MainActivity : AppCompatActivity() {
     private const val DEBUG_TOOL_MAX_ATTEMPTS = 20
     private const val AUTO_REQUEST_SESSION_DELAY_MS = 1200L
     private const val AUTO_PROOF_INPUT_DELAY_MS = 6500L
-    private const val DEFAULT_LOCAL_WS_URL = ""
-    private const val LEGACY_LOCAL_WS_URL = "ws://10.0.2.2:18080/ws"
-    private const val EMULATOR_WS_URL = "ws://10.0.2.2:18081/ws"
     // 作者: long；远控视频渲染优先级高于指标面板刷新，降低 UI 文本更新频率，避免真机动态控制时主线程挤压 Surface 渲染。
     private const val RTC_STATS_UI_UPDATE_INTERVAL_MS = 1000L
     private const val RTC_WATCHDOG_INTERVAL_MS = 2000L
@@ -728,18 +729,15 @@ class MainActivity : AppCompatActivity() {
     launchAutoRequestSession = intent?.getBooleanExtra(EXTRA_AUTO_REQUEST_SESSION, false) == true
     launchAutoProofInput = intent?.getBooleanExtra(EXTRA_AUTO_PROOF_INPUT, false) == true
     val savedWsUrl = normalizeWsUrl(preferences.getString(PREF_WS_URL, null).orEmpty())
-    val savedUri = if (savedWsUrl.isNotBlank()) Uri.parse(savedWsUrl) else null
-    val shouldMigrateEmulatorHost = isLikelyEmulator() &&
-      (savedUri?.host.equals("127.0.0.1", ignoreCase = true) || savedUri?.host.equals("localhost", ignoreCase = true)) &&
-      savedUri?.port == 18081
     val initialWsUrl = when {
       launchWsUrl.isNotBlank() -> launchWsUrl
-      savedWsUrl.isBlank() -> if (isLikelyEmulator()) EMULATOR_WS_URL else DEFAULT_LOCAL_WS_URL
-      shouldMigrateEmulatorHost -> EMULATOR_WS_URL
-      savedWsUrl == LEGACY_LOCAL_WS_URL -> EMULATOR_WS_URL
       else -> savedWsUrl
     }
     binding.wsUrlInput.setText(normalizeWsUrl(initialWsUrl))
+    binding.turnUrlInput.setText(preferences.getString(PREF_TURN_URL, "").orEmpty())
+    binding.turnUsernameInput.setText(preferences.getString(PREF_TURN_USERNAME, "").orEmpty())
+    binding.turnPasswordInput.setText(preferences.getString(PREF_TURN_PASSWORD, "").orEmpty())
+    binding.stunUrlInput.setText(preferences.getString(PREF_STUN_URL, "").orEmpty())
     binding.targetDeviceInput.setText(
       launchTargetDeviceId.ifBlank {
         preferences.getString(PREF_TARGET_DEVICE_ID, binding.targetDeviceInput.text.toString()).orEmpty()
@@ -774,6 +772,16 @@ class MainActivity : AppCompatActivity() {
       )
       renderDeviceList()
     }
+    val persistManualIceSettings: () -> Unit = {
+      persistConnectionSettings(
+        wsUrl = normalizeWsUrl(binding.wsUrlInput.text.toString()),
+        targetDeviceId = binding.targetDeviceInput.text?.toString().orEmpty().trim(),
+      )
+    }
+    binding.turnUrlInput.doAfterTextChanged { persistManualIceSettings() }
+    binding.turnUsernameInput.doAfterTextChanged { persistManualIceSettings() }
+    binding.turnPasswordInput.doAfterTextChanged { persistManualIceSettings() }
+    binding.stunUrlInput.doAfterTextChanged { persistManualIceSettings() }
 
     renderDeviceList()
     switchPage(currentPage, autoRefreshDevices = false)
@@ -2307,11 +2315,7 @@ class MainActivity : AppCompatActivity() {
     val factory = rtcFactory ?: return null
     closeWebRtcSession(reason = "recreate_pc")
     rtcCurrentSessionId = sessionId
-    val config = PeerConnection.RTCConfiguration(
-      if (rtcIceServers.isNotEmpty()) rtcIceServers else listOf(
-        PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-      ),
-    )
+    val config = PeerConnection.RTCConfiguration(rtcIceServers)
     config.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
     config.tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
     config.candidateNetworkPolicy = PeerConnection.CandidateNetworkPolicy.ALL
@@ -2690,14 +2694,12 @@ class MainActivity : AppCompatActivity() {
         }
       }
     }
-    rtcIceServers = if (parsed.isNotEmpty()) {
-      parsed
-    } else {
-      listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
-    }
+    // 作者: long；用户在手机端显式填写 ICE 后必须优先使用，留空时才采用 relay 会话配置，避免公网地址仍被旧服务端参数覆盖。
+    val manualServers = buildManualIceServers()
+    rtcIceServers = if (manualServers.isNotEmpty()) manualServers else parsed
     Log.i(
       RTC_TAG,
-      "ice_servers_applied profile=$rtcControllerProfile count=${rtcIceServers.size} urls=${rtcIceServers.flatMap { server -> server.urls }}",
+      "ice_servers_applied profile=$rtcControllerProfile source=${if (manualServers.isNotEmpty()) "manual" else "session"} count=${rtcIceServers.size} urls=${rtcIceServers.flatMap { server -> server.urls }}",
     )
   }
 
@@ -8228,6 +8230,12 @@ class MainActivity : AppCompatActivity() {
       switchPage(MainPage.SETTINGS, autoRefreshDevices = false)
       return
     }
+    val iceValidationError = validateManualIceSettings()
+    if (iceValidationError != null) {
+      appendLog(iceValidationError)
+      switchPage(MainPage.SETTINGS, autoRefreshDevices = false)
+      return
+    }
     val uri = Uri.parse(wsUrl)
     if (uri.host.equals("10.0.2.2", ignoreCase = true)) {
       appendLog("10.0.2.2 仅适用于 Android 模拟器，真机请改成局域网 IP 或 wss 域名")
@@ -8408,8 +8416,63 @@ class MainActivity : AppCompatActivity() {
   private fun persistConnectionSettings(wsUrl: String, targetDeviceId: String) {
     preferences.edit {
       putString(PREF_WS_URL, normalizeWsUrl(wsUrl))
+      putString(PREF_TURN_URL, binding.turnUrlInput.text?.toString().orEmpty().trim())
+      putString(PREF_TURN_USERNAME, binding.turnUsernameInput.text?.toString().orEmpty().trim())
+      putString(PREF_TURN_PASSWORD, binding.turnPasswordInput.text?.toString().orEmpty())
+      putString(PREF_STUN_URL, binding.stunUrlInput.text?.toString().orEmpty().trim())
       putString(PREF_TARGET_DEVICE_ID, targetDeviceId)
     }
+  }
+
+  private fun validateManualIceSettings(): String? {
+    val turnUrl = binding.turnUrlInput.text?.toString().orEmpty().trim()
+    val username = binding.turnUsernameInput.text?.toString().orEmpty().trim()
+    val password = binding.turnPasswordInput.text?.toString().orEmpty()
+    val stunUrl = binding.stunUrlInput.text?.toString().orEmpty().trim()
+    if (stunUrl.isNotBlank() && !isValidIceUrl(stunUrl, setOf("stun", "stuns"))) {
+      return "STUN 地址必须以 stun: 或 stuns: 开头"
+    }
+    if (turnUrl.isBlank() && (username.isNotBlank() || password.isNotBlank())) {
+      return "填写 TURN 用户名或密码前，请先填写 TURN 地址"
+    }
+    if (turnUrl.isNotBlank() && !isValidIceUrl(turnUrl, setOf("turn", "turns"))) {
+      return "TURN 地址必须以 turn: 或 turns: 开头"
+    }
+    if (turnUrl.isNotBlank() && (username.isBlank() || password.isBlank())) {
+      return "TURN 地址、用户名和密码需要同时填写"
+    }
+    return null
+  }
+
+  private fun isValidIceUrl(value: String, allowedSchemes: Set<String>): Boolean {
+    val normalized = value.trim()
+    if (normalized.isBlank() || normalized.any { it.isWhitespace() }) {
+      return false
+    }
+    val separatorIndex = normalized.indexOf(':')
+    if (separatorIndex <= 0 || separatorIndex >= normalized.lastIndex) {
+      return false
+    }
+    return allowedSchemes.contains(normalized.substring(0, separatorIndex).lowercase(Locale.ROOT))
+  }
+
+  private fun buildManualIceServers(): List<PeerConnection.IceServer> {
+    if (validateManualIceSettings() != null) {
+      return emptyList()
+    }
+    val result = mutableListOf<PeerConnection.IceServer>()
+    val stunUrl = binding.stunUrlInput.text?.toString().orEmpty().trim()
+    if (stunUrl.isNotBlank()) {
+      result += PeerConnection.IceServer.builder(stunUrl).createIceServer()
+    }
+    val turnUrl = binding.turnUrlInput.text?.toString().orEmpty().trim()
+    if (turnUrl.isNotBlank()) {
+      result += PeerConnection.IceServer.builder(turnUrl)
+        .setUsername(binding.turnUsernameInput.text?.toString().orEmpty().trim())
+        .setPassword(binding.turnPasswordInput.text?.toString().orEmpty())
+        .createIceServer()
+    }
+    return result
   }
 
   private fun formatFrameSize(width: Int, height: Int): String {
@@ -8503,12 +8566,7 @@ class MainActivity : AppCompatActivity() {
       fixedScheme.startsWith("ws:/") && !fixedScheme.startsWith("ws://") -> fixedScheme.replaceFirst("ws:/", "ws://")
       fixedScheme.startsWith("wss:/") && !fixedScheme.startsWith("wss://") -> fixedScheme.replaceFirst("wss:/", "wss://")
       else -> fixedScheme
-    }.replace("://10.0.2.2:18080/ws", "://10.0.2.2:18081/ws")
-      .replace("://127.0.0.1:18080/ws", "://127.0.0.1:18081/ws")
-      .replace("://localhost:18080/ws", "://localhost:18081/ws")
-      .replace("://10.0.2.2:18080", "://10.0.2.2:18081")
-      .replace("://127.0.0.1:18080", "://127.0.0.1:18081")
-      .replace("://localhost:18080", "://localhost:18081")
+    }
   }
 
   private fun validateWsUrl(wsUrl: String): String? {

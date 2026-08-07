@@ -2601,13 +2601,11 @@ func TestInferSessionQualityHintRelayThresholds(t *testing.T) {
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
-	cfg := config.Config{
-		HTTPAddr:        ":0",
-		ProtocolVersion: "1.0",
-		LogLevel:        "debug",
-		PublicWSURL:     "ws://public.example/ws",
-		AllowedOrigins:  []string{allowedOrigin},
-	}
+	cfg := config.Default()
+	cfg.HTTPAddr = ":0"
+	cfg.PublicWSURL = "ws://public.example/ws"
+	cfg.TurnPublicHost = "public.example"
+	cfg.AllowedOrigins = []string{allowedOrigin}
 	logger := observability.New()
 	registry := presence.NewRegistry()
 	sessions := store.New()
@@ -2675,7 +2673,7 @@ func registerDeviceWithPlatformAndCapabilities(t *testing.T, conn *websocket.Con
 			"device_id":      deviceID,
 			"user_id":        "user-" + deviceID,
 			"platform":       platform,
-			"client_version": "0.1.2",
+			"client_version": "0.1.3",
 			"device_name":    strings.ToUpper(deviceID),
 			"capabilities": map[string]any{
 				"can_control":       canControl,

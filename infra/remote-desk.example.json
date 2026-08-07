@@ -1,0 +1,25 @@
+{
+  "http_addr": "0.0.0.0:18081",
+  "protocol_version": "1.0",
+  "log_level": "info",
+  "public_ws_url": "ws://127.0.0.1:18081/ws",
+  "allowed_origins": [
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173"
+  ],
+  "turn_bind_addr": "0.0.0.0:3478",
+  "turn_public_ip": "",
+  "turn_public_host": "",
+  "turn_port": 3478,
+  "turn_realm": "remote.desk",
+  "turn_username": "remote-desk",
+  "turn_password": "CHANGE_ME_TO_A_STRONG_PASSWORD",
+  "stun_urls": [],
+  "ice_mode": "default",
+  "ice_turn_transport": "all",
+  "ice_relay_udp_high_rtt_ms": 220,
+  "ice_degrade_streak_samples": 3
+}

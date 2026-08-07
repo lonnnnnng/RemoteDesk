@@ -4,17 +4,14 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
+	"remote_desk/apps/server/internal/config"
 	"remote_desk/apps/server/internal/protocol"
 	"remote_desk/apps/server/internal/store"
 )
-
-const defaultTurnPort = 3478
 
 type iceServerPolicy struct {
 	mode          string
@@ -44,22 +41,22 @@ func BuildApprovedResult(req protocol.Envelope, sessionID string) protocol.Envel
 	}
 }
 
-func BuildStart(current store.Session, traceID string, publicWSURL string) protocol.Envelope {
+func BuildStart(current store.Session, traceID string, cfg config.Config) protocol.Envelope {
 	now := time.Now().UnixMilli()
-	turnHosts := resolveTurnHostsForControllerProfile(publicWSURL, current.ControllerProfile)
-	turnPort := resolveTurnPort()
-	icePolicy := resolveIceServerPolicy()
+	// 作者: long；TURN 地址与凭据必须来自服务端共享配置，确保下发给客户端的 ICE 参数和实际 TURN 认证完全一致。
+	turnHosts := resolveTurnHostsForControllerProfile(cfg.PublicWSURL, cfg.TurnPublicHost, current.ControllerProfile)
+	icePolicy := resolveIceServerPolicy(cfg)
 	iceServers := make([]map[string]any, 0, 2)
-	if stunURLs := buildStunURLs(icePolicy.includeStun); len(stunURLs) > 0 {
+	if stunURLs := buildStunURLs(cfg.StunURLs, icePolicy.includeStun); len(stunURLs) > 0 {
 		iceServers = append(iceServers, map[string]any{
 			"urls": stunURLs,
 		})
 	}
-	if turnURLs := buildTurnURLs(turnHosts, turnPort, icePolicy.turnTransport); len(turnURLs) > 0 {
+	if turnURLs := buildTurnURLs(turnHosts, cfg.TurnPort, icePolicy.turnTransport); len(turnURLs) > 0 {
 		iceServers = append(iceServers, map[string]any{
 			"urls":       turnURLs,
-			"username":   "rd",
-			"credential": "rdpass",
+			"username":   cfg.TurnUsername,
+			"credential": cfg.TurnPassword,
 		})
 	}
 	return protocol.Envelope{
@@ -79,7 +76,7 @@ func BuildStart(current store.Session, traceID string, publicWSURL string) proto
 			"agent_device_id":      current.AgentDeviceID,
 			"transport": map[string]any{
 				"mode":       "webrtc",
-				"signal_url": publicWSURL,
+				"signal_url": cfg.PublicWSURL,
 			},
 			"webrtc": map[string]any{
 				"ice_servers":        iceServers,
@@ -88,8 +85,8 @@ func BuildStart(current store.Session, traceID string, publicWSURL string) proto
 					"mode":                   icePolicy.mode,
 					"stun_enabled":           icePolicy.includeStun,
 					"turn_transport":         icePolicy.turnTransport,
-					"relay_udp_high_rtt_ms":  resolveRelayUdpHighRttMs(),
-					"degrade_streak_samples": 3,
+					"relay_udp_high_rtt_ms":  cfg.ICERelayUDPHighRTTMS,
+					"degrade_streak_samples": cfg.ICEDegradeStreakSamples,
 				},
 			},
 			"start_deadline_ms": 15000,
@@ -97,9 +94,9 @@ func BuildStart(current store.Session, traceID string, publicWSURL string) proto
 	}
 }
 
-func resolveTurnHostsForControllerProfile(publicWSURL string, controllerProfile string) []string {
+func resolveTurnHostsForControllerProfile(publicWSURL string, explicitTurnHost string, controllerProfile string) []string {
 	return filterTurnHostsForControllerProfile(
-		resolveLocalTurnHosts(publicWSURL),
+		resolveLocalTurnHosts(publicWSURL, explicitTurnHost),
 		controllerProfile,
 	)
 }
@@ -135,7 +132,10 @@ func turnHostPriority(host string, physicalAndroid bool) int {
 	}
 }
 
-func resolveLocalTurnHosts(publicWSURL string) []string {
+func resolveLocalTurnHosts(publicWSURL string, explicitTurnHost string) []string {
+	if normalized := normalizeTurnHost(explicitTurnHost); normalized != "" {
+		return []string{normalized}
+	}
 	hosts := []string{"127.0.0.1", "10.0.2.2"}
 	if host := hostFromURL(publicWSURL); host != "" {
 		hosts = append(hosts, host)
@@ -189,6 +189,17 @@ func resolveLocalTurnHosts(publicWSURL string) []string {
 	return result
 }
 
+func normalizeTurnHost(value string) string {
+	normalized := strings.TrimSpace(value)
+	if normalized == "" {
+		return ""
+	}
+	if parsed, err := url.Parse(normalized); err == nil && parsed.Hostname() != "" {
+		return strings.ToLower(parsed.Hostname())
+	}
+	return strings.ToLower(strings.Trim(normalized, "[]"))
+}
+
 func hostFromURL(raw string) string {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed == nil {
@@ -197,25 +208,11 @@ func hostFromURL(raw string) string {
 	return parsed.Hostname()
 }
 
-func resolveTurnPort() int {
-	raw := strings.TrimSpace(os.Getenv("RD_TURN_PORT"))
-	if raw == "" {
-		return defaultTurnPort
-	}
-	port, err := strconv.Atoi(raw)
-	if err != nil || port < 1 || port > 65535 {
-		return defaultTurnPort
-	}
-	return port
-}
-
-func buildStunURLs(enabled bool) []string {
+func buildStunURLs(configured []string, enabled bool) []string {
 	if !enabled {
 		return nil
 	}
-	return []string{
-		"stun:stun.l.google.com:19302",
-	}
+	return append([]string(nil), configured...)
 }
 
 func buildTurnURLs(hosts []string, port int, transport string) []string {
@@ -241,14 +238,14 @@ func buildTurnURLs(hosts []string, port int, transport string) []string {
 	return urls
 }
 
-func resolveIceServerPolicy() iceServerPolicy {
+func resolveIceServerPolicy(cfg config.Config) iceServerPolicy {
 	policy := iceServerPolicy{
-		mode:          "default",
-		includeStun:   true,
-		turnTransport: "all",
+		mode:          cfg.ICEMode,
+		includeStun:   len(cfg.StunURLs) > 0,
+		turnTransport: cfg.ICETurnTransport,
 	}
 
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("RD_ICE_MODE"))) {
+	switch cfg.ICEMode {
 	case "relay_only":
 		policy.mode = "relay_only"
 		policy.includeStun = false
@@ -262,11 +259,7 @@ func resolveIceServerPolicy() iceServerPolicy {
 		policy.turnTransport = "tcp"
 	}
 
-	if parseEnvBool("RD_ICE_DISABLE_STUN", false) {
-		policy.includeStun = false
-	}
-
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("RD_ICE_TURN_TRANSPORT"))) {
+	switch cfg.ICETurnTransport {
 	case "udp":
 		policy.turnTransport = "udp"
 	case "tcp":
@@ -276,36 +269,6 @@ func resolveIceServerPolicy() iceServerPolicy {
 	}
 
 	return policy
-}
-
-func parseEnvBool(key string, fallback bool) bool {
-	raw := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
-	if raw == "" {
-		return fallback
-	}
-	switch raw {
-	case "1", "true", "yes", "on":
-		return true
-	case "0", "false", "no", "off":
-		return false
-	default:
-		return fallback
-	}
-}
-
-func resolveRelayUdpHighRttMs() float64 {
-	raw := strings.TrimSpace(os.Getenv("RD_ICE_POLICY_RELAY_UDP_HIGH_RTT_MS"))
-	if raw == "" {
-		return 220
-	}
-	value, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
-		return 220
-	}
-	if value < 0 {
-		return 0
-	}
-	return value
 }
 
 const (

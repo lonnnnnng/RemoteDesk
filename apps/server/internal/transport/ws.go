@@ -402,7 +402,7 @@ func (h *Hub) handleSessionRequest(client *clientConn, msg protocol.Envelope) {
 		"trace_id":   msg.TraceID,
 	})
 	approved := session.BuildApprovedResult(msg, current.SessionID)
-	start := session.BuildStart(current, msg.TraceID, h.cfg.PublicWSURL)
+	start := session.BuildStart(current, msg.TraceID, h.cfg)
 	if !h.writeToDevice(targetDeviceID, start) {
 		h.sessions.Delete(current.SessionID)
 		h.writeError(client, msg.TraceID, msg.MessageID, 2002, "DEVICE_OFFLINE", "target device disconnected before session start", msg.From.DeviceID)

@@ -82,11 +82,21 @@
           "signal_url": "string"
         },
         "webrtc": {
+          "controller_profile": "desktop|android_phone|emulator",
           "ice_servers": [
             {
-              "urls": ["string"]
+              "urls": ["string"],
+              "username": "string|null",
+              "credential": "string|null"
             }
-          ]
+          ],
+          "ice_policy": {
+            "mode": "default|relay_only|relay_udp|relay_tcp",
+            "stun_enabled": "boolean",
+            "turn_transport": "all|udp|tcp",
+            "relay_udp_high_rtt_ms": "number",
+            "degrade_streak_samples": "number"
+          }
         },
         "start_deadline_ms": "number"
       }

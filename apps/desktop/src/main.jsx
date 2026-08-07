@@ -157,6 +157,10 @@ const localStore = resolveStorage("localStorage")
 const sessionStore = resolveStorage("sessionStorage")
 
 const storedWsUrl = safeStorageGet(localStore, "rd-ws-url")
+const storedTurnUrl = safeStorageGet(localStore, "rd-turn-url")
+const storedTurnUsername = safeStorageGet(localStore, "rd-turn-username")
+const storedTurnPassword = safeStorageGet(localStore, "rd-turn-password")
+const storedStunUrl = safeStorageGet(localStore, "rd-stun-url")
 const storedDeviceId = safeStorageGet(localStore, "rd-device-id")
 const storedRole = safeStorageGet(localStore, "rd-role")
 const storedTargetDeviceId = safeStorageGet(localStore, "rd-target-device-id")
@@ -395,6 +399,10 @@ const REMOTE_MODIFIER_CODES = new Set([
 const state = {
   ws: null,
   wsUrl: queryWsUrl || storedWsUrl || "",
+  turnUrl: storedTurnUrl || "",
+  turnUsername: storedTurnUsername || "",
+  turnPassword: storedTurnPassword || "",
+  stunUrl: storedStunUrl || "",
   token: "",
   sessionId: "",
   sessionInfo: null,
@@ -515,7 +523,7 @@ const state = {
   runtime: isTauri() ? "tauri" : "browser",
   shellPlatform: tauriRuntime ? "unknown" : inferPlatform(),
   protocolVersion: "1.0",
-  defaultWsUrl: "ws://localhost:18081/ws",
+  defaultWsUrl: "",
   defaultCodec: "jpeg-frame-stream",
   bootstrapError: "",
   hostBridgeStatus: emptyHostBridgeStatus(),
@@ -653,6 +661,10 @@ function normalizeDeviceRole(value) {
 
 function persistLocalSettings() {
   safeStorageSet(localStore, "rd-ws-url", state.wsUrl)
+  safeStorageSet(localStore, "rd-turn-url", state.turnUrl)
+  safeStorageSet(localStore, "rd-turn-username", state.turnUsername)
+  safeStorageSet(localStore, "rd-turn-password", state.turnPassword)
+  safeStorageSet(localStore, "rd-stun-url", state.stunUrl)
   safeStorageSet(localStore, "rd-device-id", state.deviceId)
   safeStorageSet(localStore, "rd-role", state.role)
   safeStorageSet(localStore, "rd-target-device-id", state.targetDeviceId)
@@ -3269,6 +3281,59 @@ function isValidRelayWsUrl(value) {
   }
 }
 
+function isValidIceUrl(value, allowedSchemes) {
+  const candidate = `${value || ""}`.trim()
+  if (!candidate || /\s/.test(candidate)) {
+    return false
+  }
+  const separatorIndex = candidate.indexOf(":")
+  if (separatorIndex <= 0 || separatorIndex === candidate.length - 1) {
+    return false
+  }
+  const scheme = candidate.slice(0, separatorIndex).toLowerCase()
+  return allowedSchemes.includes(scheme)
+}
+
+function manualIceConfigError() {
+  const turnUrl = `${state.turnUrl || ""}`.trim()
+  const stunUrl = `${state.stunUrl || ""}`.trim()
+  const username = `${state.turnUsername || ""}`.trim()
+  const password = `${state.turnPassword || ""}`
+  if (stunUrl && !isValidIceUrl(stunUrl, ["stun", "stuns"])) {
+    return "STUN 地址必须以 stun: 或 stuns: 开头"
+  }
+  if (!turnUrl && (username || password)) {
+    return "填写 TURN 用户名或密码前，请先填写 TURN 地址"
+  }
+  if (turnUrl && !isValidIceUrl(turnUrl, ["turn", "turns"])) {
+    return "TURN 地址必须以 turn: 或 turns: 开头"
+  }
+  if (turnUrl && (!username || !password)) {
+    return "TURN 地址、用户名和密码需要同时填写"
+  }
+  return ""
+}
+
+function manualIceServers() {
+  if (manualIceConfigError()) {
+    return []
+  }
+  const servers = []
+  const stunUrl = `${state.stunUrl || ""}`.trim()
+  const turnUrl = `${state.turnUrl || ""}`.trim()
+  if (stunUrl) {
+    servers.push({ urls: [stunUrl] })
+  }
+  if (turnUrl) {
+    servers.push({
+      urls: [turnUrl],
+      username: `${state.turnUsername || ""}`.trim(),
+      credential: `${state.turnPassword || ""}`,
+    })
+  }
+  return servers
+}
+
 function triggerAutoConnectFromSettings() {
   if (!state.autoConnect || !isValidRelayWsUrl(state.wsUrl)) {
     return
@@ -3516,12 +3581,8 @@ function applyBootstrapContext(context) {
   state.debugSendClipboardText = `${context.debug_send_clipboard_text || ""}`
   state.debugSendFilePath = `${context.debug_send_file_path || ""}`
 
-  if (!hasExplicitWsUrlOverride || !isValidRelayWsUrl(state.wsUrl)) {
-    if (isValidRelayWsUrl(state.defaultWsUrl)) {
-      state.wsUrl = state.defaultWsUrl
-    } else if (!isValidRelayWsUrl(state.wsUrl)) {
-      state.wsUrl = "ws://127.0.0.1:18081/ws"
-    }
+  if ((!hasExplicitWsUrlOverride || !isValidRelayWsUrl(state.wsUrl)) && isValidRelayWsUrl(state.defaultWsUrl)) {
+    state.wsUrl = state.defaultWsUrl
     persistLocalSettings()
   }
 }
@@ -6602,11 +6663,16 @@ function sendEnvelope(type, payload = {}, sessionId = "", options = {}) {
 }
 
 function sessionIceServers() {
+  // 作者: long；用户手动填写的 ICE 参数必须优先，留空时才接受 relay 下发，避免客户端仍被旧的服务端地址锁定。
+  const manualServers = manualIceServers()
+  if (manualServers.length) {
+    return manualServers
+  }
   const fromSession = Array.isArray(state.sessionInfo?.webrtc?.ice_servers)
     ? state.sessionInfo.webrtc.ice_servers
     : []
   if (!fromSession.length) {
-    return [{ urls: ["stun:stun.l.google.com:19302"] }]
+    return []
   }
   return fromSession
     .map((server) => {
@@ -10951,6 +11017,13 @@ async function connect(options = {}) {
   syncControlsFromInputs()
   state.deviceId = `${state.deviceId || ""}`.trim() || createDefaultDeviceId()
   persistLocalSettings()
+  const iceConfigError = manualIceConfigError()
+  if (iceConfigError) {
+    appendLog(iceConfigError)
+    state.currentPage = "settings"
+    render()
+    return
+  }
   const connectAttempt = state.connectAttemptSeq + 1
   state.connectAttemptSeq = connectAttempt
   traceLog("ws.connect.begin", {
@@ -11626,7 +11699,7 @@ function sendRegister(options = {}) {
     device_id: state.deviceId,
     user_id: `desktop-user-${state.deviceId}`,
     platform: state.shellPlatform,
-    client_version: "0.1.2",
+    client_version: "0.1.3",
     device_name: isAgent ? "Desktop Agent" : "Desktop Controller",
     capabilities,
   })
@@ -12445,9 +12518,26 @@ function render() {
         <div class="form-grid">
           <label class="field">
             <span>中继地址</span>
-            <input id="assistWsUrl" value="${escapeHtml(state.wsUrl)}" placeholder="ws://localhost:18081/ws" />
+            <input id="assistWsUrl" value="${escapeHtml(state.wsUrl)}" placeholder="ws://服务器地址:端口/ws" />
+          </label>
+          <label class="field">
+            <span>TURN 地址</span>
+            <input id="assistTurnUrl" value="${escapeHtml(state.turnUrl)}" placeholder="turn:服务器地址:端口" />
+          </label>
+          <label class="field">
+            <span>TURN 用户名</span>
+            <input id="assistTurnUsername" value="${escapeHtml(state.turnUsername)}" autocomplete="username" />
+          </label>
+          <label class="field">
+            <span>TURN 密码</span>
+            <input id="assistTurnPassword" type="password" value="${escapeHtml(state.turnPassword)}" autocomplete="current-password" />
+          </label>
+          <label class="field">
+            <span>STUN 地址（可选）</span>
+            <input id="assistStunUrl" value="${escapeHtml(state.stunUrl)}" placeholder="stun:服务器地址:端口" />
           </label>
         </div>
+        ${manualIceConfigError() ? `<p class="muted-copy">${escapeHtml(manualIceConfigError())}</p>` : ""}
 
         <div class="action-row">
           <button id="connectBtn" ${state.ws?.readyState === WebSocket.CONNECTING ? "disabled" : ""}>${escapeHtml(state.ws?.readyState === WebSocket.CONNECTING ? "连接中..." : "连接")}</button>
@@ -12617,6 +12707,22 @@ function render() {
     persistLocalSettings()
     triggerAutoConnectFromSettings()
   }, "change")
+  bindInput("assistTurnUrl", (event) => {
+    state.turnUrl = event.target.value.trim()
+    persistLocalSettings()
+  })
+  bindInput("assistTurnUsername", (event) => {
+    state.turnUsername = event.target.value.trim()
+    persistLocalSettings()
+  })
+  bindInput("assistTurnPassword", (event) => {
+    state.turnPassword = event.target.value
+    persistLocalSettings()
+  })
+  bindInput("assistStunUrl", (event) => {
+    state.stunUrl = event.target.value.trim()
+    persistLocalSettings()
+  })
   bindClick("connectBtn", connect)
   bindClick("registerBtn", sendRegister)
   bindClick("heartbeatBtn", sendHeartbeat)
@@ -13093,7 +13199,7 @@ function DesktopReactApp() {
                     <input
                       id="assistWsUrl"
                       value={state.wsUrl}
-                      placeholder="ws://localhost:18081/ws"
+                      placeholder="ws://服务器地址:端口/ws"
                       onInput={(event) => {
                         state.wsUrl = `${event.target.value || ""}`.trim()
                         persistLocalSettings()
@@ -13107,6 +13213,56 @@ function DesktopReactApp() {
                         render()
                       }}
                     />
+                  </label>
+                  <label className="field">
+                    <span>TURN 地址</span>
+                    <input
+                      value={state.turnUrl}
+                      placeholder="turn:服务器地址:端口"
+                      onInput={(event) => {
+                        state.turnUrl = `${event.target.value || ""}`.trim()
+                        persistLocalSettings()
+                        render()
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>TURN 用户名</span>
+                    <input
+                      value={state.turnUsername}
+                      autoComplete="username"
+                      onInput={(event) => {
+                        state.turnUsername = `${event.target.value || ""}`.trim()
+                        persistLocalSettings()
+                        render()
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>TURN 密码</span>
+                    <input
+                      type="password"
+                      value={state.turnPassword}
+                      autoComplete="current-password"
+                      onInput={(event) => {
+                        state.turnPassword = `${event.target.value || ""}`
+                        persistLocalSettings()
+                        render()
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>STUN 地址（可选）</span>
+                    <input
+                      value={state.stunUrl}
+                      placeholder="stun:服务器地址:端口"
+                      onInput={(event) => {
+                        state.stunUrl = `${event.target.value || ""}`.trim()
+                        persistLocalSettings()
+                        render()
+                      }}
+                    />
+                    {manualIceConfigError() ? <small>{manualIceConfigError()}</small> : null}
                   </label>
                   <label className="field">
                     <span>本机角色</span>

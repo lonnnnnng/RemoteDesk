@@ -4,15 +4,12 @@ import (
 	"strings"
 	"testing"
 
+	"remote_desk/apps/server/internal/config"
 	"remote_desk/apps/server/internal/store"
 )
 
 func TestResolveIceServerPolicy_Default(t *testing.T) {
-	t.Setenv("RD_ICE_MODE", "")
-	t.Setenv("RD_ICE_DISABLE_STUN", "")
-	t.Setenv("RD_ICE_TURN_TRANSPORT", "")
-
-	policy := resolveIceServerPolicy()
+	policy := resolveIceServerPolicy(config.Default())
 	if policy.mode != "default" {
 		t.Fatalf("expected mode=default, got %q", policy.mode)
 	}
@@ -25,11 +22,10 @@ func TestResolveIceServerPolicy_Default(t *testing.T) {
 }
 
 func TestResolveIceServerPolicy_RelayTCPMode(t *testing.T) {
-	t.Setenv("RD_ICE_MODE", "relay_tcp")
-	t.Setenv("RD_ICE_DISABLE_STUN", "")
-	t.Setenv("RD_ICE_TURN_TRANSPORT", "")
-
-	policy := resolveIceServerPolicy()
+	cfg := config.Default()
+	cfg.ICEMode = "relay_tcp"
+	cfg.ICETurnTransport = "tcp"
+	policy := resolveIceServerPolicy(cfg)
 	if policy.mode != "relay_tcp" {
 		t.Fatalf("expected mode=relay_tcp, got %q", policy.mode)
 	}
@@ -42,11 +38,10 @@ func TestResolveIceServerPolicy_RelayTCPMode(t *testing.T) {
 }
 
 func TestResolveIceServerPolicy_ExplicitOverride(t *testing.T) {
-	t.Setenv("RD_ICE_MODE", "relay_tcp")
-	t.Setenv("RD_ICE_DISABLE_STUN", "false")
-	t.Setenv("RD_ICE_TURN_TRANSPORT", "udp")
-
-	policy := resolveIceServerPolicy()
+	cfg := config.Default()
+	cfg.ICEMode = "relay_tcp"
+	cfg.ICETurnTransport = "udp"
+	policy := resolveIceServerPolicy(cfg)
 	if policy.includeStun {
 		t.Fatalf("expected includeStun=false because relay_tcp mode defaults to relay-only")
 	}
@@ -56,16 +51,19 @@ func TestResolveIceServerPolicy_ExplicitOverride(t *testing.T) {
 }
 
 func TestBuildStart_RelayTCPOnlyPolicy(t *testing.T) {
-	t.Setenv("RD_ICE_MODE", "relay_tcp")
-	t.Setenv("RD_ICE_DISABLE_STUN", "")
-	t.Setenv("RD_ICE_TURN_TRANSPORT", "")
-	t.Setenv("RD_TURN_PORT", "3478")
+	cfg := config.Default()
+	cfg.PublicWSURL = "ws://localhost:18081/ws"
+	cfg.TurnPublicHost = "turn.example.com"
+	cfg.TurnUsername = "relay-user"
+	cfg.TurnPassword = "relay-password"
+	cfg.ICEMode = "relay_tcp"
+	cfg.ICETurnTransport = "tcp"
 
 	msg := BuildStart(store.Session{
 		SessionID:          "sess-test-1",
 		ControllerDeviceID: "controller-1",
 		AgentDeviceID:      "agent-1",
-	}, "trace-1", "ws://localhost:18081/ws")
+	}, "trace-1", cfg)
 
 	payload, ok := msg.Payload["webrtc"].(map[string]any)
 	if !ok {
@@ -77,6 +75,9 @@ func TestBuildStart_RelayTCPOnlyPolicy(t *testing.T) {
 	}
 	if len(rawServers) != 1 {
 		t.Fatalf("expected only TURN server when relay_tcp mode is enabled, got %d", len(rawServers))
+	}
+	if rawServers[0]["username"] != "relay-user" || rawServers[0]["credential"] != "relay-password" {
+		t.Fatalf("expected configured TURN credentials, got %#v", rawServers[0])
 	}
 	urlsAny, ok := rawServers[0]["urls"].([]string)
 	if !ok {
@@ -133,8 +134,7 @@ func TestFilterTurnHostsKeepsEmulatorGatewayForEmulator(t *testing.T) {
 }
 
 func TestResolveRelayUdpHighRttMsDefault(t *testing.T) {
-	t.Setenv("RD_ICE_POLICY_RELAY_UDP_HIGH_RTT_MS", "")
-	value := resolveRelayUdpHighRttMs()
+	value := config.Default().ICERelayUDPHighRTTMS
 	if value != 220 {
 		t.Fatalf("expected default relay_udp_high_rtt_ms=220, got %v", value)
 	}

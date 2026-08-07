@@ -1,5 +1,5 @@
 [Unit]
-Description=remote_desk relay api-server
+Description=RemoteDesk TURN server
 After=network-online.target
 Wants=network-online.target
 
@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=remote_desk
 Group=remote_desk
-ExecStart=/usr/local/bin/remote-desk-api-server -config /etc/remote-desk/remote-desk.json
+ExecStart=/usr/local/bin/remote-desk-turn-server -config /etc/remote-desk/remote-desk.json
 Restart=always
 RestartSec=3
 NoNewPrivileges=true
